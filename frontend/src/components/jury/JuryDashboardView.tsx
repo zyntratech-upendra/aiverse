@@ -7,8 +7,7 @@ import {
   Flame,
   Layers
 } from "lucide-react";
-import { db } from "../../config/firebase";
-import { collection, getDocs, getDoc, doc } from "firebase/firestore";
+import { fetchSettings, fetchJuryEvaluations, fetchRegistrations, fetchEvents } from "../../services/apiClient";
 
 interface JuryDashboardViewProps {
   onNavigateTab: (tab: "Dashboard" | "Assignments") => void;
@@ -47,7 +46,7 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
     title: localStorage.getItem("activeJuryEventTitle") || "All Events"
   });
 
-  // 1. Subscribe to Active Event configuration from Firestore settings/portal_config
+  // 1. Subscribe to Active Event configuration from settings/portal_config
   useEffect(() => {
     const syncConfig = () => {
       const id = localStorage.getItem("activeJuryEventId") || "ALL_EVENTS";
@@ -61,22 +60,19 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
     let settingsPoll: any = null;
     const loadSettings = async () => {
       try {
-        const sDoc = await getDoc(doc(db, "settings", "portal_config"));
-        if (sDoc.exists()) {
-          const d = sDoc.data();
-          if (d.activeJuryEventId || d.activeJuryEventTitle) {
-            const id = d.activeJuryEventId || "ALL_EVENTS";
-            const title = d.activeJuryEventTitle || "All Events";
-            setActiveEventConfig({ id, title });
-            localStorage.setItem("activeJuryEventId", id);
-            localStorage.setItem("activeJuryEventTitle", title);
-          }
+        const d = await fetchSettings("portal_config");
+        if (d && (d.activeJuryEventId || d.activeJuryEventTitle)) {
+          const id = d.activeJuryEventId || "ALL_EVENTS";
+          const title = d.activeJuryEventTitle || "All Events";
+          setActiveEventConfig({ id, title });
+          localStorage.setItem("activeJuryEventId", id);
+          localStorage.setItem("activeJuryEventTitle", title);
         }
       } catch (e) {}
     };
 
     loadSettings();
-    settingsPoll = setInterval(loadSettings, 10000);
+    settingsPoll = setInterval(loadSettings, 15000);
 
     return () => {
       window.removeEventListener("storage", syncConfig);
@@ -85,25 +81,22 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
     };
   }, []);
 
-  // 2. Subscribe to real-time jury evaluations from Firestore
+  // 2. Load jury evaluations from backend
   useEffect(() => {
     let evalsPoll: any = null;
     const loadEvals = async () => {
       try {
-        const snapshot = await getDocs(collection(db, "jury_evaluations"));
-        if (!snapshot.empty) {
-          const fetched: JuryEvaluationDoc[] = snapshot.docs.map((docSnap) => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              teamName: data.teamName || "",
-              projectTitle: data.projectTitle || "",
-              track: data.track || "",
-              status: (data.status as "Pending" | "Evaluated") || "Pending",
-              isSaved: Boolean(data.isSaved),
-              totalScore: Number(data.totalScore) || 0
-            };
-          });
+        const list = await fetchJuryEvaluations();
+        if (Array.isArray(list) && list.length > 0) {
+          const fetched: JuryEvaluationDoc[] = list.map((data: any) => ({
+            id: data._id || data.id || "",
+            teamName: data.teamName || "",
+            projectTitle: data.projectTitle || "",
+            track: data.track || "",
+            status: (data.status as "Pending" | "Evaluated") || "Pending",
+            isSaved: Boolean(data.isSaved),
+            totalScore: Number(data.totalScore) || 0
+          }));
           setEvaluations(fetched);
         } else {
           setEvaluations([]);
@@ -114,49 +107,48 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
     };
 
     loadEvals();
-    evalsPoll = setInterval(loadEvals, 10000);
+    evalsPoll = setInterval(loadEvals, 15000);
     return () => { if (evalsPoll) clearInterval(evalsPoll); };
   }, []);
 
-  // 3. Subscribe to real-time registrations count for fallback metrics
+  // 3. Load registrations count for fallback metrics
   useEffect(() => {
     let regsPoll: any = null;
     const loadRegsCount = async () => {
       try {
-        const snapshot = await getDocs(collection(db, "registrations"));
-        setRegistrationsCount(snapshot.size);
+        const list = await fetchRegistrations();
+        if (Array.isArray(list)) {
+          setRegistrationsCount(list.length);
+        }
       } catch (err) {
         console.error("Error loading registrations count:", err);
       }
     };
     loadRegsCount();
-    regsPoll = setInterval(loadRegsCount, 10000);
+    regsPoll = setInterval(loadRegsCount, 15000);
     return () => { if (regsPoll) clearInterval(regsPoll); };
   }, []);
 
-  // 4. Subscribe to real-time events for Active Tracks and Calendar (Excludes completed/archived events)
+  // 4. Load events for Active Tracks and Calendar (Excludes completed/archived events)
   useEffect(() => {
     let eventsPoll: any = null;
-    const loadEvents = async () => {
+    const loadEventsList = async () => {
       try {
-        const snapshot = await getDocs(collection(db, "events"));
-        if (!snapshot.empty) {
-          const list: FirestoreEventDoc[] = snapshot.docs
-            .map((docSnap) => {
-              const d = docSnap.data();
-              return {
-                id: docSnap.id,
-                title: d.title || "Unnamed Event",
-                date: d.date || "Upcoming",
-                time: d.time || d.startTime || "10:00 AM",
-                location: d.location || "Main Auditorium",
-                category: d.category || "Hackathon",
-                currentReg: Number(d.currentReg) || 0,
-                maxReg: Number(d.maxReg) || 50,
-                status: d.status || "Active"
-              };
-            })
-            .filter((ev) => {
+        const events = await fetchEvents();
+        if (Array.isArray(events) && events.length > 0) {
+          const list: FirestoreEventDoc[] = events
+            .map((d: any) => ({
+              id: d._id || d.id || "",
+              title: d.title || "Unnamed Event",
+              date: d.date || "Upcoming",
+              time: d.time || d.startTime || "10:00 AM",
+              location: d.location || "Main Auditorium",
+              category: d.category || "Hackathon",
+              currentReg: Number(d.currentReg) || 0,
+              maxReg: Number(d.maxReg) || 50,
+              status: d.status || "Active"
+            }))
+            .filter((ev: any) => {
               const s = (ev.status || "").toLowerCase();
               return !s.includes("completed") && !s.includes("finished") && !s.includes("archive");
             });

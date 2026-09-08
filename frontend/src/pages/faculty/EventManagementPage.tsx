@@ -1909,7 +1909,8 @@ const EventManagementPage: React.FC = () => {
   ]);
   const [formIsFeatured, setFormIsFeatured] = useState(false);
   const [formSendEmail, setFormSendEmail] = useState(true);
-  const [formStatus, setFormStatus] = useState<"Draft" | "Active" | "Opened">("Draft");
+  const [formStatus, setFormStatus] = useState<"Draft" | "Active" | "Opened">("Opened");
+  const [isSavingEvent, setIsSavingEvent] = useState<boolean>(false);
 
   // Give Event Access States
   const [formAllowRegistrations, setFormAllowRegistrations] = useState<boolean>(true);
@@ -1989,168 +1990,175 @@ const EventManagementPage: React.FC = () => {
   // Handlers
   const handleCreateEvent = async (e: React.FormEvent) => {
     if (e) e.preventDefault();
-    if (!formTitle) {
+    if (isSavingEvent) return; // Prevent duplicate event creation on double-click
+    if (!formTitle.trim()) {
       alert("Event Name is required!");
       return;
     }
 
-    const mappedCategory = formCategory === "Workshop" ? "WORKSHOPS" : formCategory === "Hackathon" ? "HACKATHONS" : formCategory === "Seminar" ? "LECTURES" : formCategory === "Tech Event" ? "TECH_EVENTS" : formCategory === "Quiz" ? "QUIZ" : "ALUMNI_MEETUPS";
-
-    let imageName = "sparkImg";
-    let imageFile = sparkImg;
-    if (mappedCategory === "HACKATHONS") {
-      imageName = "hackathonImg";
-      imageFile = hackathonImg;
-    } else if (mappedCategory === "LECTURES") {
-      imageName = "seminarImg";
-      imageFile = seminarImg;
-    }
-
-    let displayDate = "TBD";
-    if (formStartDate) {
-      const d = new Date(formStartDate);
-      if (!isNaN(d.getTime())) {
-        displayDate = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-      } else {
-        displayDate = formStartDate;
-      }
-    }
-
-    // Compress any large preview strings to guarantee document stays under 100KB - 200KB
-    const safePosterPreview = await compressBase64String(formPosterImages[0]?.preview || "", 1200, 1200, 0.75);
-    const safeTicketBgPreview = await compressBase64String(formTicketBgPreview, 1200, 1200, 0.75);
-    const safeSpeakerPreview = await compressBase64String(formSpeakerImagePreview, 400, 400, 0.75);
-    const safeJuryPreview = await compressBase64String(formJuryImagePreview, 400, 400, 0.75);
-    const safePaymentQrPreview = await compressBase64String(formPaymentQrImagePreview, 600, 600, 0.8);
-
-    const safePosterImages = await Promise.all(
-      formPosterImages.slice(0, 3).map(async (img) => ({
-        filename: img.filename,
-        preview: await compressBase64String(img.preview, 1200, 1200, 0.75)
-      }))
-    );
-
-    const payload = {
-      title: formTitle,
-      date: displayDate,
-      location: formLocation || "Virtual Hub",
-      category: mappedCategory,
-      currentReg: 0,
-      maxReg: formMaxParticipants ? Number(formMaxParticipants) : 100,
-      imageName: imageName,
-      primaryTag: formPrimaryTag,
-      description: formDescription,
-      startDate: formStartDate,
-      endDate: formEndDate,
-      startTime: formStartTime,
-      endTime: formEndTime,
-      isVirtual: formIsVirtual,
-      regDeadline: formRegDeadline,
-      enableWaitlist: formEnableWaitlist,
-      posterFilename: formPosterImages[0]?.filename || "",
-      posterPreview: safePosterPreview,
-      posterImages: safePosterImages,
-      visibility: formVisibility,
-      isFeatured: formIsFeatured,
-      sendEmail: formSendEmail,
-      speakerName: formSpeakerName,
-      speakerRole: formSpeakerRole,
-      speakerBio: formSpeakerBio,
-      speakerLinkedin: formSpeakerLinkedin,
-      speakerImagePreview: safeSpeakerPreview,
-      hasAgenda: formHasAgenda,
-      agendaItems: formHasAgenda ? formAgendaItems : [],
-      agendaTime1: formAgendaItems[0]?.time || "",
-      agendaTitle1: formAgendaItems[0]?.title || "",
-      agendaDesc1: formAgendaItems[0]?.description || "",
-      agendaTime2: formAgendaItems[1]?.time || "",
-      agendaTitle2: formAgendaItems[1]?.title || "",
-      agendaDesc2: formAgendaItems[1]?.description || "",
-      agendaTime3: formAgendaItems[2]?.time || "",
-      agendaTitle3: formAgendaItems[2]?.title || "",
-      agendaDesc3: formAgendaItems[2]?.description || "",
-      minTeamSize: formMinTeamSize ? Number(formMinTeamSize) : 1,
-      maxTeamSize: formMaxTeamSize ? Number(formMaxTeamSize) : 4,
-      isPaidEvent: formIsPaidEvent,
-      pricingType: formIsPaidEvent ? formPricingType : "per_person",
-      pricingModel: formIsPaidEvent ? formPricingType : "per_person",
-      registrationFee: formIsPaidEvent && formRegistrationFee ? Number(formRegistrationFee) : 0,
-      paymentQrImageFilename: formIsPaidEvent ? formPaymentQrImageFilename : "",
-      paymentQrImagePreview: formIsPaidEvent ? safePaymentQrPreview : "",
-      paymentQr: formIsPaidEvent ? safePaymentQrPreview : "",
-      upiId: formIsPaidEvent ? formUpiId.trim() : "",
-      status: formStatus,
-      whatsGroupLink: formWhatsGroupLink,
-      facultyCoordinator: formFacultyCoordinator,
-      facultyCoordinatorEmail: formFacultyCoordinatorEmail,
-      facultyCoordinatorPhone: formFacultyCoordinatorPhone,
-      studentCoordinator: formStudentCoordinator,
-      studentCoordinatorEmail: formStudentCoordinatorEmail,
-      studentCoordinatorPhone: formStudentCoordinatorPhone,
-      coordinators: [
-        ...(formFacultyCoordinator ? [{
-          name: formFacultyCoordinator,
-          email: formFacultyCoordinatorEmail,
-          phone: formFacultyCoordinatorPhone,
-          role: "Faculty Coordinator"
-        }] : []),
-        ...(formStudentCoordinator ? [{
-          name: formStudentCoordinator,
-          email: formStudentCoordinatorEmail,
-          phone: formStudentCoordinatorPhone,
-          role: "Student Coordinator"
-        }] : [])
-      ],
-      juryName: formJuryName,
-      juryRole: formJuryRole,
-      juryBio: formJuryBio,
-      juryLinkedin: formJuryLinkedin,
-      jurySameAsSpeaker: formJurySameAsSpeaker,
-      juryImageFilename: formJuryImageFilename,
-      juryImagePreview: safeJuryPreview,
-      company: formCategory === "Alumni Meetup" ? formCompany : "",
-      batch: formCategory === "Alumni Meetup" ? formBatch : "",
-      customRegLink: formCategory !== "Hackathon" ? formCustomRegLink : "",
-      regType: formCategory !== "Hackathon" ? formRegType : "Open",
-      preRegisteredEmails: formCategory !== "Hackathon" ? formPreRegisteredEmails : "",
-      bulkRegCsvFilename: formCategory !== "Hackathon" ? bulkRegCsvFilename : "",
-      bulkRegCsvCount: (formCategory !== "Hackathon" && bulkRegCsvData) ? bulkRegCsvData.length : 0,
-      isPastEvent: formIsPastEvent,
-      allowRegistrations: formAllowRegistrations,
-      allowLoginAccess: formAllowLoginAccess,
-      allowSubmissions: formAllowSubmissions,
-      allowQuizAccess: formAllowQuizAccess,
-      allowProblemStatements: formAllowProblemStatements,
-      allowCertificates: formAllowCertificates,
-      allowRoundManagement: formAllowRoundManagement,
-      totalRounds: formTotalRounds,
-      currentRound: formCurrentRound,
-      rounds: formRounds,
-      ticketDesign: {
-        bgPreview: safeTicketBgPreview,
-        bgFilename: formTicketBgFilename,
-        qrPosition: formTicketQrPosition,
-        qrX: formTicketQrX,
-        qrY: formTicketQrY,
-        qrWidthPercent: formTicketQrWidthPercent,
-        qrBg: formTicketQrBg,
-        showAttendeeText: formTicketShowAttendeeText,
-        textX: formTicketTextX,
-        textY: formTicketTextY,
-        textColor: formTicketTextColor,
-      },
-      createdAt: Date.now()
-    };
+    setIsSavingEvent(true);
 
     try {
+      const mappedCategory = formCategory === "Workshop" ? "WORKSHOPS" : formCategory === "Hackathon" ? "HACKATHONS" : formCategory === "Seminar" ? "LECTURES" : formCategory === "Tech Event" ? "TECH_EVENTS" : formCategory === "Quiz" ? "QUIZ" : "ALUMNI_MEETUPS";
+
+      let imageName = "sparkImg";
+      let imageFile = sparkImg;
+      if (mappedCategory === "HACKATHONS") {
+        imageName = "hackathonImg";
+        imageFile = hackathonImg;
+      } else if (mappedCategory === "LECTURES") {
+        imageName = "seminarImg";
+        imageFile = seminarImg;
+      }
+
+      let displayDate = "TBD";
+      if (formStartDate) {
+        const d = new Date(formStartDate);
+        if (!isNaN(d.getTime())) {
+          displayDate = d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+        } else {
+          displayDate = formStartDate;
+        }
+      }
+
+      // Parallel compression for any remaining preview strings
+      const [
+        safePosterPreview,
+        safeTicketBgPreview,
+        safeSpeakerPreview,
+        safeJuryPreview,
+        safePaymentQrPreview,
+        safePosterImages
+      ] = await Promise.all([
+        compressBase64String(formPosterImages[0]?.preview || "", 1200, 1200, 0.75),
+        compressBase64String(formTicketBgPreview, 1200, 1200, 0.75),
+        compressBase64String(formSpeakerImagePreview, 400, 400, 0.75),
+        compressBase64String(formJuryImagePreview, 400, 400, 0.75),
+        compressBase64String(formPaymentQrImagePreview, 600, 600, 0.8),
+        Promise.all(
+          formPosterImages.slice(0, 3).map(async (img) => ({
+            filename: img.filename,
+            preview: await compressBase64String(img.preview, 1200, 1200, 0.75)
+          }))
+        )
+      ]);
+
+      const payload = {
+        title: formTitle.trim(),
+        date: displayDate,
+        location: formLocation || "Virtual Hub",
+        category: mappedCategory,
+        currentReg: 0,
+        maxReg: formMaxParticipants ? Number(formMaxParticipants) : 100,
+        imageName: imageName,
+        primaryTag: formPrimaryTag,
+        description: formDescription,
+        startDate: formStartDate,
+        endDate: formEndDate,
+        startTime: formStartTime,
+        endTime: formEndTime,
+        isVirtual: formIsVirtual,
+        regDeadline: formRegDeadline,
+        enableWaitlist: formEnableWaitlist,
+        posterFilename: formPosterImages[0]?.filename || "",
+        posterPreview: safePosterPreview,
+        posterImages: safePosterImages,
+        visibility: formVisibility,
+        isFeatured: formIsFeatured,
+        sendEmail: formSendEmail,
+        speakerName: formSpeakerName,
+        speakerRole: formSpeakerRole,
+        speakerBio: formSpeakerBio,
+        speakerLinkedin: formSpeakerLinkedin,
+        speakerImagePreview: safeSpeakerPreview,
+        hasAgenda: formHasAgenda,
+        agendaItems: formHasAgenda ? formAgendaItems : [],
+        agendaTime1: formAgendaItems[0]?.time || "",
+        agendaTitle1: formAgendaItems[0]?.title || "",
+        agendaDesc1: formAgendaItems[0]?.description || "",
+        agendaTime2: formAgendaItems[1]?.time || "",
+        agendaTitle2: formAgendaItems[1]?.title || "",
+        agendaDesc2: formAgendaItems[1]?.description || "",
+        agendaTime3: formAgendaItems[2]?.time || "",
+        agendaTitle3: formAgendaItems[2]?.title || "",
+        agendaDesc3: formAgendaItems[2]?.description || "",
+        minTeamSize: formMinTeamSize ? Number(formMinTeamSize) : 1,
+        maxTeamSize: formMaxTeamSize ? Number(formMaxTeamSize) : 4,
+        isPaidEvent: formIsPaidEvent,
+        pricingType: formIsPaidEvent ? formPricingType : "per_person",
+        pricingModel: formIsPaidEvent ? formPricingType : "per_person",
+        registrationFee: formIsPaidEvent && formRegistrationFee ? Number(formRegistrationFee) : 0,
+        paymentQrImageFilename: formIsPaidEvent ? formPaymentQrImageFilename : "",
+        paymentQrImagePreview: formIsPaidEvent ? safePaymentQrPreview : "",
+        paymentQr: formIsPaidEvent ? safePaymentQrPreview : "",
+        upiId: formIsPaidEvent ? formUpiId.trim() : "",
+        status: formStatus || "Opened",
+        whatsGroupLink: formWhatsGroupLink,
+        facultyCoordinator: formFacultyCoordinator,
+        facultyCoordinatorEmail: formFacultyCoordinatorEmail,
+        facultyCoordinatorPhone: formFacultyCoordinatorPhone,
+        studentCoordinator: formStudentCoordinator,
+        studentCoordinatorEmail: formStudentCoordinatorEmail,
+        studentCoordinatorPhone: formStudentCoordinatorPhone,
+        coordinators: [
+          ...(formFacultyCoordinator ? [{
+            name: formFacultyCoordinator,
+            email: formFacultyCoordinatorEmail,
+            phone: formFacultyCoordinatorPhone,
+            role: "Faculty Coordinator"
+          }] : []),
+          ...(formStudentCoordinator ? [{
+            name: formStudentCoordinator,
+            email: formStudentCoordinatorEmail,
+            phone: formStudentCoordinatorPhone,
+            role: "Student Coordinator"
+          }] : [])
+        ],
+        juryName: formJuryName,
+        juryRole: formJuryRole,
+        juryBio: formJuryBio,
+        juryLinkedin: formJuryLinkedin,
+        jurySameAsSpeaker: formJurySameAsSpeaker,
+        juryImageFilename: formJuryImageFilename,
+        juryImagePreview: safeJuryPreview,
+        company: formCategory === "Alumni Meetup" ? formCompany : "",
+        batch: formCategory === "Alumni Meetup" ? formBatch : "",
+        customRegLink: formCategory !== "Hackathon" ? formCustomRegLink : "",
+        regType: formCategory !== "Hackathon" ? formRegType : "Open",
+        preRegisteredEmails: formCategory !== "Hackathon" ? formPreRegisteredEmails : "",
+        bulkRegCsvFilename: formCategory !== "Hackathon" ? bulkRegCsvFilename : "",
+        bulkRegCsvCount: (formCategory !== "Hackathon" && bulkRegCsvData) ? bulkRegCsvData.length : 0,
+        isPastEvent: formIsPastEvent,
+        allowRegistrations: formAllowRegistrations,
+        allowLoginAccess: formAllowLoginAccess,
+        allowSubmissions: formAllowSubmissions,
+        allowQuizAccess: formAllowQuizAccess,
+        allowProblemStatements: formAllowProblemStatements,
+        allowCertificates: formAllowCertificates,
+        allowRoundManagement: formAllowRoundManagement,
+        totalRounds: formTotalRounds,
+        currentRound: formCurrentRound,
+        rounds: formRounds,
+        ticketDesign: {
+          bgPreview: safeTicketBgPreview,
+          bgFilename: formTicketBgFilename,
+          qrPosition: formTicketQrPosition,
+          qrX: formTicketQrX,
+          qrY: formTicketQrY,
+          qrWidthPercent: formTicketQrWidthPercent,
+          qrBg: formTicketQrBg,
+          showAttendeeText: formTicketShowAttendeeText,
+          textX: formTicketTextX,
+          textY: formTicketTextY,
+          textColor: formTicketTextColor,
+        },
+        createdAt: Date.now()
+      };
+
       let targetEventId = editingEventId;
       if (editingEventId) {
         // 1. Update backend MongoDB
-        await updateEvent(editingEventId, payload).catch((err) => {
-          console.warn("[EventManagement] Backend updateEvent notice:", err);
-        });
-        // 2. Optional Firestore sync
-        try { await setDoc(doc(db, "events", editingEventId), payload, { merge: true }); } catch (e) {}
+        await updateEvent(editingEventId, payload);
 
         const existingReg = events.find(e => e.id === editingEventId)?.currentReg || 0;
         const updatedEvent: EventItem = {
@@ -2159,7 +2167,7 @@ const EventManagementPage: React.FC = () => {
           date: displayDate,
           location: formLocation || "Virtual Hub",
           category: mappedCategory,
-          status: formStatus,
+          status: formStatus || "Opened",
           currentReg: existingReg,
           maxReg: formMaxParticipants ? Number(formMaxParticipants) : 100,
           image: formPosterImages[0]?.preview || imageFile
@@ -2172,16 +2180,13 @@ const EventManagementPage: React.FC = () => {
         const createdId = res?.id || res?.event?.id || res?.event?._id;
         targetEventId = createdId;
 
-        // 2. Optional Firestore sync
-        try { await addDoc(collection(db, "events"), { ...payload, _id: createdId }); } catch (e) {}
-
         const newEvent: EventItem = {
           id: targetEventId || `event_${Date.now()}`,
           title: formTitle,
           date: displayDate,
           location: formLocation || "Virtual Hub",
           category: mappedCategory,
-          status: formStatus,
+          status: formStatus || "Opened",
           currentReg: 0,
           maxReg: formMaxParticipants ? Number(formMaxParticipants) : 100,
           image: formPosterImages[0]?.preview || imageFile
@@ -2229,23 +2234,19 @@ const EventManagementPage: React.FC = () => {
               createdAt: Date.now()
             };
             await createRegistration(regPayload).catch(() => {});
-            try {
-              const regDocRef = await addDoc(collection(db, "registrations"), regPayload);
-              await setDoc(doc(db, "registrations", regDocRef.id), { qrCodeData: regDocRef.id }, { merge: true });
-            } catch (e) {}
             addedCount++;
           }
         }
 
         if (addedCount > 0) {
-          try {
-            await updateDoc(doc(db, "events", targetEventId), {
-              currentReg: increment(addedCount)
-            });
-          } catch (e) {}
           setEvents(prev => prev.map(e => e.id === targetEventId ? { ...e, currentReg: (e.currentReg || 0) + addedCount } : e));
         }
       }
+
+      // Invalidate caches across the portal
+      dataCache.remove("public_events");
+      dataCache.remove("all_events");
+      dataCache.remove("faculty_events");
 
       // Reset form fields
       setFormTitle("");
@@ -2265,7 +2266,7 @@ const EventManagementPage: React.FC = () => {
       setFormVisibility("Public");
       setFormIsFeatured(false);
       setFormSendEmail(true);
-      setFormStatus("Draft");
+      setFormStatus("Opened");
       setFormMinTeamSize("1");
       setFormMaxTeamSize("4");
       setFormIsPaidEvent(false);
@@ -2336,9 +2337,11 @@ const EventManagementPage: React.FC = () => {
       setFormTicketTextColor("#FFFFFF");
 
       setView("list");
-    } catch (err) {
-      console.error("Error saving event to Firestore:", err);
-      alert("Failed to save event to database.");
+    } catch (err: any) {
+      console.error("Error saving event:", err);
+      alert("Failed to save event: " + (err.message || "Unknown error"));
+    } finally {
+      setIsSavingEvent(false);
     }
   };
 
@@ -3010,10 +3013,13 @@ const EventManagementPage: React.FC = () => {
                 Cancel
               </button>
               <button
+                type="button"
+                disabled={isSavingEvent}
                 onClick={handleCreateEvent}
-                className="px-5 py-2.5 bg-[#2563EB] hover:bg-blue-700 text-white font-bold rounded-2xl shadow-md shadow-blue-600/10 hover:shadow-lg transition-all text-xs"
+                className="px-5 py-2.5 bg-[#2563EB] hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-2xl shadow-md shadow-blue-600/10 hover:shadow-lg transition-all text-xs flex items-center gap-2 cursor-pointer"
               >
-                {editingEventId ? "Save Changes" : "Publish Event"}
+                {isSavingEvent && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>{isSavingEvent ? "Saving Event..." : (editingEventId ? "Save Changes" : "Publish Event")}</span>
               </button>
             </div>
           </div>

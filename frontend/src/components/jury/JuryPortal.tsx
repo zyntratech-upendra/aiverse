@@ -7,8 +7,7 @@ import JuryAssignmentsView from "./JuryAssignmentsView";
 import SubmitScoresModal from "./SubmitScoresModal";
 import SEO from "../layout/SEO";
 import { Lock, ShieldAlert } from "lucide-react";
-import { db } from "../../config/firebase";
-import { doc, getDoc } from "firebase/firestore";
+import { fetchSettings } from "../../services/apiClient";
 
 interface JuryPortalProps {
   initialTab?: JurySidebarTab;
@@ -37,22 +36,18 @@ const JuryPortal: React.FC<JuryPortalProps> = ({
     window.addEventListener("storage", syncStatus);
     window.addEventListener("juryPortalStatusChanged", syncStatus);
 
-    // Poll settings/portal_config periodically instead of real-time listener
     let poll: any = null;
     const load = async () => {
       try {
-        const sDoc = await getDoc(doc(db, "settings", "portal_config"));
-        if (sDoc.exists()) {
-          const data = sDoc.data();
-          if (typeof data.juryPortalActive === "boolean") {
-            setIsJuryActive(data.juryPortalActive);
-            localStorage.setItem("juryPortalActive", String(data.juryPortalActive));
-          }
+        const data = await fetchSettings("portal_config");
+        if (data && typeof data.juryPortalActive === "boolean") {
+          setIsJuryActive(data.juryPortalActive);
+          localStorage.setItem("juryPortalActive", String(data.juryPortalActive));
         }
       } catch (e) {}
     };
     load();
-    poll = setInterval(load, 10000);
+    poll = setInterval(load, 15000);
 
     return () => {
       window.removeEventListener("storage", syncStatus);

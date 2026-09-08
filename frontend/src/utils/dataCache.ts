@@ -10,6 +10,8 @@ export interface IDataCache {
   get<T>(key: string, maxAgeMs?: number): T | null;
   set<T>(key: string, data: T, maxAgeMs?: number): void;
   invalidate(keyPrefix: string): void;
+  remove(key: string): void;
+  clear(): void;
   loadWithRevalidate<T>(
     key: string,
     fetcher: () => Promise<T>,
@@ -87,6 +89,30 @@ export const dataCache: IDataCache = {
     } catch {
       // Ignore storage errors
     }
+  },
+
+  /**
+   * Remove a specific cache key
+   */
+  remove(key: string): void {
+    dataCache.invalidate(key);
+  },
+
+  /**
+   * Clear all cached items
+   */
+  clear(): void {
+    memoryCache.clear();
+    try {
+      const keysToRemove: string[] = [];
+      for (let i = 0; i < sessionStorage.length; i++) {
+        const k = sessionStorage.key(i);
+        if (k && k.startsWith(`aiverse_cache_`)) {
+          keysToRemove.push(k);
+        }
+      }
+      keysToRemove.forEach(k => sessionStorage.removeItem(k));
+    } catch {}
   },
 
   /**

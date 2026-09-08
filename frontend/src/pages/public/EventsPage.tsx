@@ -50,34 +50,33 @@ const EventsPage: React.FC = () => {
       try {
         const querySnapshot = await fetchEvents();
         const list: Event[] = [];
-        const titlesSeen = new Set<string>();
+        const idsSeen = new Set<string>();
 
         (querySnapshot || []).forEach((docSnap: any) => {
           const data = docSnap || {};
+          const eventId = String(data.id || data._id || "").trim();
           const title = (data.title || "").trim();
           
-          if (title && titlesSeen.has(title.toLowerCase())) {
+          if (!eventId || idsSeen.has(eventId)) {
             return;
           }
-          if (title) {
-            titlesSeen.add(title.toLowerCase());
-          }
+          idsSeen.add(eventId);
           
           let eventType: Event["type"] = "Workshop";
           const catUpper = String(data.category || "").toUpperCase();
-          if (catUpper === "HACKATHONS" || catUpper === "HACKATHON") {
+          if (catUpper.includes("HACKATHON")) {
             eventType = "Hackathon";
-          } else if (catUpper === "LECTURES" || catUpper === "SEMINAR" || catUpper === "SEMINARS") {
+          } else if (catUpper.includes("LECTURE") || catUpper.includes("SEMINAR")) {
             eventType = "Seminar";
-          } else if (catUpper === "NETWORKING") {
+          } else if (catUpper.includes("NETWORK") || catUpper.includes("MEETUP")) {
             eventType = "Networking";
-          } else if (catUpper === "QUIZ" || catUpper === "QUIZZES") {
+          } else if (catUpper.includes("QUIZ")) {
             eventType = "Quiz";
           }
           
           let img = sparkImg;
-          if (data.imageName === "hackathonImg" || catUpper === "HACKATHONS" || catUpper === "HACKATHON") img = hackathonImg;
-          else if (data.imageName === "seminarImg" || catUpper === "LECTURES" || catUpper === "SEMINAR") img = seminarImg;
+          if (data.imageName === "hackathonImg" || catUpper.includes("HACKATHON")) img = hackathonImg;
+          else if (data.imageName === "seminarImg" || catUpper.includes("LECTURE") || catUpper.includes("SEMINAR")) img = seminarImg;
           
           if (data.posterPreview) {
             img = data.posterPreview;
@@ -89,17 +88,20 @@ const EventsPage: React.FC = () => {
             if (data.endTime) timeText += ` - ${data.endTime}`;
           }
 
+          const rawStatus = (data.status || "Opened").trim();
+          const normStatus = rawStatus.toLowerCase() === "draft" ? "Draft" : (rawStatus.toLowerCase() === "completed" || data.isPastEvent) ? "Completed" : "Opened";
+
           list.push({
-            id: docSnap.id || docSnap._id || docSnap._doc || "",
-            title: title,
+            id: eventId,
+            title: title || "Untitled Event",
             type: eventType,
             category: data.category || eventType,
-            date: data.date || "Oct 24",
+            date: data.date || "TBD",
             time: timeText,
             location: data.location || "Virtual Hub",
             description: data.description || "",
             image: img,
-            status: data.status || "Opened",
+            status: normStatus as Event["status"],
             currentReg: Math.max(0, Number(data.currentReg) || 0),
             maxReg: data.maxReg || 100,
             endDate: data.endDate || data.startDate || "",
