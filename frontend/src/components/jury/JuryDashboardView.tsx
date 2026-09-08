@@ -132,7 +132,7 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
   // 4. Load events for Active Tracks and Calendar (Excludes completed/archived events)
   useEffect(() => {
     let eventsPoll: any = null;
-    const loadEventsList = async () => {
+    const loadEvents = async () => {
       try {
         const events = await fetchEvents();
         if (Array.isArray(events) && events.length > 0) {
