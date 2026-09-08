@@ -32,10 +32,14 @@ import {
   Camera
 } from "lucide-react";
 import Papa from "papaparse";
-import { db, app } from "../../config/firebase";
-import { getFunctions, httpsCallable } from "firebase/functions";
-import { collection, addDoc, doc, getDoc, getDocs, setDoc, deleteDoc } from "firebase/firestore";
-import { fetchUsers as apiFetchUsers, createUser as apiCreateUser, updateUser as apiUpdateUser, deleteUser as apiDeleteUser } from "../../services/apiClient";
+import { 
+  fetchUsers as apiFetchUsers, 
+  createUser as apiCreateUser, 
+  updateUser as apiUpdateUser, 
+  deleteUser as apiDeleteUser,
+  fetchOrganizers 
+} from "../../services/apiClient";
+import { userService } from "../../services/userService";
 import Button from "../../components/ui/Button";
 import { useAuth } from "../../context/AuthContext";
 import TeamGraphModal from "../../components/dashboard/TeamGraphModal";
@@ -150,7 +154,7 @@ const UserManagementPage: React.FC = () => {
           const backendUsers = await apiFetchUsers();
           if (backendUsers && backendUsers.length > 0) {
             backendUsers.forEach((u: any) => {
-              const name = (u.name || u.display_name || "").trim();
+              const name = (u.name || u.display_name || u.displayName || "").trim();
               const email = (u.email || "").toLowerCase().trim();
               if (!name && !email) return;
               if (name.toLowerCase() === "unnamed user" && !email) return;
@@ -160,14 +164,14 @@ const UserManagementPage: React.FC = () => {
                 id: u.id || u._id || u._doc || "",
                 name: name || "User",
                 email: u.email || "",
-                personal_email: u.personal_email || "",
-                personalEmail: u.personal_email || "",
-                phone: u.phone || "",
+                personal_email: u.personal_email || u.personalEmail || "",
+                personalEmail: u.personal_email || u.personalEmail || "",
+                phone: u.phone || u.phoneNumber || "",
                 role: (u.role || "Guest") as any,
-                position: u.position || "",
+                position: u.position || u.sub_role || "",
                 status: (u.status || "Active") as any,
                 image: u.image || "",
-                showInAbout: u.show_in_about ? "Yes" : "No",
+                showInAbout: (u.show_in_about || u.showInAbout) ? "Yes" : "No",
                 bio: u.bio || "",
                 linkedin: u.linkedin || "",
                 github: u.github || ""
@@ -178,66 +182,12 @@ const UserManagementPage: React.FC = () => {
           console.warn("[UserManagement] Notice fetching users from backend:", backendErr);
         }
 
+        // 2. Fetch and merge from backend organizers
         try {
-          const usersSnap = await getDocs(collection(db, "users"));
-          usersSnap.forEach((docSnap) => {
-            const data = docSnap.data();
-            const email = (data.email || "").toLowerCase().trim();
-            const rawName = (data.name || data.displayName || data.teamLeadName || "").trim();
-            
-            // Ignore ghost or revoked entries that have neither name nor email
-            if (!rawName && !email) return;
-            if (rawName.toLowerCase() === "unnamed user" && !email) return;
-
-            if (email && seenEmails.has(email)) {
-              // Update existing entry with any extra fields from Firestore
-              const idx = combinedList.findIndex(item => (item.email || "").toLowerCase().trim() === email);
-              if (idx >= 0) {
-                combinedList[idx] = {
-                  ...combinedList[idx],
-                  personal_email: combinedList[idx].personal_email || data.personal_email || data.personalEmail || "",
-                  personalEmail: combinedList[idx].personalEmail || data.personalEmail || data.personal_email || "",
-                  image: combinedList[idx].image || data.image || "",
-                  bio: combinedList[idx].bio || data.bio || "",
-                  linkedin: combinedList[idx].linkedin || data.linkedin || "",
-                  github: combinedList[idx].github || data.github || "",
-                  phone: combinedList[idx].phone || data.phone || data.phoneNumber || "",
-                  role: combinedList[idx].role || data.role || data.roleType || "Guest",
-                  position: combinedList[idx].position || data.position || data.sub_role || data.subRole || "",
-                  showInAbout: combinedList[idx].showInAbout || (data.showInAbout === true || data.showInAbout === "Yes" || data.showInAboutPage === true || data.showInAboutPage === "Yes" ? "Yes" : "No")
-                };
-              }
-            } else {
-              if (email) seenEmails.add(email);
-              combinedList.push({
-                id: docSnap.id,
-                name: rawName || "User",
-                email: data.email || "",
-                personal_email: data.personal_email || data.personalEmail || "",
-                personalEmail: data.personalEmail || data.personal_email || "",
-                phone: data.phone || data.phoneNumber || "",
-                role: data.role || data.roleType || "Guest",
-                position: data.position || data.sub_role || data.subRole || "",
-                status: data.status || "Active",
-                image: data.image || "",
-                showInAbout: data.showInAbout === true || data.showInAbout === "Yes" || data.showInAboutPage === true || data.showInAboutPage === "Yes" ? "Yes" : "No",
-                bio: data.bio || "",
-                linkedin: data.linkedin || "",
-                github: data.github || ""
-              });
-            }
-          });
-        } catch (fsErr) {
-          console.warn("[UserManagement] Notice fetching users from Firestore:", fsErr);
-        }
-
-        // 3. Fetch and merge from Firestore 'organizers'
-        try {
-          const organizersSnap = await getDocs(collection(db, "organizers"));
-          organizersSnap.forEach((docSnap) => {
-            const data = docSnap.data();
-            const email = (data.email || "").toLowerCase().trim();
-            const rawName = (data.name || data.displayName || "").trim();
+          const organizers = await fetchOrganizers().catch(() => []);
+          (organizers || []).forEach((org: any) => {
+            const email = (org.email || "").toLowerCase().trim();
+            const rawName = (org.name || org.displayName || org.username || "").trim();
 
             if (!rawName && !email) return;
             if (rawName.toLowerCase() === "unnamed user" && !email) return;
@@ -247,36 +197,37 @@ const UserManagementPage: React.FC = () => {
               if (idx >= 0) {
                 combinedList[idx] = {
                   ...combinedList[idx],
-                  personal_email: combinedList[idx].personal_email || data.personal_email || data.personalEmail || "",
-                  personalEmail: combinedList[idx].personalEmail || data.personal_email || data.personalEmail || "",
-                  image: combinedList[idx].image || data.image || "",
-                  bio: combinedList[idx].bio || data.bio || "",
-                  linkedin: combinedList[idx].linkedin || data.linkedin || "",
-                  github: combinedList[idx].github || data.github || "",
-                  phone: combinedList[idx].phone || data.phone || data.phoneNumber || "",
+                  personal_email: combinedList[idx].personal_email || org.personal_email || org.personalEmail || "",
+                  personalEmail: combinedList[idx].personalEmail || org.personalEmail || org.personal_email || "",
+                  image: combinedList[idx].image || org.image || "",
+                  bio: combinedList[idx].bio || org.bio || "",
+                  linkedin: combinedList[idx].linkedin || org.linkedin || "",
+                  github: combinedList[idx].github || org.github || "",
+                  phone: combinedList[idx].phone || org.phone || org.phoneNumber || "",
                 };
               }
             } else {
               if (email) seenEmails.add(email);
               combinedList.push({
-                id: docSnap.id,
+                id: org.id || org._id || "",
                 name: rawName || "Organizer",
-                email: data.email || "",
-                personal_email: data.personal_email || data.personalEmail || "",
-                personalEmail: data.personalEmail || data.personal_email || "",
-                phone: data.phone || data.phoneNumber || "",
-                role: data.role || data.roleType || "Organizer",
-                status: data.status || "Active",
-                image: data.image || "",
-                showInAbout: data.showInAbout === true || data.showInAbout === "Yes" ? "Yes" : "No",
-                bio: data.bio || "",
-                linkedin: data.linkedin || "",
-                github: data.github || ""
+                email: org.email || "",
+                personal_email: org.personal_email || org.personalEmail || "",
+                personalEmail: org.personal_email || org.personalEmail || "",
+                phone: org.phone || org.phoneNumber || "",
+                role: (org.role || org.roleType || "Organizer") as any,
+                position: org.position || org.sub_role || "",
+                status: (org.status || "Active") as any,
+                image: org.image || "",
+                showInAbout: (org.showInAbout === true || org.showInAbout === "Yes" || org.show_in_about) ? "Yes" : "No",
+                bio: org.bio || "",
+                linkedin: org.linkedin || "",
+                github: org.github || ""
               });
             }
           });
         } catch (orgErr) {
-          console.warn("[UserManagement] Notice fetching organizers from Firestore:", orgErr);
+          console.warn("[UserManagement] Notice fetching organizers:", orgErr);
         }
 
         // Filter out system administrative accounts and participant accounts from Club User Management
@@ -470,7 +421,7 @@ const UserManagementPage: React.FC = () => {
         const compressedImage = image ? await compressImageBase64(image, 500, 500, 0.75) : "";
 
         try {
-          const supabaseRecord = await userService.addUser({
+          const createdUser = await apiCreateUser({
             name,
             display_name: name,
             email,
@@ -484,37 +435,12 @@ const UserManagementPage: React.FC = () => {
             image: compressedImage,
             status: "Active"
           });
-          createdId = supabaseRecord.id;
-        } catch (supaErr) {
-          console.warn("Supabase bulk insert fallback to Firestore:", supaErr);
+          createdId = createdUser?.id || createdUser?.user?.id || createdUser?._id || `${Date.now()}-${i}`;
+        } catch (apiErr) {
+          console.warn("User create error:", apiErr);
         }
 
-        const payload = {
-          name,
-          displayName: name,
-          email,
-          personalEmail: personalEmail,
-          personal_email: personalEmail,
-          phone,
-          phoneNumber: phone,
-          role: cleanedRole,
-          roleType: cleanedRole,
-          position,
-          bio,
-          linkedin,
-          github,
-          image: compressedImage,
-          status: "Active",
-          createdAt: Date.now()
-        };
-
-        if (!createdId) {
-          const docRef = await addDoc(collection(db, "users"), payload);
-          createdId = docRef.id;
-        } else {
-          // Keep Firestore in sync
-          setDoc(doc(db, "users", createdId), payload, { merge: true }).catch(() => {});
-        }
+        if (!createdId) createdId = `${Date.now()}-${i}`;
 
         const newUser: UserItem = {
           id: createdId,
@@ -923,7 +849,7 @@ const UserManagementPage: React.FC = () => {
       let createdUserId = "";
       const finalPhoto = formPhotoPreview ? await compressImageBase64(formPhotoPreview, 500, 500, 0.75) : "";
 
-      // 1. Add in Supabase
+      // 1. Add via userService / MongoDB backend
       try {
         const supaUser = await userService.addUser({
           name: formName,
@@ -939,37 +865,12 @@ const UserManagementPage: React.FC = () => {
           show_in_about: formShowInAbout === "Yes",
           status: "Active"
         });
-        createdUserId = supaUser.id;
-      } catch (supaErr) {
-        console.warn("Supabase insert notice, attempting Firestore fallback:", supaErr);
+        createdUserId = supaUser?.id || `${Date.now()}`;
+      } catch (err) {
+        console.warn("Notice adding user:", err);
       }
 
-      // 2. Mirror to Firestore for cross-compatibility
-      const payload = {
-        name: formName,
-        displayName: formName,
-        email: formEmail,
-        personalEmail: formPersonalEmail,
-        personal_email: formPersonalEmail,
-        role: formRoleType,
-        roleType: formRoleType,
-        position: formPosition,
-        bio: formBio,
-        linkedin: formLinkedin,
-        github: formGithub,
-        image: finalPhoto,
-        showInAbout: formShowInAbout === "Yes",
-        showInAboutPage: formShowInAbout === "Yes",
-        status: "Active",
-        createdAt: Date.now()
-      };
-
-      if (!createdUserId) {
-        const userDocRef = await addDoc(collection(db, "users"), payload);
-        createdUserId = userDocRef.id;
-      } else {
-        setDoc(doc(db, "users", createdUserId), payload, { merge: true }).catch(() => {});
-      }
+      if (!createdUserId) createdUserId = `${Date.now()}`;
 
       alert("Member successfully added to team!");
       
@@ -1059,28 +960,12 @@ const UserManagementPage: React.FC = () => {
           status: "Active",
           show_in_about: false
         });
-        createdId = supaUser.id;
+        createdId = supaUser?.id || `${Date.now()}`;
       } catch (e) {
-        console.warn("Supabase add user error:", e);
+        console.warn("Add user notice:", e);
       }
 
-      const newUserDoc = {
-        name: inviteName,
-        email: inviteEmail,
-        personalEmail: invitePersonalEmail,
-        personal_email: invitePersonalEmail,
-        role: inviteRole,
-        position: invitePosition,
-        status: "Active",
-        showInAbout: "No"
-      };
-
-      if (!createdId) {
-        const docRef = await addDoc(collection(db, "users"), newUserDoc);
-        createdId = docRef.id;
-      } else {
-        setDoc(doc(db, "users", createdId), newUserDoc, { merge: true }).catch(() => {});
-      }
+      if (!createdId) createdId = `${Date.now()}`;
 
       const newUser: UserItem = {
         id: createdId,
@@ -1141,47 +1026,19 @@ const UserManagementPage: React.FC = () => {
     try {
       const finalPhoto = formPhotoPreview ? await compressImageBase64(formPhotoPreview, 500, 500, 0.75) : "";
 
-      // 1. Update in Supabase
-      try {
-        await userService.updateUser(editingUserId, {
-          name: formName,
-          display_name: formName,
-          email: formEmail,
-          personal_email: formPersonalEmail,
-          role: formRoleType,
-          position: formPosition,
-          image: finalPhoto,
-          show_in_about: formShowInAbout === "Yes",
-          bio: formBio,
-          linkedin: formLinkedin,
-          github: formGithub
-        });
-      } catch (supaErr) {
-        console.warn("Supabase update user error:", supaErr);
-      }
-
-      // 2. Mirror to Firestore
-      try {
-        const docRef = doc(db, "users", editingUserId);
-        await setDoc(docRef, {
-          name: formName,
-          displayName: formName,
-          email: formEmail,
-          personalEmail: formPersonalEmail,
-          personal_email: formPersonalEmail,
-          role: formRoleType,
-          roleType: formRoleType,
-          position: formPosition,
-          image: finalPhoto,
-          showInAbout: formShowInAbout === "Yes",
-          showInAboutPage: formShowInAbout === "Yes",
-          bio: formBio,
-          linkedin: formLinkedin,
-          github: formGithub
-        }, { merge: true });
-      } catch (fsErr) {
-        console.warn("Firestore update user notice:", fsErr);
-      }
+      await userService.updateUser(editingUserId, {
+        name: formName,
+        display_name: formName,
+        email: formEmail,
+        personal_email: formPersonalEmail,
+        role: formRoleType,
+        position: formPosition,
+        image: finalPhoto,
+        show_in_about: formShowInAbout === "Yes",
+        bio: formBio,
+        linkedin: formLinkedin,
+        github: formGithub
+      });
 
       setUsers(users.map(u => u.id === editingUserId ? {
         ...u,
@@ -1207,6 +1064,7 @@ const UserManagementPage: React.FC = () => {
       setFormPosition("");
       setFormPhotoPreview("");
       setFormShowInAbout("No");
+      alert("User profile updated successfully!");
     } catch (err) {
       console.error("Error updating user in database:", err);
       alert("Failed to update user.");
@@ -1215,21 +1073,7 @@ const UserManagementPage: React.FC = () => {
 
   const handleStatusChange = async (id: string, newStatus: UserItem["status"]) => {
     try {
-      // 1. Supabase
-      try {
-        await userService.updateUser(id, { status: newStatus });
-      } catch (supaErr) {
-        console.warn("Supabase update status notice:", supaErr);
-      }
-
-      // 2. Firestore
-      try {
-        const docRef = doc(db, "users", id);
-        await setDoc(docRef, { status: newStatus }, { merge: true });
-      } catch (fsErr) {
-        console.warn("Firestore update status notice:", fsErr);
-      }
-
+      await userService.updateUser(id, { status: newStatus });
       setUsers(users.map(u => u.id === id ? { ...u, status: newStatus } : u));
     } catch (err) {
       console.error("Error updating user status:", err);
@@ -1249,21 +1093,7 @@ const UserManagementPage: React.FC = () => {
     if (!id || !newRole) return;
 
     try {
-      // 1. Supabase
-      try {
-        await userService.updateUser(id, { role: newRole });
-      } catch (supaErr) {
-        console.warn("Supabase update role notice:", supaErr);
-      }
-
-      // 2. Firestore
-      try {
-        const docRef = doc(db, "users", id);
-        await setDoc(docRef, { role: newRole }, { merge: true });
-      } catch (fsErr) {
-        console.warn("Firestore update role notice:", fsErr);
-      }
-
+      await userService.updateUser(id, { role: newRole });
       setUsers(users.map(u => u.id === id ? { ...u, role: newRole as any } : u));
     } catch (err) {
       console.error("Error updating user role:", err);
@@ -1276,32 +1106,11 @@ const UserManagementPage: React.FC = () => {
     if (!window.confirm("Are you sure you want to permanently delete this user? This action cannot be undone.")) return;
     
     try {
-      // 1. Delete user record from Supabase (both auth.users and public.users)
-      try {
-        const targetUser = users.find(u => u.id === id);
-        if (targetUser && targetUser.email) {
-          await userService.deleteUserByEmail(targetUser.email);
-        } else {
-          await userService.deleteUser(id);
-        }
-      } catch (supaErr) {
-        console.warn("Supabase delete user notice:", supaErr);
-      }
-
-      // 2. Delete user record from Firestore
-      try {
-        await deleteDoc(doc(db, "users", id));
-      } catch (fsErr) {
-        console.warn("Firestore delete user notice:", fsErr);
-      }
-
-      // 3. Try deleting Firebase Auth account if exists
-      try {
-        const functions = getFunctions(app);
-        const deleteUserAccount = httpsCallable(functions, "deleteUserAccount");
-        await deleteUserAccount({ uid: id });
-      } catch {
-        // User may not have an auth record (database-only user) — expected fallback
+      const targetUser = users.find(u => u.id === id);
+      if (targetUser && targetUser.email) {
+        await userService.deleteUserByEmail(targetUser.email);
+      } else {
+        await userService.deleteUser(id);
       }
       
       setUsers(prev => prev.filter(u => u.id !== id));

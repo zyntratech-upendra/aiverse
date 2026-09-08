@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from "react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
-import { db } from "../../config/firebase";
-import { supabase } from "../../config/supabase";
 import { useAuth } from "../../context/AuthContext";
-import { doc, getDoc, setDoc, collection, getDocs } from "firebase/firestore";
+import { fetchEvents, fetchSettings, updateSettings } from "../../services/apiClient";
+import { userService } from "../../services/userService";
 import { 
   Globe, 
   Palette, 
@@ -91,31 +90,30 @@ const SettingsPage: React.FC = () => {
     activeJuryEventTitle: "All Events"
   };
 
-  // Real events list fetched from Firestore for Jury Control selector
+  // Real events list fetched from backend for Jury Control selector
   const [dbEventsList, setDbEventsList] = useState<{ id: string; title: string }[]>([]);
 
   useEffect(() => {
-    const fetchEvents = async () => {
+    const loadEvents = async () => {
       try {
-        const eventsSnap = await getDocs(collection(db, "events"));
-        if (!eventsSnap.empty) {
-          const list = eventsSnap.docs
-            .map(docSnap => ({
-              id: docSnap.id,
-              title: docSnap.data().title || "Unnamed Event",
-              status: docSnap.data().status || "Active"
-            }))
-            .filter(e => {
-              const s = (e.status || "").toLowerCase();
-              return !s.includes("completed") && !s.includes("finished") && !s.includes("archive");
-            });
-          setDbEventsList(list);
-        }
+        const eventsData = await fetchEvents().catch(() => []);
+        const list = Array.isArray(eventsData) ? eventsData : [];
+        const filtered = list
+          .map((data: any) => ({
+            id: data.id || data._id || "",
+            title: data.title || "Unnamed Event",
+            status: data.status || "Active"
+          }))
+          .filter(e => {
+            const s = (e.status || "").toLowerCase();
+            return !s.includes("completed") && !s.includes("finished") && !s.includes("archive");
+          });
+        setDbEventsList(filtered);
       } catch (err) {
         console.error("Error loading events for Jury Control:", err);
       }
     };
-    fetchEvents();
+    loadEvents();
   }, []);
 
   // State configurations
@@ -180,30 +178,16 @@ const SettingsPage: React.FC = () => {
         await updateUserPassword(newPassword);
       }
 
-      // 2. Direct Supabase Auth update
-      try {
-        await supabase.auth.updateUser({ password: newPassword });
-      } catch (err) {
-        console.warn("Supabase auth direct password update:", err);
-      }
-
-      // 3. Update Firestore users collection for the admin email
+      // 2. Update user in MongoDB backend
       const adminEmail = (user?.email || "admin@aiverse.in").toLowerCase().trim();
-      const docId = adminEmail.replace(/[^a-z0-9]/g, '_');
-      await setDoc(doc(db, "users", docId), {
-        password: newPassword,
-        requiresPasswordChange: false,
-        updatedAt: Date.now()
-      }, { merge: true });
-
-      // Also update mock user in localStorage
-      const savedUserStr = localStorage.getItem("aether_mock_user");
-      if (savedUserStr) {
-        try {
-          const u = JSON.parse(savedUserStr);
-          u.requiresPasswordChange = false;
-          localStorage.setItem("aether_mock_user", JSON.stringify(u));
-        } catch (e) {}
+      try {
+        await userService.updateUser(adminEmail, {
+          password: newPassword,
+          requiresPasswordChange: false,
+          updatedAt: Date.now()
+        });
+      } catch (err) {
+        console.warn("User password update notice:", err);
       }
 
       setNewPassword("");
@@ -218,25 +202,21 @@ const SettingsPage: React.FC = () => {
     }
   };
 
-  // Fetch settings from Firestore on mount
+  // Fetch settings from MongoDB backend on mount
   useEffect(() => {
     const fetchPortalSettings = async () => {
       try {
-        const docRef = doc(db, "settings", "portal_config");
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const fetchedData = docSnap.data() as PortalConfig;
+        const fetchedData = await fetchSettings("portal_config");
+        if (fetchedData && Object.keys(fetchedData).length > 0 && !fetchedData.error) {
           const mergedConfig = { ...defaultConfigs, ...fetchedData };
           setSavedConfig(mergedConfig);
           setCurrentConfig(mergedConfig);
         } else {
-          // If document does not exist, save the default config to Firestore
-          await setDoc(docRef, defaultConfigs);
           setSavedConfig(defaultConfigs);
           setCurrentConfig(defaultConfigs);
         }
       } catch (err) {
-        console.error("Error loading settings from Firestore:", err);
+        console.error("Error loading settings from database:", err);
         addToast("Failed to load settings from database. Using local defaults.", "warning");
       }
     };
@@ -346,16 +326,15 @@ const SettingsPage: React.FC = () => {
     }
 
     setIsSaving(true);
-    addToast("Saving portal configurations to Firestore...", "info");
+    addToast("Saving portal configurations to database...", "info");
 
     try {
-      const docRef = doc(db, "settings", "portal_config");
-      await setDoc(docRef, currentConfig);
+      await updateSettings("portal_config", currentConfig);
       setSavedConfig(currentConfig);
       addToast("Portal configurations updated successfully!");
     } catch (err) {
-      console.error("Error writing settings to Firestore:", err);
-      addToast("Failed to save configurations to Firestore.", "error");
+      console.error("Error writing settings to database:", err);
+      addToast("Failed to save configurations to database.", "error");
     } finally {
       setIsSaving(false);
     }
@@ -388,17 +367,16 @@ const SettingsPage: React.FC = () => {
   // Reset Portal Configuration to system defaults
   const handleResetPortal = async () => {
     setIsResetting(true);
-    addToast("Restoring settings to factory defaults in Firestore...", "info");
+    addToast("Restoring settings to factory defaults in database...", "info");
 
     try {
-      const docRef = doc(db, "settings", "portal_config");
-      await setDoc(docRef, defaultConfigs);
+      await updateSettings("portal_config", defaultConfigs);
       setCurrentConfig(defaultConfigs);
       setSavedConfig(defaultConfigs);
       addToast("All configurations restored to system defaults.");
     } catch (err) {
-      console.error("Error resetting settings in Firestore:", err);
-      addToast("Failed to reset configurations in Firestore.", "error");
+      console.error("Error resetting settings in database:", err);
+      addToast("Failed to reset configurations in database.", "error");
     } finally {
       setIsResetting(false);
       setIsResetModalOpen(false);

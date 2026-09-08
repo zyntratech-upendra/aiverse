@@ -2,8 +2,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
 import Badge from "../../components/ui/Badge";
-import { fetchAlbums } from "../../services/apiClient";
-import { collection, doc, getDocs, addDoc, updateDoc, deleteDoc } from "firebase/firestore";
+import { fetchAlbums, createAlbum, updateAlbum, deleteAlbum } from "../../services/apiClient";
 import { 
   Folder, 
   Image as ImageIcon, 
@@ -16,16 +15,16 @@ import {
   X, 
   Sparkles, 
   Trash2, 
-  CheckCircle,
-  ArrowLeft,
-  Save,
-  Info,
-  Settings as SettingsIcon,
-  Bell,
-  Link as LinkIcon,
-  ExternalLink,
-  Pencil,
-  AlertTriangle
+  CheckCircle, 
+  ArrowLeft, 
+  Save, 
+  Info, 
+  Settings as SettingsIcon, 
+  Bell, 
+  Link as LinkIcon, 
+  ExternalLink, 
+  Pencil, 
+  AlertTriangle 
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -94,7 +93,7 @@ const GalleryManagementPage: React.FC = () => {
     return galleryLab;
   };
 
-  // Fetch albums from Firestore on mount
+  // Fetch albums from backend on mount
   useEffect(() => {
     const loadAlbums = async () => {
       try {
@@ -123,7 +122,6 @@ const GalleryManagementPage: React.FC = () => {
 
     loadAlbums();
   }, []);
-
 
   // Interactive UI states
   const [searchQuery, setSearchQuery] = useState("");
@@ -245,34 +243,34 @@ const GalleryManagementPage: React.FC = () => {
       createdAt: Date.now()
     };
 
-    addToast("Saving album to Firestore...", "info");
+    addToast("Saving album to database...", "info");
 
-      try {
-        if (editingAlbumId) {
-          await updateDoc(doc(db, "albums", editingAlbumId), payload);
-          addToast("Album updated successfully!", "success");
-        } else {
-          await addDoc(collection(db, "albums"), payload);
-          addToast("Album created successfully!", "success");
-        }
-        
-        const updated = await fetchAlbums();
-        const list: AlbumItem[] = [];
-        (updated || []).forEach((docSnap: any) => {
-          const data = docSnap || {};
+    try {
+      if (editingAlbumId) {
+        await updateAlbum(editingAlbumId, payload);
+        addToast("Album updated successfully!", "success");
+      } else {
+        await createAlbum(payload);
+        addToast("Album created successfully!", "success");
+      }
+      
+      const updated = await fetchAlbums();
+      const list: AlbumItem[] = [];
+      (updated || []).forEach((docSnap: any) => {
+        const data = docSnap || {};
 
-          list.push({
-            id: docSnap.id || docSnap._id || "",
-            title: data.title || "",
-            photosCount: data.photosCount || data.photos_count || 0,
-            date: data.date || "",
-            status: data.status || "Published",
-            coverImage: resolveAlbumCover(data),
-            category: data.category || "Workshops",
-            createdAt: data.createdAt || data.created_at || Date.now()
-          });
+        list.push({
+          id: docSnap.id || docSnap._id || "",
+          title: data.title || "",
+          photosCount: data.photosCount || data.photos_count || 0,
+          date: data.date || "",
+          status: data.status || "Published",
+          coverImage: resolveAlbumCover(data),
+          category: data.category || "Workshops",
+          createdAt: data.createdAt || data.created_at || Date.now()
         });
-        setAlbums(list);
+      });
+      setAlbums(list);
 
       setAlbumTitle("");
       setAlbumDescription("");
@@ -286,17 +284,6 @@ const GalleryManagementPage: React.FC = () => {
       addToast("Failed to save album.", "warning");
     }
   };
-
-  // Mock library of recently uploaded files (lightbox view)
-  const [recentImages, setRecentImages] = useState([
-    { id: "r1", url: hackathonImg, name: "hackathon_group.png", size: "2.4 MB", date: "Jul 06, 2026" },
-    { id: "r2", url: galleryCoworking, name: "coworking_team.png", size: "1.8 MB", date: "Jul 05, 2026" },
-    { id: "r3", url: galleryVr, name: "vr_demo.png", size: "3.1 MB", date: "Jul 05, 2026" },
-    { id: "r4", url: galleryCollab, name: "collab_brainstorm.png", size: "1.2 MB", date: "Jul 04, 2026" },
-    { id: "r5", url: galleryLab, name: "lab_testing.png", size: "2.9 MB", date: "Jul 04, 2026" },
-    { id: "r6", url: sparkImg, name: "spark_workshop.png", size: "1.5 MB", date: "Jul 03, 2026" },
-    { id: "r7", url: seminarImg, name: "seminar_audience.png", size: "4.0 MB", date: "Jul 03, 2026" },
-  ]);
 
   // AI tag state
   const [tags, setTags] = useState([
@@ -359,12 +346,12 @@ const GalleryManagementPage: React.FC = () => {
       createdAt: Date.now()
     };
 
-    addToast("Saving album to Firestore...", "info");
+    addToast("Saving album to database...", "info");
 
     try {
-      const docRef = await addDoc(collection(db, "albums"), payload);
+      const createdRes = await createAlbum(payload);
       const newAlbumItem: AlbumItem = {
-        id: docRef.id,
+        id: createdRes.id || createdRes.album?.id || `${Date.now()}`,
         title: formTitle,
         photosCount: 0,
         date: dateStr,
@@ -383,8 +370,8 @@ const GalleryManagementPage: React.FC = () => {
 
       addToast(`Album "${formTitle}" created successfully!`);
     } catch (err) {
-      console.error("Error saving album to Firestore:", err);
-      addToast("Failed to create album in Firestore.", "warning");
+      console.error("Error saving album to database:", err);
+      addToast("Failed to create album.", "warning");
     }
   };
 
@@ -396,13 +383,12 @@ const GalleryManagementPage: React.FC = () => {
       return;
     }
 
-    addToast("Updating album counts in Firestore...", "info");
+    addToast("Updating album counts in database...", "info");
 
     try {
       const targetAlbum = albums.find(a => a.id === uploadAlbumId);
       if (targetAlbum) {
-        const docRef = doc(db, "albums", uploadAlbumId);
-        await updateDoc(docRef, { photosCount: targetAlbum.photosCount + selectedFileCount });
+        await updateAlbum(uploadAlbumId, { photosCount: targetAlbum.photosCount + selectedFileCount });
 
         setAlbums(prev => prev.map(alb => {
           if (alb.id === uploadAlbumId) {
@@ -416,8 +402,8 @@ const GalleryManagementPage: React.FC = () => {
       setSelectedFileCount(0);
       addToast(`Successfully uploaded ${selectedFileCount} images!`);
     } catch (err) {
-      console.error("Error updating image count in Firestore:", err);
-      addToast("Failed to upload image metadata to Firestore.", "warning");
+      console.error("Error updating image count in database:", err);
+      addToast("Failed to upload image metadata.", "warning");
     }
   };
 
@@ -436,8 +422,7 @@ const GalleryManagementPage: React.FC = () => {
     const nextStatus = targetAlbum.status === "Published" ? "Draft" : "Published";
 
     try {
-      const docRef = doc(db, "albums", id);
-      await updateDoc(docRef, { status: nextStatus });
+      await updateAlbum(id, { status: nextStatus });
 
       setAlbums(prev => prev.map(alb => {
         if (alb.id === id) {
@@ -447,8 +432,8 @@ const GalleryManagementPage: React.FC = () => {
         return alb;
       }));
     } catch (err) {
-      console.error("Error toggling status in Firestore:", err);
-      addToast("Failed to update status in Firestore.", "warning");
+      console.error("Error toggling status in database:", err);
+      addToast("Failed to update status.", "warning");
     }
   };
 
@@ -463,14 +448,13 @@ const GalleryManagementPage: React.FC = () => {
     const { id, title } = deleteConfirmAlbum;
 
     try {
-      const docRef = doc(db, "albums", id);
-      await deleteDoc(docRef);
+      await deleteAlbum(id);
 
       setAlbums(prev => prev.filter(alb => alb.id !== id));
       addToast(`Album "${title}" deleted from gallery directory.`, "success");
     } catch (err) {
-      console.error("Error deleting album from Firestore:", err);
-      addToast("Failed to delete album from Firestore.", "warning");
+      console.error("Error deleting album from database:", err);
+      addToast("Failed to delete album.", "warning");
     } finally {
       setDeleteConfirmAlbum(null);
     }

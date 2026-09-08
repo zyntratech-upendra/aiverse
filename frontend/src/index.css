@@ -113,6 +113,21 @@ input[type="date"], input[type="time"] {
   color-scheme: light;
 }
 
+/* Global Form Input Styling & White Backgrounds */
+input, textarea, select {
+  color-scheme: light;
+}
+
+/* Chrome/Safari/Edge Autofill Styling to keep background pure white */
+input:-webkit-autofill,
+input:-webkit-autofill:hover, 
+input:-webkit-autofill:focus, 
+input:-webkit-autofill:active {
+  -webkit-box-shadow: 0 0 0 30px #ffffff inset !important;
+  -webkit-text-fill-color: #0f172a !important;
+  transition: background-color 5000s ease-in-out 0s;
+}
+
 ::-webkit-calendar-picker-indicator {
   cursor: pointer;
   filter: invert(32%) sepia(90%) saturate(1900%) hue-rotate(212deg) brightness(98%) contrast(96%);

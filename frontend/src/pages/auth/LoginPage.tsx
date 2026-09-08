@@ -110,7 +110,7 @@ const LoginPage: React.FC = () => {
         <form onSubmit={handleFormSubmit} className="space-y-4 text-left">
           {/* Email / Phone field */}
           <div className="space-y-1.5">
-            <label htmlFor="login-identifier" className="block text-xs font-semibold text-slate-500 uppercase tracking-wider">
+            <label htmlFor="login-identifier" className="block text-xs font-semibold text-slate-600 uppercase tracking-wider">
               Email Address or Phone Number
             </label>
             <div className="relative flex items-center">
@@ -127,7 +127,7 @@ const LoginPage: React.FC = () => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 placeholder="Email Address or Registered Phone Number"
-                className="w-full pl-11 pr-4 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-aether-blue-500/20 focus:border-aether-blue-500 transition-all font-sans text-sm text-slate-800 placeholder-slate-400"
+                className="w-full pl-11 pr-4 py-3 rounded-xl bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all font-sans text-sm text-slate-900 placeholder-slate-400 shadow-xs"
                 required
               />
             </div>
@@ -145,13 +145,13 @@ const LoginPage: React.FC = () => {
           {!isPhoneInput && (
             <div className="space-y-1.5 animate-in fade-in">
               <div className="flex justify-between items-center">
-                <label htmlFor="login-password" className="block text-xs font-semibold text-slate-500 uppercase tracking-wider">
+                <label htmlFor="login-password" className="block text-xs font-semibold text-slate-600 uppercase tracking-wider">
                   Password
                 </label>
                 <button
                   type="button"
                   onClick={() => alert("Password reset link has been sent to your email!")}
-                  className="text-xs font-semibold text-aether-blue-600 hover:text-aether-blue-700 transition-colors"
+                  className="text-xs font-semibold text-blue-600 hover:text-blue-700 transition-colors"
                 >
                   Forgot Password?
                 </button>
@@ -166,7 +166,7 @@ const LoginPage: React.FC = () => {
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••"
-                  className="w-full pl-11 pr-11 py-3 rounded-xl border border-slate-200 focus:outline-none focus:ring-2 focus:ring-aether-blue-500/20 focus:border-aether-blue-500 transition-all font-sans text-sm text-slate-800 placeholder-slate-400"
+                  className="w-full pl-11 pr-11 py-3 rounded-xl bg-white border border-slate-200 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-600 transition-all font-sans text-sm text-slate-900 placeholder-slate-400 shadow-xs"
                   required={!isPhoneInput}
                 />
                 <button

@@ -11,9 +11,14 @@ import {
   RefreshCw, 
   CheckSquare
 } from "lucide-react";
-import { db } from "../../config/firebase";
-import { collection, getDocs, doc, setDoc } from "firebase/firestore";
-import { fetchUsers, fetchEvents, fetchRegistrations } from "../../services/apiClient";
+import { 
+  fetchUsers, 
+  fetchEvents, 
+  fetchRegistrations, 
+  fetchAttendance, 
+  markAttendance,
+  updateEvent 
+} from "../../services/apiClient";
 import SEO from "../../components/layout/SEO";
 
 interface Attendee {
@@ -58,23 +63,23 @@ const AttendanceManagementPage: React.FC = () => {
     setTimeout(() => setToastMessage(null), 3000);
   };
 
-      useEffect(() => {
+  useEffect(() => {
     const initializeAttendanceData = async () => {
       try {
         setLoading(true);
         // 1. Fetch total members from users collection to show realistic total attendees
-        const usersSnap = await fetchUsers();
-        if (usersSnap && usersSnap.length > 0) {
-          setTotalAttendeesCount(usersSnap.length * 12 + 84); // Scaled multiplier
+        const usersList = await fetchUsers().catch(() => []);
+        if (usersList && usersList.length > 0) {
+          setTotalAttendeesCount(usersList.length * 12 + 84);
         }
 
         // 2. Fetch events from backend
-        const eventsSnap = await fetchEvents();
-        const todayStr = new Date().toISOString().split("T")[0]; // e.g. "2026-08-02"
+        const rawEvents = await fetchEvents().catch(() => []);
+        const eventsList: any[] = Array.isArray(rawEvents) ? rawEvents : [];
+        const todayStr = new Date().toISOString().split("T")[0];
 
-        const activeDbEvents: EventCard[] = eventsSnap.docs
-          .map(docSnap => {
-            const data = docSnap.data();
+        const activeDbEvents: EventCard[] = eventsList
+          .map((data: any) => {
             const categoryString = data.category || (data.type ? data.type.toUpperCase() : "GENERAL");
             
             // Check if event is completed, closed, finished, cancelled, or past
@@ -85,7 +90,6 @@ const AttendanceManagementPage: React.FC = () => {
             const dateStr = data.endDate || data.startDate;
             const isPastDate = Boolean(dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr) && dateStr < todayStr);
 
-            // Filter out completed and past events so they do not show for attendance management
             if (isCompletedStatus || isPastFlag || isPastDate) {
               return null;
             }
@@ -95,7 +99,7 @@ const AttendanceManagementPage: React.FC = () => {
               : ("STARTING SOON" as const);
             
             return {
-              id: docSnap.id,
+              id: data.id || data._id || "",
               title: data.title || "Unnamed Event",
               location: data.location || "General Classroom",
               timeRange: data.timeRange || (data.startDate ? `${data.startDate} • ${data.startTime || ""}` : "10:00 AM - 12:00 PM"),
@@ -128,7 +132,7 @@ const AttendanceManagementPage: React.FC = () => {
     const loadAttendees = async () => {
       try {
         // 1. Fetch Participant Registrations
-        const regsSnap = await fetchRegistrations();
+        const regsSnap = await fetchRegistrations().catch(() => []);
         const eventRegs = (regsSnap || [])
           .map((d: any) => ({ id: d.id || d._id || "", ...d }))
           .filter((r: any) => r.eventId === selectedEventId);
@@ -148,19 +152,19 @@ const AttendanceManagementPage: React.FC = () => {
         }
 
         // 2. Fetch Team Members and their Attendances
-        const teamSnap = await getDocs(collection(db, "team"));
-        const teamMembers = teamSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        const allUsers = await fetchUsers().catch(() => []);
+        const teamMembers = (allUsers || []).filter((u: any) => {
+          const role = (u.role || "").toLowerCase();
+          return role.includes("organizer") || role.includes("volunteer") || role.includes("coordinator") || role.includes("faculty") || role.includes("team");
+        });
 
-        const attSnap = await getDocs(collection(db, "attendances"));
-        const attendances = attSnap.docs
-          .map(d => ({ id: d.id, ...d.data() } as any))
-          .filter((a: any) => a.eventId === selectedEventId);
+        const attendances = await fetchAttendance({ eventId: selectedEventId }).catch(() => []);
 
         const teamList: Attendee[] = teamMembers.map((tm: any) => {
-          const attendanceRecord = attendances.find((a: any) => a.teamMemberId === tm.id);
+          const attendanceRecord = attendances.find((a: any) => a.teamMemberId === (tm.id || tm._id) || (a.userEmail && a.userEmail.toLowerCase() === tm.email?.toLowerCase()));
           return {
-            id: tm.id,
-            name: tm.name || tm.username || "Unnamed Team Member",
+            id: tm.id || tm._id,
+            name: tm.name || tm.displayName || "Unnamed Team Member",
             email: tm.email || "",
             department: tm.role || "Organizer",
             checkInTime: attendanceRecord?.checkInTime || "—",
@@ -191,28 +195,14 @@ const AttendanceManagementPage: React.FC = () => {
     } : t));
 
     try {
-      const attsSnap = await getDocs(collection(db, "attendances"));
-      const existingDoc = attsSnap.docs.find(d => {
-        const data = d.data();
-        return data.eventId === selectedEventId && data.teamMemberId === teamMemberId;
+      await markAttendance({
+        eventId: selectedEventId,
+        teamMemberId,
+        name: teamMemberName,
+        role: teamMemberRole,
+        status: newStatus,
+        checkInTime: formattedCheckIn
       });
-
-      if (existingDoc) {
-        await setDoc(doc(db, "attendances", existingDoc.id), {
-          status: newStatus,
-          checkInTime: formattedCheckIn
-        }, { merge: true });
-      } else {
-        const newDocRef = doc(collection(db, "attendances"));
-        await setDoc(newDocRef, {
-          eventId: selectedEventId,
-          teamMemberId: teamMemberId,
-          name: teamMemberName,
-          role: teamMemberRole,
-          status: newStatus,
-          checkInTime: formattedCheckIn
-        });
-      }
       showToast(`Updated attendance for ${teamMemberName}`);
     } catch (err) {
       console.error("Error updating team attendance:", err);
@@ -245,7 +235,7 @@ const AttendanceManagementPage: React.FC = () => {
     setSyncing(true);
     setTimeout(() => {
       setSyncing(false);
-      showToast("Synced dynamic attendance logs to university cloud!");
+      showToast("Synced dynamic attendance logs to database!");
     }, 1500);
   };
 
@@ -259,8 +249,7 @@ const AttendanceManagementPage: React.FC = () => {
     setSelectedEventId(eventId);
     
     try {
-      const docRef = doc(db, "events", eventId);
-      await setDoc(docRef, { status: "Published" }, { merge: true });
+      await updateEvent(eventId, { status: "Published" });
     } catch (err) {
       console.error("Error opening event check-in in database:", err);
     }
@@ -277,8 +266,7 @@ const AttendanceManagementPage: React.FC = () => {
     }));
     
     try {
-      const docRef = doc(db, "events", eventId);
-      await setDoc(docRef, { status: "CLOSED" }, { merge: true });
+      await updateEvent(eventId, { status: "CLOSED" });
     } catch (err) {
       console.error("Error closing event check-in in database:", err);
     }

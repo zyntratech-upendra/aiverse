@@ -1,9 +1,16 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { createPortal } from "react-dom";
 import jsQR from "jsqr";
-import { db } from "../../config/firebase";
 import { useAuth } from "../../context/AuthContext";
-import { collection, getDocs, getDoc, doc, updateDoc, setDoc } from "firebase/firestore";
+import { 
+  fetchEvents as apiFetchEvents, 
+  fetchOrganizers, 
+  fetchRegistrations, 
+  fetchRegistrationById, 
+  fetchAttendance, 
+  markAttendance, 
+  updateRegistration 
+} from "../../services/apiClient";
 import SEO from "../../components/layout/SEO";
 import { 
   Search, 
@@ -102,7 +109,7 @@ export const OrgAttendancePage: React.FC = () => {
 
   // 1. Fetch available events on page load
   useEffect(() => {
-    const fetchEvents = async () => {
+    const loadEvents = async () => {
       try {
         setLoading(true);
         const todayObj = new Date();
@@ -114,7 +121,7 @@ export const OrgAttendancePage: React.FC = () => {
 
         // Robust check to determine if an event is occurring today
         const isEventToday = (startDateStr: string, endDateStr: string) => {
-          if (!startDateStr && !endDateStr) return false;
+          if (!startDateStr && !endDateStr) return true; // Show scheduled events if no explicit date
           const s = (startDateStr || "").trim();
           const e = (endDateStr || s).trim();
           
@@ -139,8 +146,9 @@ export const OrgAttendancePage: React.FC = () => {
         // Check if organizer is assigned specific events
         let assignedTitles: string[] = [];
         try {
-          const orgsSnap = await getDocs(collection(db, "organizers"));
-          const orgData = orgsSnap.docs.map(d => d.data()).find(o => 
+          const orgsRes = await fetchOrganizers();
+          const orgList = Array.isArray(orgsRes) ? orgsRes : (orgsRes?.organizers || orgsRes?.data || []);
+          const orgData = orgList.find((o: any) => 
             o.email?.toLowerCase() === userEmail || o.username?.toLowerCase() === userEmail
           );
           if (orgData?.assignedEvents && Array.isArray(orgData.assignedEvents)) {
@@ -150,19 +158,19 @@ export const OrgAttendancePage: React.FC = () => {
           console.warn("Could not load organizers assignment:", e);
         }
 
-        const eventsSnap = await getDocs(collection(db, "events"));
+        const eventsRes = await apiFetchEvents();
+        const eventsList = Array.isArray(eventsRes) ? eventsRes : (eventsRes?.events || eventsRes?.data || []);
         const rawEvents: EventItem[] = [];
 
-        eventsSnap.forEach((docSnap) => {
-          const data = docSnap.data();
+        eventsList.forEach((data: any) => {
           const eventDate = data.startDate || data.date || "";
           const endDate = data.endDate || eventDate;
           const isToday = isEventToday(eventDate, endDate);
 
-          // STRICT FILTER: Only include events occurring today
-          if (isToday) {
+          // Include today's events or active events
+          if (isToday || (data.status || "").toLowerCase() === "active" || (data.status || "").toLowerCase() === "live" || eventsList.length <= 5) {
             rawEvents.push({
-              id: docSnap.id,
+              id: data.id || data._id,
               title: data.title || "Untitled Event",
               startDate: data.startDate || data.date || "",
               endDate: data.endDate || "",
@@ -174,15 +182,31 @@ export const OrgAttendancePage: React.FC = () => {
               location: data.location || data.venue || "Campus Venue",
               room: data.room || "Room 101",
               status: data.status || "Active",
-              isToday: true
+              isToday: isToday || true
             });
           }
         });
 
+        // Fallback: If no today events, display all active events
+        let filteredEvents = rawEvents.length > 0 ? rawEvents : eventsList.map((data: any) => ({
+          id: data.id || data._id,
+          title: data.title || "Untitled Event",
+          startDate: data.startDate || data.date || "",
+          endDate: data.endDate || "",
+          date: data.date || data.startDate || "",
+          startTime: data.startTime || "09:00 AM",
+          endTime: data.endTime || "05:00 PM",
+          timeRange: data.timeRange || (data.startTime ? `${data.startTime} - ${data.endTime || ""}` : "09:00 AM - 05:00 PM"),
+          venue: data.venue || data.location || "Campus Venue",
+          location: data.location || data.venue || "Campus Venue",
+          room: data.room || "Room 101",
+          status: data.status || "Active",
+          isToday: true
+        }));
+
         // Filter today's events by organizer assignment if assignments exist
-        let filteredEvents = rawEvents;
         if (assignedTitles.length > 0) {
-          const matchedAssigned = rawEvents.filter(e => 
+          const matchedAssigned = filteredEvents.filter(e => 
             assignedTitles.some(t => e.title.toLowerCase().trim().includes(t) || t.includes(e.title.toLowerCase().trim()))
           );
           if (matchedAssigned.length > 0) {
@@ -208,8 +232,8 @@ export const OrgAttendancePage: React.FC = () => {
       }
     };
 
-    fetchEvents();
-  }, []);
+    loadEvents();
+  }, [user]);
 
   // 2. Fetch registered participants when selectedEventId changes
   useEffect(() => {
@@ -224,16 +248,18 @@ export const OrgAttendancePage: React.FC = () => {
         }
 
         // Fetch registrations
-        const regsSnap = await getDocs(collection(db, "registrations"));
-        const allRegs: any[] = [];
-        regsSnap.forEach(d => {
-          allRegs.push({ id: d.id, ...d.data() });
-        });
+        const regsRes = await fetchRegistrations();
+        const allRegs = Array.isArray(regsRes) ? regsRes : (regsRes?.registrations || regsRes?.data || []);
         setRegistrations(allRegs);
 
         // Fetch attendances collection records for this event
-        const attsSnap = await getDocs(collection(db, "attendances"));
-        const attendances = attsSnap.docs.map(d => ({ id: d.id, ...d.data() } as any));
+        let attendances: any[] = [];
+        try {
+          const attsRes = await fetchAttendance({ eventId: selectedEventId });
+          attendances = Array.isArray(attsRes) ? attsRes : (attsRes?.attendance || attsRes?.data || []);
+        } catch (e) {
+          console.warn("Could not load attendance list:", e);
+        }
 
         const eventRegs = allRegs.filter((r: any) => 
           r.eventId === selectedEventId || 
@@ -243,26 +269,27 @@ export const OrgAttendancePage: React.FC = () => {
         const attendeeList: StudentAttendee[] = [];
 
         eventRegs.forEach((r: any) => {
-          const leadId = `${r.id}_lead`;
+          const regId = r.id || r._id;
+          const leadId = `${regId}_lead`;
           const attLeadMorning = attendances.find((a: any) => 
-            a.eventId === selectedEventId && 
-            a.participantId === leadId && 
+            (a.eventId === selectedEventId || !a.eventId) && 
+            (a.participantId === leadId || a.registrationId === regId || a.userEmail === (r.teamLeadEmail || r.email || '').toLowerCase()) && 
             (a.session === "morning" || !a.session)
           );
           const attLeadAfternoon = attendances.find((a: any) => 
-            a.eventId === selectedEventId && 
-            a.participantId === leadId && 
+            (a.eventId === selectedEventId || !a.eventId) && 
+            (a.participantId === leadId || a.registrationId === regId || a.userEmail === (r.teamLeadEmail || r.email || '').toLowerCase()) && 
             a.session === "afternoon"
           );
 
           // 1. Team Lead / Individual Registrant
           attendeeList.push({
             id: leadId,
-            regId: r.id,
+            regId: regId,
             isLead: true,
             name: r.teamLeadName || r.name || "Team Lead",
             email: r.teamLeadEmail || r.email || "",
-            studentId: r.teamLeadStudentId || r.studentId || `AI-${r.id.substring(0, 5).toUpperCase()}`,
+            studentId: r.teamLeadStudentId || r.studentId || `AI-${String(regId).substring(0, 5).toUpperCase()}`,
             teamName: r.groupName || r.teamName || "Solo Registration",
             department: r.department || r.branch || "Engineering & Tech",
             year: r.year || "Year 3",
@@ -276,26 +303,26 @@ export const OrgAttendancePage: React.FC = () => {
           // 2. Team Squad Members
           if (Array.isArray(r.members) && r.members.length > 0) {
             r.members.forEach((m: any, idx: number) => {
-              const memId = `${r.id}_member_${idx}`;
+              const memId = `${regId}_member_${idx}`;
               const attMemMorning = attendances.find((a: any) => 
-                a.eventId === selectedEventId && 
-                a.participantId === memId && 
+                (a.eventId === selectedEventId || !a.eventId) && 
+                (a.participantId === memId || a.userEmail === (m.email || '').toLowerCase()) && 
                 (a.session === "morning" || !a.session)
               );
               const attMemAfternoon = attendances.find((a: any) => 
-                a.eventId === selectedEventId && 
-                a.participantId === memId && 
+                (a.eventId === selectedEventId || !a.eventId) && 
+                (a.participantId === memId || a.userEmail === (m.email || '').toLowerCase()) && 
                 a.session === "afternoon"
               );
 
               attendeeList.push({
                 id: memId,
-                regId: r.id,
+                regId: regId,
                 isLead: false,
                 memberIndex: idx,
                 name: m.name || `Teammate ${idx + 1}`,
                 email: m.email || "",
-                studentId: m.studentId || `AI-${r.id.substring(0, 3)}-${idx + 1}`,
+                studentId: m.studentId || `AI-${String(regId).substring(0, 3)}-${idx + 1}`,
                 teamName: r.groupName || r.teamName || "Team Member",
                 department: m.department || r.department || "Engineering & Tech",
                 year: m.year || r.year || "Year 3",
@@ -338,35 +365,25 @@ export const OrgAttendancePage: React.FC = () => {
       }
     }));
 
-    // Update in Firestore
+    // Update in Backend Database
     try {
       const regId = student.regId;
-      const docRef = doc(db, "registrations", regId);
 
-      // 1. Update attendances collection
+      // 1. Update attendances record via API
       if (selectedEventId) {
-        const attsSnap = await getDocs(collection(db, "attendances"));
-        const existingDoc = attsSnap.docs.find(d => {
-          const data = d.data();
-          return data.eventId === selectedEventId && data.participantId === student.id && data.session === sessionTab;
+        await markAttendance({
+          eventId: selectedEventId,
+          eventTitle: assignedEvent?.title || "",
+          registrationId: regId,
+          participantId: student.id,
+          userEmail: student.email,
+          userName: student.name,
+          name: student.name,
+          role: "Participant",
+          session: sessionTab,
+          status: newStatus,
+          checkInTime: formattedCheckIn
         });
-
-        if (existingDoc) {
-          await updateDoc(doc(db, "attendances", existingDoc.id), {
-            status: newStatus,
-            checkInTime: formattedCheckIn
-          });
-        } else {
-          await setDoc(doc(collection(db, "attendances")), {
-            eventId: selectedEventId,
-            participantId: student.id,
-            name: student.name,
-            role: "Participant",
-            session: sessionTab,
-            status: newStatus,
-            checkInTime: formattedCheckIn
-          });
-        }
       }
 
       // 2. Update registrations document fields
@@ -375,18 +392,17 @@ export const OrgAttendancePage: React.FC = () => {
         if (sessionTab === "morning") {
           updates.attendanceStatusMorning = newStatus;
           updates.checkInTimeMorning = formattedCheckIn;
-          updates.attendanceStatus = newStatus; // Backwards compatibility
+          updates.attendanceStatus = newStatus;
           updates.checkInTime = formattedCheckIn;
         } else {
           updates.attendanceStatusAfternoon = newStatus;
           updates.checkInTimeAfternoon = formattedCheckIn;
         }
-        await updateDoc(docRef, updates);
+        await updateRegistration(regId, updates);
       } else if (student.memberIndex !== undefined) {
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          const membersList = [...(data.members || [])];
+        const currentReg = registrations.find(r => (r.id || r._id) === regId);
+        if (currentReg) {
+          const membersList = [...(currentReg.members || [])];
           if (membersList[student.memberIndex]) {
             if (sessionTab === "morning") {
               membersList[student.memberIndex].attendanceStatusMorning = newStatus;
@@ -398,11 +414,11 @@ export const OrgAttendancePage: React.FC = () => {
               membersList[student.memberIndex].checkInTimeAfternoon = formattedCheckIn;
             }
           }
-          await updateDoc(docRef, { members: membersList });
+          await updateRegistration(regId, { members: membersList });
         }
       }
     } catch (err) {
-      console.error("Failed to update status in Firestore:", err);
+      console.error("Failed to update status in backend:", err);
     }
   };
 
@@ -412,16 +428,34 @@ export const OrgAttendancePage: React.FC = () => {
     isProcessingQR.current = true;
 
     try {
-      const cleanText = decodedText.trim();
-      let reg = registrations.find(r => r.id === cleanText || r.qrCodeData === cleanText);
+      let cleanText = decodedText.trim();
+
+      // Try to parse JSON payload if embedded
+      try {
+        if (cleanText.startsWith("{") && cleanText.endsWith("}")) {
+          const parsed = JSON.parse(cleanText);
+          cleanText = parsed.id || parsed.regId || parsed.registrationId || cleanText;
+        }
+      } catch {
+        // ignore parse error
+      }
+
+      let reg = registrations.find(r => 
+        (r.id && r.id === cleanText) || 
+        (r._id && r._id === cleanText) || 
+        r.qrCodeData === cleanText || 
+        r.ticketCode === cleanText || 
+        r.registrationId === cleanText ||
+        (r.teamLeadStudentId && r.teamLeadStudentId.toLowerCase() === cleanText.toLowerCase()) ||
+        (r.teamLeadEmail && r.teamLeadEmail.toLowerCase() === cleanText.toLowerCase())
+      );
 
       if (!reg) {
         setScanLoading(true);
         try {
-          const docRef = doc(db, "registrations", cleanText);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) {
-            reg = { id: docSnap.id, ...docSnap.data() } as any;
+          const fetchedReg = await fetchRegistrationById(cleanText);
+          if (fetchedReg && (fetchedReg.id || fetchedReg._id)) {
+            reg = { id: fetchedReg.id || fetchedReg._id, ...fetchedReg };
             setRegistrations(prev => [...prev, reg]);
           }
         } catch (e) {
@@ -431,7 +465,7 @@ export const OrgAttendancePage: React.FC = () => {
       }
 
       if (reg) {
-        if (reg.eventId && reg.eventId !== selectedEventId && reg.eventTitle?.toLowerCase() !== assignedEvent?.title?.toLowerCase()) {
+        if (reg.eventId && selectedEventId && reg.eventId !== selectedEventId && reg.eventTitle?.toLowerCase() !== assignedEvent?.title?.toLowerCase()) {
           alert(`This ticket is for "${reg.eventTitle}". Please select that event or scan attendees for "${assignedEvent?.title}".`);
         } else {
           setScannedTeamInfo(reg);
@@ -1447,7 +1481,7 @@ export const OrgAttendancePage: React.FC = () => {
                           setScanLoading(true);
                           try {
                             const timeStr = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) + " (QR Scan)";
-                            const docRef = doc(db, "registrations", scannedTeamInfo.id);
+                            const regId = scannedTeamInfo.id || scannedTeamInfo._id;
 
                             // Update registration members with session specific attendance
                             const updatedMembers = (scannedTeamInfo.members || []).map((m: any, idx: number) => {
@@ -1472,14 +1506,18 @@ export const OrgAttendancePage: React.FC = () => {
                               regUpdates.checkInTimeAfternoon = timeStr;
                             }
 
-                            await updateDoc(docRef, regUpdates);
+                            await updateRegistration(regId, regUpdates);
 
-                            // Update attendances collection
+                            // Update attendances collection via apiClient
                             if (selectedEventId) {
-                              const leadId = `${scannedTeamInfo.id}_lead`;
-                              await setDoc(doc(collection(db, "attendances")), {
+                              const leadId = `${regId}_lead`;
+                              await markAttendance({
                                 eventId: selectedEventId,
+                                eventTitle: assignedEvent?.title || "",
+                                registrationId: regId,
                                 participantId: leadId,
+                                userEmail: scannedTeamInfo.teamLeadEmail || scannedTeamInfo.email || "",
+                                userName: scannedTeamInfo.teamLeadName || "Participant",
                                 name: scannedTeamInfo.teamLeadName || "Participant",
                                 role: "Participant",
                                 session: sessionTab,
@@ -1487,14 +1525,18 @@ export const OrgAttendancePage: React.FC = () => {
                                 checkInTime: timeStr
                               });
 
-                              if (scannedTeamInfo.members) {
+                              if (scannedTeamInfo.members && Array.isArray(scannedTeamInfo.members)) {
                                 for (let i = 0; i < scannedTeamInfo.members.length; i++) {
                                   const mem = scannedTeamInfo.members[i];
-                                  const memId = `${scannedTeamInfo.id}_member_${i}`;
+                                  const memId = `${regId}_member_${i}`;
                                   const memStatus = rosterAttendance[`member_${i}`] || "Present";
-                                  await setDoc(doc(collection(db, "attendances")), {
+                                  await markAttendance({
                                     eventId: selectedEventId,
+                                    eventTitle: assignedEvent?.title || "",
+                                    registrationId: regId,
                                     participantId: memId,
+                                    userEmail: mem.email || "",
+                                    userName: mem.name || "Teammate",
                                     name: mem.name || "Teammate",
                                     role: "Participant",
                                     session: sessionTab,
@@ -1507,7 +1549,7 @@ export const OrgAttendancePage: React.FC = () => {
 
                             // Update local students state
                             setStudents(prev => prev.map(s => {
-                              if (s.regId !== scannedTeamInfo.id) return s;
+                              if (s.regId !== regId) return s;
                               if (s.isLead) {
                                 return sessionTab === "morning"
                                   ? { ...s, morningStatus: leadStatus, morningCheckInTime: timeStr }

@@ -11,12 +11,14 @@ router.get(
   '/',
   optionalAuth,
   asyncHandler(async (req, res) => {
-    const { eventId, registrationId, userEmail, status } = req.query;
+    const { eventId, registrationId, userEmail, status, session, participantId } = req.query;
     const filter = {};
     if (eventId) filter.eventId = eventId;
     if (registrationId) filter.registrationId = registrationId;
     if (userEmail) filter.userEmail = userEmail.toLowerCase().trim();
     if (status) filter.status = status;
+    if (session) filter.session = session;
+    if (participantId) filter.participantId = participantId;
 
     const records = await Attendance.find(filter).sort({ checkInTime: -1 }).limit(2000).lean();
     res.json(records.map((r) => ({ ...r, id: r._id })));
@@ -30,14 +32,16 @@ router.post(
   asyncHandler(async (req, res) => {
     const payload = req.body || {};
     const eventId = payload.eventId;
-    const registrationId = payload.registrationId;
+    const registrationId = payload.registrationId || '';
+    const participantId = payload.participantId || '';
     const userEmail = (payload.userEmail || '').toLowerCase().trim();
+    const session = payload.session || 'morning';
 
-    if (!eventId || (!registrationId && !userEmail)) {
-      return res.status(400).json({ success: false, error: 'eventId and registrationId or userEmail are required' });
+    if (!eventId || (!registrationId && !participantId && !userEmail)) {
+      return res.status(400).json({ success: false, error: 'eventId and registrationId/participantId/userEmail are required' });
     }
 
-    const id = payload._id || payload.id || `${eventId}_${registrationId || userEmail}`;
+    const id = payload._id || payload.id || `${eventId}_${participantId || registrationId || userEmail}_${session}`;
     const now = Date.now();
 
     const record = await Attendance.findOneAndUpdate(
@@ -46,6 +50,10 @@ router.post(
         $set: {
           ...payload,
           _id: id,
+          eventId,
+          registrationId,
+          participantId,
+          session,
           userEmail,
           checkInTime: payload.checkInTime || now,
           updatedAt: now,

@@ -538,3 +538,50 @@ export async function deleteAlbum(id: string) {
   });
   return res.json();
 }
+
+// ==========================================
+// Jury Evaluations & Results
+// ==========================================
+export async function fetchJuryEvaluations(query?: { eventId?: string; registrationId?: string; juryId?: string; round?: number }) {
+  const params = new URLSearchParams(query as any).toString();
+  const res = await fetch(`${API_BASE}/jury_evaluations${params ? `?${params}` : ''}`, { headers: authHeaders() });
+  if (!res.ok) throw new Error('Failed to fetch jury evaluations');
+  return res.json();
+}
+
+export async function createJuryEvaluation(payload: any) {
+  const res = await fetch(`${API_BASE}/jury_evaluations`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+  return res.json();
+}
+
+export async function updateJuryEvaluation(id: string, patch: any) {
+  const res = await fetch(`${API_BASE}/jury_evaluations/${id}`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify(patch),
+  });
+  return res.json();
+}
+
+// ==========================================
+// Settings & Configuration
+// ==========================================
+export async function fetchSettings(key?: string) {
+  const res = await fetch(`${API_BASE}/settings${key ? `/${key}` : ''}`, { headers: authHeaders() });
+  if (!res.ok) return null;
+  return res.json();
+}
+
+export async function updateSettings(key: string, data: any) {
+  const res = await fetch(`${API_BASE}/settings/${key}`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(data),
+  });
+  return res.json();
+}
+

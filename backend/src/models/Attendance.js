@@ -5,17 +5,20 @@ const AttendanceSchema = new mongoose.Schema(
     _id: { type: String, default: () => new mongoose.Types.ObjectId().toString() },
     eventId: { type: String, required: true, index: true },
     eventTitle: { type: String, default: '' },
-    registrationId: { type: String, required: true, index: true },
+    registrationId: { type: String, default: '', index: true },
+    participantId: { type: String, default: '', index: true },
+    session: { type: String, default: 'morning', index: true },
     userId: { type: String, default: '', index: true },
-    userEmail: { type: String, required: true, lowercase: true, trim: true, index: true },
+    userEmail: { type: String, default: '', lowercase: true, trim: true, index: true },
     userName: { type: String, default: '' },
+    name: { type: String, default: '' },
+    role: { type: String, default: 'Participant' },
     teamName: { type: String, default: '' },
     status: {
       type: String,
-      enum: ['Present', 'Absent', 'Late', 'Excused'],
       default: 'Present',
     },
-    checkInTime: { type: Number, default: () => Date.now() },
+    checkInTime: { type: mongoose.Schema.Types.Mixed, default: () => Date.now() },
     markedBy: { type: String, default: 'System' },
     notes: { type: String, default: '' },
     createdAt: { type: Number, default: () => Date.now() },
@@ -25,6 +28,7 @@ const AttendanceSchema = new mongoose.Schema(
     timestamps: false,
     versionKey: false,
     _id: false,
+    strict: false,
   }
 );
 

@@ -7,8 +7,7 @@ import {
   ChevronRight, 
   Users
 } from "lucide-react";
-import { db } from "../../config/firebase";
-import { collection, getDocs } from "firebase/firestore";
+import { fetchEvents, fetchJuryEvaluations } from "../../services/apiClient";
 
 interface LeaderboardItem {
   id: string;
@@ -38,31 +37,25 @@ const JuryResultsView: React.FC = () => {
   const [allEvaluations, setAllEvaluations] = useState<LeaderboardItem[]>([]);
   const [loading, setLoading] = useState(true);
 
-  // Firebase Firestore real-time listener for database events and jury evaluations
+  // MongoDB REST API fetcher for database events and jury evaluations
   useEffect(() => {
     setLoading(true);
 
-    // 1. Fetch events from Firestore events collection (polling)
+    // 1. Fetch events from backend API
     const loadEvents = async () => {
       try {
-        const snapshot = await getDocs(collection(db, "events"));
-        if (!snapshot.empty) {
-          const dbCards: EventResultCard[] = snapshot.docs.map(docSnap => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              title: data.title || "Unnamed Event",
-              category: data.category || (data.type ? data.type.toUpperCase() : "GENERAL"),
-              date: data.date || (data.startDate ? `${data.startDate}` : "2026"),
-              teamsCount: Math.max(0, Number(data.currentReg) || 0),
-              status: data.status === "Opened" || data.status === "Published" || data.status === "Active" ? "Active" : "Evaluated",
-              description: data.description || "Official Event Results & Standings"
-            };
-          });
-          setEventCards(dbCards);
-        } else {
-          setEventCards([]);
-        }
+        const eventsData = await fetchEvents();
+        const list = Array.isArray(eventsData) ? eventsData : [];
+        const dbCards: EventResultCard[] = list.map((data: any) => ({
+          id: data.id || data._id || "",
+          title: data.title || "Unnamed Event",
+          category: data.category || (data.type ? data.type.toUpperCase() : "GENERAL"),
+          date: data.date || (data.startDate ? `${data.startDate}` : "2026"),
+          teamsCount: Math.max(0, Number(data.currentReg) || 0),
+          status: data.status === "Opened" || data.status === "Published" || data.status === "Active" ? "Active" : "Evaluated",
+          description: data.description || "Official Event Results & Standings"
+        }));
+        setEventCards(dbCards);
         setLoading(false);
       } catch (err) {
         console.error("Error loading events:", err);
@@ -71,51 +64,44 @@ const JuryResultsView: React.FC = () => {
     };
     loadEvents();
 
-    // 2. Fetch real jury evaluations from Firestore jury_evaluations collection
-    // 2. Fetch jury evaluations (polling)
+    // 2. Fetch real jury evaluations from backend API
     const loadEvals = async () => {
       try {
-        const snapshot = await getDocs(collection(db, "jury_evaluations"));
-        if (!snapshot.empty) {
-          const parsedProjects = snapshot.docs.map(docSnap => {
-            const data = docSnap.data();
-            return {
-              id: docSnap.id,
-              teamName: data.teamName || "Unnamed Team",
-              projectTitle: data.projectTitle || "Untitled Project",
-              track: data.track || "General Hackathon Track",
-              status: data.status || "Pending",
-              totalScore: Number(data.totalScore) || 0,
-              evaluator: data.status === "Evaluated" ? "Jury Evaluated" : "Juror Panel"
-            };
-          });
+        const evalsData = await fetchJuryEvaluations().catch(() => []);
+        const list = Array.isArray(evalsData) ? evalsData : [];
+        const parsedProjects = list.map((data: any) => ({
+          id: data.id || data._id || "",
+          teamName: data.teamName || data.team_name || "Unnamed Team",
+          projectTitle: data.projectTitle || data.project_title || "Untitled Project",
+          track: data.track || data.eventTitle || "General Hackathon Track",
+          status: data.status || "Pending",
+          totalScore: Number(data.totalScore || data.score || data.total_score) || 0,
+          evaluator: data.status === "Evaluated" ? "Jury Evaluated" : "Juror Panel"
+        }));
 
-          // Sort teams by totalScore descending
-          const sorted = [...parsedProjects].sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0));
+        // Sort teams by totalScore descending
+        const sorted = [...parsedProjects].sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0));
 
-          const mapped: LeaderboardItem[] = sorted.map((p, idx) => {
-            let badge = undefined;
-            if (idx === 0) badge = "1ST PLACE";
-            else if (idx === 1) badge = "2ND PLACE";
-            else if (idx === 2) badge = "3RD PLACE";
+        const mapped: LeaderboardItem[] = sorted.map((p, idx) => {
+          let badge = undefined;
+          if (idx === 0) badge = "1ST PLACE";
+          else if (idx === 1) badge = "2ND PLACE";
+          else if (idx === 2) badge = "3RD PLACE";
 
-            return {
-              id: p.id,
-              rank: idx + 1,
-              teamName: p.teamName,
-              projectTitle: p.projectTitle,
-              track: p.track,
-              totalScore: p.totalScore,
-              evaluator: p.evaluator,
-              badge,
-              status: p.status
-            };
-          });
+          return {
+            id: p.id,
+            rank: idx + 1,
+            teamName: p.teamName,
+            projectTitle: p.projectTitle,
+            track: p.track,
+            totalScore: p.totalScore,
+            evaluator: p.evaluator,
+            badge,
+            status: p.status
+          };
+        });
 
-          setAllEvaluations(mapped);
-        } else {
-          setAllEvaluations([]);
-        }
+        setAllEvaluations(mapped);
       } catch (err) {
         console.error("Error loading jury evaluations:", err);
       }
@@ -123,8 +109,8 @@ const JuryResultsView: React.FC = () => {
     loadEvals();
 
     const polls = [
-      setInterval(loadEvents, 10000),
-      setInterval(loadEvals, 10000)
+      setInterval(loadEvents, 15000),
+      setInterval(loadEvals, 15000)
     ];
 
     return () => polls.forEach(p => clearInterval(p));
