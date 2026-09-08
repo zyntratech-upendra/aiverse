@@ -8,8 +8,7 @@ import {
 } from "lucide-react";
 import Button from "../../components/ui/Button";
 import SEO from "../../components/layout/SEO";
-import { db } from "../../config/firebase";
-import { collection, getDocs, doc, getDoc } from "firebase/firestore";
+import { fetchSettings, fetchUsers, fetchOrganizers } from "../../services/apiClient";
 import { userService } from "../../services/userService";
 import { formatRoleLabel } from "../faculty/UserManagementPage";
 import { dataCache } from "../../utils/dataCache";
@@ -80,15 +79,15 @@ const TeamPage: React.FC = () => {
       try {
         // Run all queries in parallel
         const [configRes, supaRes, usersRes, orgsRes] = await Promise.allSettled([
-          getDoc(doc(db, "settings", "portal_config")),
+          fetchSettings("portal_config"),
           userService.getUsers(),
-          getDocs(collection(db, "users")),
-          getDocs(collection(db, "organizers"))
+          fetchUsers(),
+          fetchOrganizers()
         ]);
 
         // Process config roles
-        if (configRes.status === "fulfilled" && configRes.value.exists()) {
-          const configData = configRes.value.data();
+        if (configRes.status === "fulfilled" && configRes.value) {
+          const configData = configRes.value;
           if (configData.availableRoles && Array.isArray(configData.availableRoles) && configData.availableRoles.length > 0) {
             setConfiguredRoles(configData.availableRoles);
           }
@@ -120,10 +119,9 @@ const TeamPage: React.FC = () => {
           });
         }
 
-        // 2. Process Firestore users
-        if (usersRes.status === "fulfilled") {
-          usersRes.value.forEach((docSnap) => {
-            const data = docSnap.data();
+        // 2. Process Backend users
+        if (usersRes.status === "fulfilled" && Array.isArray(usersRes.value)) {
+          usersRes.value.forEach((data: any) => {
             const email = (data.email || "").toLowerCase().trim();
             if (email && seenEmails.has(email)) {
               const idx = combinedList.findIndex(item => (item.email || "").toLowerCase().trim() === email);
@@ -140,7 +138,7 @@ const TeamPage: React.FC = () => {
             } else if (email) {
               seenEmails.add(email);
               combinedList.push({
-                id: docSnap.id,
+                id: data.id || data._id,
                 name: data.name || data.displayName || data.teamLeadName || "Unnamed Member",
                 email: data.email || "",
                 personal_email: data.personal_email || data.personalEmail || "",
@@ -158,10 +156,9 @@ const TeamPage: React.FC = () => {
           });
         }
 
-        // 3. Process Firestore organizers
-        if (orgsRes.status === "fulfilled") {
-          orgsRes.value.forEach((docSnap) => {
-            const data = docSnap.data();
+        // 3. Process Backend organizers
+        if (orgsRes.status === "fulfilled" && Array.isArray(orgsRes.value)) {
+          orgsRes.value.forEach((data: any) => {
             const email = (data.email || "").toLowerCase().trim();
             if (email && seenEmails.has(email)) {
               const idx = combinedList.findIndex(item => (item.email || "").toLowerCase().trim() === email);
@@ -178,12 +175,12 @@ const TeamPage: React.FC = () => {
             } else if (email) {
               seenEmails.add(email);
               combinedList.push({
-                id: docSnap.id,
-                name: data.name || data.displayName || "Unnamed Member",
+                id: data.id || data._id,
+                name: data.name || data.displayName || data.username || "Organizer",
                 email: data.email || "",
                 personal_email: data.personal_email || data.personalEmail || "",
                 role: data.role || data.roleType || "Organizer",
-                position: data.position || data.roleType || "",
+                position: data.position || data.sub_role || data.role || "",
                 roleType: data.roleType || data.role || "Organizer",
                 status: data.status || "Active",
                 image: data.image || "",

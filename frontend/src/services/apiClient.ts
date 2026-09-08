@@ -66,11 +66,11 @@ export async function registerWithBackend(payload: { email: string; password?: s
   return data;
 }
 
-export async function updatePassword(password: string) {
+export async function updatePassword(password: string, email?: string) {
   const res = await fetch(`${API_BASE}/auth/password`, {
     method: 'PUT',
     headers: authHeaders(),
-    body: JSON.stringify({ password }),
+    body: JSON.stringify({ password, email }),
   });
   const data = await res.json();
   if (!res.ok) {
@@ -230,6 +230,18 @@ export async function fetchAllQuizzes(query?: { eventId?: string; status?: strin
   const params = new URLSearchParams(query as any).toString();
   const res = await fetch(`${API_BASE}/quizzes${params ? `?${params}` : ''}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to fetch quizzes');
+  return res.json();
+}
+
+export async function fetchQuizSubmissions(quizId: string) {
+  const res = await fetch(`${API_BASE}/quizzes/${quizId}/submissions`, { headers: authHeaders() });
+  if (!res.ok) return [];
+  return res.json();
+}
+
+export async function fetchQuizSessions(quizId: string) {
+  const res = await fetch(`${API_BASE}/quizzes/${quizId}/sessions`, { headers: authHeaders() });
+  if (!res.ok) return [];
   return res.json();
 }
 

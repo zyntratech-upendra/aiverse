@@ -2,7 +2,7 @@ import React, { useState, useEffect } from "react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
 import { useAuth } from "../../context/AuthContext";
-import { fetchEvents, fetchSettings, updateSettings } from "../../services/apiClient";
+import { fetchEvents, fetchSettings, updateSettings, updatePassword as apiUpdatePassword } from "../../services/apiClient";
 import { userService } from "../../services/userService";
 import { 
   Globe, 
@@ -172,22 +172,15 @@ const SettingsPage: React.FC = () => {
     }
 
     setIsUpdatingPassword(true);
-    try {
-      // 1. Update through AuthContext helper
-      if (updateUserPassword) {
-        await updateUserPassword(newPassword);
-      }
+    const adminEmail = (user?.email || "admin@aiverse.in").toLowerCase().trim();
 
-      // 2. Update user in MongoDB backend
-      const adminEmail = (user?.email || "admin@aiverse.in").toLowerCase().trim();
-      try {
-        await userService.updateUser(adminEmail, {
-          password: newPassword,
-          requiresPasswordChange: false,
-          updatedAt: Date.now()
-        });
-      } catch (err) {
-        console.warn("User password update notice:", err);
+    try {
+      // 1. Call MongoDB updatePassword REST API
+      await apiUpdatePassword(newPassword, adminEmail);
+
+      // 2. Also update via AuthContext helper
+      if (updateUserPassword) {
+        await updateUserPassword(newPassword).catch(() => {});
       }
 
       setNewPassword("");
@@ -239,7 +232,7 @@ const SettingsPage: React.FC = () => {
     );
   };
 
-  const handleAddRole = () => {
+  const handleAddRole = async () => {
     const trimmed = newRoleInput.trim();
     if (!trimmed) return;
     const currentRoles = currentConfig.availableRoles || ["Faculty Coordinator", "Student Lead", "Organizer", "Volunteer"];
@@ -247,41 +240,76 @@ const SettingsPage: React.FC = () => {
       addToast("Role already exists!", "warning");
       return;
     }
-    handleChange("availableRoles", [...currentRoles, trimmed]);
+    const updatedRoles = [...currentRoles, trimmed];
+    const updatedConfig = { ...currentConfig, availableRoles: updatedRoles };
+    setCurrentConfig(updatedConfig);
     setNewRoleInput("");
-    addToast(`"${trimmed}" added to role hierarchy. Save Changes to apply!`, "info");
-  };
 
-  const handleRemoveRole = (roleToRemove: string) => {
-    if (window.confirm(`Are you sure you want to delete the role: "${roleToRemove}"?`)) {
-      const currentRoles = currentConfig.availableRoles || ["Faculty Coordinator", "Student Lead", "Organizer", "Volunteer"];
-      const nextRoles = currentRoles.filter(r => r !== roleToRemove);
-      handleChange("availableRoles", nextRoles);
-      addToast(`"${roleToRemove}" removed.`, "warning");
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      addToast(`"${trimmed}" added and saved successfully!`, "success");
+    } catch (err) {
+      console.error("Error auto-saving role addition:", err);
+      addToast(`"${trimmed}" added locally. Click "Save Changes" to sync.`, "info");
     }
   };
 
-  const handleMoveRoleUp = (index: number) => {
+  const handleRemoveRole = async (roleToRemove: string) => {
+    if (window.confirm(`Are you sure you want to delete the role: "${roleToRemove}"?`)) {
+      const currentRoles = currentConfig.availableRoles || ["Faculty Coordinator", "Student Lead", "Organizer", "Volunteer"];
+      const nextRoles = currentRoles.filter(r => r !== roleToRemove);
+      const updatedConfig = { ...currentConfig, availableRoles: nextRoles };
+      setCurrentConfig(updatedConfig);
+      
+      try {
+        await updateSettings("portal_config", updatedConfig);
+        setSavedConfig(updatedConfig);
+        addToast(`"${roleToRemove}" removed and saved successfully!`, "warning");
+      } catch (err) {
+        console.error("Error auto-saving role removal:", err);
+        addToast(`"${roleToRemove}" removed.`, "warning");
+      }
+    }
+  };
+
+  const handleMoveRoleUp = async (index: number) => {
     if (index <= 0) return;
     const currentRoles = [...(currentConfig.availableRoles || [])];
     const temp = currentRoles[index - 1];
     currentRoles[index - 1] = currentRoles[index];
     currentRoles[index] = temp;
-    handleChange("availableRoles", currentRoles);
-    addToast(`Moved "${currentRoles[index - 1]}" to Position #${index}. Save Changes to apply!`, "info");
+    const updatedConfig = { ...currentConfig, availableRoles: currentRoles };
+    setCurrentConfig(updatedConfig);
+
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      addToast(`Moved "${currentRoles[index - 1]}" to Position #${index}.`, "success");
+    } catch (err) {
+      console.error("Error auto-saving role order:", err);
+    }
   };
 
-  const handleMoveRoleDown = (index: number) => {
+  const handleMoveRoleDown = async (index: number) => {
     const currentRoles = [...(currentConfig.availableRoles || [])];
     if (index >= currentRoles.length - 1) return;
     const temp = currentRoles[index + 1];
     currentRoles[index + 1] = currentRoles[index];
     currentRoles[index] = temp;
-    handleChange("availableRoles", currentRoles);
-    addToast(`Moved "${currentRoles[index + 1]}" to Position #${index + 2}. Save Changes to apply!`, "info");
+    const updatedConfig = { ...currentConfig, availableRoles: currentRoles };
+    setCurrentConfig(updatedConfig);
+
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      addToast(`Moved "${currentRoles[index + 1]}" to Position #${index + 2}.`, "success");
+    } catch (err) {
+      console.error("Error auto-saving role order:", err);
+    }
   };
 
-  const handleSaveEditRole = (index: number) => {
+  const handleSaveEditRole = async (index: number) => {
     const trimmed = editingRoleValue.trim();
     if (!trimmed) {
       addToast("Role name cannot be empty.", "warning");
@@ -289,13 +317,22 @@ const SettingsPage: React.FC = () => {
     }
     const currentRoles = [...(currentConfig.availableRoles || [])];
     currentRoles[index] = trimmed;
-    handleChange("availableRoles", currentRoles);
+    const updatedConfig = { ...currentConfig, availableRoles: currentRoles };
+    setCurrentConfig(updatedConfig);
     setEditingRoleIndex(null);
     setEditingRoleValue("");
-    addToast(`Role renamed to "${trimmed}". Save Changes to apply!`, "info");
+
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      addToast(`Role renamed to "${trimmed}" and saved!`, "success");
+    } catch (err) {
+      console.error("Error auto-saving role edit:", err);
+      addToast(`Role renamed to "${trimmed}". Click Save Changes to sync.`, "info");
+    }
   };
 
-  const handleResetDefaultRoles = () => {
+  const handleResetDefaultRoles = async () => {
     if (window.confirm("Reset all roles to the recommended default hierarchy?")) {
       const defaultRolesList = [
         "Faculty Coordinators",
@@ -310,8 +347,17 @@ const SettingsPage: React.FC = () => {
         "Student Organizers",
         "Volunteers"
       ];
-      handleChange("availableRoles", defaultRolesList);
-      addToast("Roles reset to standard hierarchy. Click Save Changes to apply!", "info");
+      const updatedConfig = { ...currentConfig, availableRoles: defaultRolesList };
+      setCurrentConfig(updatedConfig);
+
+      try {
+        await updateSettings("portal_config", updatedConfig);
+        setSavedConfig(updatedConfig);
+        addToast("Roles reset to standard hierarchy and saved!", "success");
+      } catch (err) {
+        console.error("Error auto-saving reset roles:", err);
+        addToast("Roles reset to standard hierarchy. Click Save Changes to apply!", "info");
+      }
     }
   };
 
@@ -908,12 +954,11 @@ const SettingsPage: React.FC = () => {
                     handleChange("juryPortalActive", nextVal);
                     localStorage.setItem("juryPortalActive", String(nextVal));
                     
-                    // Immediately write change to Firestore for instant live sync across all tabs/jurors
+                    // Immediately write change to MongoDB for instant live sync across all tabs/jurors
                     try {
-                      const docRef = doc(db, "settings", "portal_config");
-                      await setDoc(docRef, { ...currentConfig, juryPortalActive: nextVal }, { merge: true });
+                      await updateSettings("portal_config", { ...currentConfig, juryPortalActive: nextVal });
                     } catch (err) {
-                      console.error("Error writing juryPortalActive to Firestore:", err);
+                      console.error("Error writing juryPortalActive to backend:", err);
                     }
 
                     // Dispatch custom storage events to wake up open tabs immediately
@@ -953,14 +998,13 @@ const SettingsPage: React.FC = () => {
                     localStorage.setItem("activeJuryEventTitle", selectedTitle);
 
                     try {
-                      const docRef = doc(db, "settings", "portal_config");
-                      await setDoc(docRef, { 
+                      await updateSettings("portal_config", { 
                         ...currentConfig, 
                         activeJuryEventId: selectedId, 
                         activeJuryEventTitle: selectedTitle 
-                      }, { merge: true });
+                      });
                     } catch (err) {
-                      console.error("Error writing activeJuryEventId to Firestore:", err);
+                      console.error("Error writing activeJuryEventId to backend:", err);
                     }
 
                     window.dispatchEvent(new Event("storage"));

@@ -2,16 +2,7 @@ import React, { useState, useEffect } from "react";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useModal } from "../../context/ModalContext";
-import { db } from "../../config/firebase";
-import {
-  collection,
-  getDocs,
-  doc,
-  setDoc,
-  updateDoc,
-  query,
-  where
-} from "firebase/firestore";
+import * as api from "../../services/apiClient";
 import type { Quiz, QuizQuestion, QuizSubmission, QuizSession } from "../../types/quiz";
 import { resetParticipantQuizSession, resetAllQuizSubmissions, deleteQuizCascading, evaluateQuizAnswers } from "../../services/quizService";
 import { extractTextFromPdf, parseQuestionsFromText } from "../../utils/pdfExtractor";
@@ -89,45 +80,46 @@ export const QuizManagementPage: React.FC = () => {
     }
   }, [eventIdParam]);
 
-  // When events load, ensure a valid event is selected if none specified
+  // When events load, initialize selectedEventId if URL param present, or default to "all"
   useEffect(() => {
     if (events.length > 0) {
-      if (!selectedEventId || !events.some((e) => e.id === selectedEventId)) {
-        const initialId = eventIdParam && events.some((e) => e.id === eventIdParam) ? eventIdParam : events[0].id;
-        setSelectedEventId(initialId);
-        if (!eventIdParam) {
-          setSearchParams({ eventId: initialId }, { replace: true });
-        }
+      if (eventIdParam && events.some((e) => e.id === eventIdParam)) {
+        setSelectedEventId(eventIdParam);
+      } else if (!selectedEventId) {
+        setSelectedEventId("all");
       }
     }
-  }, [events, eventIdParam, selectedEventId, setSearchParams]);
+  }, [events, eventIdParam, selectedEventId]);
 
   // Compute currently active scoped event
   const activeEvent = React.useMemo(() => {
-    if (!events.length) return null;
-    return events.find((e) => e.id === selectedEventId) || events[0] || null;
+    if (!events.length || !selectedEventId || selectedEventId === "all") return null;
+    return events.find((e) => e.id === selectedEventId) || null;
   }, [events, selectedEventId]);
 
-  // Filter quizzes strictly by active scoped event (one event's quizzes are never mixed with another)
+  // Filter quizzes by active scoped event or show all if "all" is selected
   const filteredQuizzes = React.useMemo(() => {
-    if (!activeEvent) return [];
+    if (!selectedEventId || selectedEventId === "all") {
+      return quizzes;
+    }
     return quizzes.filter((q) => {
-      if (q.eventId && q.eventId === activeEvent.id) return true;
-      if (q.eventTitle && activeEvent.title && q.eventTitle.toLowerCase().trim() === activeEvent.title.toLowerCase().trim()) return true;
+      if (q.eventId && (q.eventId === selectedEventId || (activeEvent && q.eventId === activeEvent.id))) return true;
+      if (activeEvent && q.eventTitle && activeEvent.title && q.eventTitle.toLowerCase().trim() === activeEvent.title.toLowerCase().trim()) return true;
       return false;
     });
-  }, [quizzes, activeEvent]);
+  }, [quizzes, activeEvent, selectedEventId]);
 
-  // Automatically update selectedQuizId when filteredQuizzes list changes
+  // Automatically update selectedQuizId when filteredQuizzes or quizzes change
   useEffect(() => {
-    if (filteredQuizzes.length > 0) {
-      if (!selectedQuizId || !filteredQuizzes.some((q) => q.id === selectedQuizId)) {
-        setSelectedQuizId(filteredQuizzes[0].id);
+    const listToPick = filteredQuizzes.length > 0 ? filteredQuizzes : quizzes;
+    if (listToPick.length > 0) {
+      if (!selectedQuizId || !listToPick.some((q) => q.id === selectedQuizId)) {
+        setSelectedQuizId(listToPick[0].id);
       }
     } else {
       setSelectedQuizId("");
     }
-  }, [filteredQuizzes, selectedQuizId]);
+  }, [filteredQuizzes, quizzes, selectedQuizId]);
 
   // View state: "list" or "editor" (Full-page editor mode)
   const [isEditorMode, setIsEditorMode] = useState<boolean>(false);
@@ -237,32 +229,23 @@ export const QuizManagementPage: React.FC = () => {
         setLoading(true);
 
         // 1. Fetch Quizzes
-        const quizSnap = await getDocs(collection(db, "quizzes"));
-        const qList: Quiz[] = [];
-        quizSnap.forEach((d) => {
-          qList.push({ id: d.id, ...d.data() } as Quiz);
-        });
-        setQuizzes(qList);
+        const qList = await api.fetchAllQuizzes();
+        setQuizzes(qList || []);
 
         // 2. Fetch Events for dropdown selection
-        const eventSnap = await getDocs(collection(db, "events"));
-        const evList: EventOption[] = [];
-        eventSnap.forEach((d) => {
-          const data = d.data();
-          evList.push({
-            id: d.id,
-            title: data.title || "Untitled Event",
-            category: data.category || "General"
-          });
-        });
+        const evData = await api.fetchEvents();
+        const evList: EventOption[] = (evData || []).map((e: any) => ({
+          id: e.id || e._id,
+          title: e.title || "Untitled Event",
+          category: e.category || "General"
+        }));
         setEvents(evList);
 
         // 3. Fetch Registrations to map registered full names & roll numbers
         try {
-          const regSnap = await getDocs(collection(db, "registrations"));
+          const regData = await api.fetchRegistrations();
           const regMap = new Map<string, { name: string; rollNo?: string; phone?: string; teamName?: string }>();
-          regSnap.forEach((d) => {
-            const data = d.data();
+          (regData || []).forEach((data: any) => {
             const primaryName = (data.fullName || data.teamLeadName || data.name || "").trim();
             const roll = data.rollNo || data.studentId || data.teamLeadStudentId || "";
             const phone = data.phone || data.phoneNumber || data.teamLeadPhone || "";
@@ -307,18 +290,18 @@ export const QuizManagementPage: React.FC = () => {
           console.warn("Notice fetching registrations:", regErr);
         }
 
-        // 4. Fetch Users (Firestore & Supabase)
+        // 4. Fetch Users
         try {
           const uMap = new Map<string, { name: string; rollNo?: string }>();
-          const userSnap = await getDocs(collection(db, "users"));
-          userSnap.forEach((d) => {
-            const data = d.data();
+          const usersData = await api.fetchUsers();
+          (usersData || []).forEach((data: any) => {
             const rawName = (data.displayName || data.name || data.teamLeadName || "").trim();
             const cleanEmail = (data.email || "").toLowerCase().trim();
             const pEmail = (data.personalEmail || data.personal_email || "").toLowerCase().trim();
             const roll = data.rollNo || data.studentId || "";
+            const uid = data.id || data._id;
             if (rawName && rawName.toLowerCase() !== "unnamed user" && rawName.toLowerCase() !== "participant") {
-              if (d.id) uMap.set(d.id, { name: rawName, rollNo: roll });
+              if (uid) uMap.set(uid, { name: rawName, rollNo: roll });
               if (cleanEmail) uMap.set(cleanEmail, { name: rawName, rollNo: roll });
               if (pEmail) uMap.set(pEmail, { name: rawName, rollNo: roll });
             }
@@ -355,11 +338,9 @@ export const QuizManagementPage: React.FC = () => {
     fetchData();
   }, []);
 
-  // Fetch sessions & submissions on-demand when quiz is selected (replaces real-time listeners)
-  // Real-time listeners on 1,500 submissions/sessions would cause a read storm on the admin dashboard.
+  // Fetch sessions & submissions on-demand when quiz is selected
   const [refreshKey, setRefreshKey] = useState(0);
   const _refreshSubmissions = () => setRefreshKey((k) => k + 1);
-  // Expose for use in tab switch and refresh button handlers
   void _refreshSubmissions;
 
   useEffect(() => {
@@ -372,51 +353,24 @@ export const QuizManagementPage: React.FC = () => {
     let isMounted = true;
     const fetchData = async () => {
       try {
-        // Fetch submissions
-        const subSnap = await getDocs(
-          query(collection(db, "quizSubmissions"), where("quizId", "==", selectedQuizId))
-        );
-        const targetQuiz = quizzes.find((q) => q.id === selectedQuizId);
-        const subs: QuizSubmission[] = [];
-        const backfillPromises: Promise<void>[] = [];
+        const [subsData, sessData] = await Promise.all([
+          api.fetchQuizSubmissions(selectedQuizId),
+          api.fetchQuizSessions(selectedQuizId),
+        ]);
 
-        subSnap.forEach((d) => {
-          const raw = { id: d.id, ...d.data() } as QuizSubmission;
+        const targetQuiz = quizzes.find((q) => q.id === selectedQuizId);
+        const subs: QuizSubmission[] = (subsData || []).map((raw: any) => {
           if ((raw.score === undefined || raw.score === null) && targetQuiz && targetQuiz.questions && targetQuiz.questions.length > 0) {
             const evalData = evaluateQuizAnswers(targetQuiz, raw.answers || {});
-            const evaluated = { ...raw, ...evalData, evaluatedAt: Date.now() };
-            subs.push(evaluated);
-            // Queue backfill write (fire-and-forget)
-            backfillPromises.push(
-              updateDoc(doc(db, "quizSubmissions", d.id), {
-                score: evalData.score,
-                maxScore: evalData.maxScore,
-                percentage: evalData.percentage,
-                correctCount: evalData.correctCount,
-                incorrectCount: evalData.incorrectCount,
-                passed: evalData.passed,
-                evaluatedAt: Date.now()
-              }).catch(() => {})
-            );
-          } else {
-            subs.push(raw);
+            return { ...raw, ...evalData, evaluatedAt: Date.now() };
           }
+          return raw;
         });
-
-        // Fetch sessions
-        const sessSnap = await getDocs(
-          query(collection(db, "quizSessions"), where("quizId", "==", selectedQuizId))
-        );
-        const sess: QuizSession[] = [];
-        sessSnap.forEach((d) => sess.push({ id: d.id, ...d.data() } as QuizSession));
 
         if (isMounted) {
           setSubmissions(subs);
-          setActiveSessions(sess);
+          setActiveSessions(sessData || []);
         }
-
-        // Fire backfill writes in background (don't await, don't block UI)
-        Promise.all(backfillPromises).catch(() => {});
       } catch (err) {
         console.warn("Error fetching submissions/sessions:", err);
       }
@@ -530,7 +484,11 @@ export const QuizManagementPage: React.FC = () => {
         updatedAt: Date.now()
       };
 
-      await setDoc(doc(db, "quizzes", quizId), payload);
+      if (editingQuiz.id) {
+        await api.updateQuiz(quizId, payload);
+      } else {
+        await api.createQuiz(payload);
+      }
 
       setQuizzes((prev) => {
         const existingIdx = prev.findIndex((q) => q.id === quizId);
@@ -601,7 +559,7 @@ export const QuizManagementPage: React.FC = () => {
       const now = Date.now();
       const scheduledEndTime = now + (quiz.durationMinutes * 60 * 1000);
       
-      await updateDoc(doc(db, "quizzes", quiz.id), {
+      await api.updateQuiz(quiz.id, {
         status: "active",
         scheduledStartTime: now,
         scheduledEndTime: scheduledEndTime,
@@ -638,7 +596,7 @@ export const QuizManagementPage: React.FC = () => {
 
     try {
       const now = Date.now();
-      await updateDoc(doc(db, "quizzes", quiz.id), {
+      await api.updateQuiz(quiz.id, {
         status: "completed",
         scheduledEndTime: now, // Force immediate stop
         updatedAt: now
@@ -2039,30 +1997,51 @@ Answer: A`;
         </div>
 
         {/* Event Scoping Indicator Banner */}
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xs">
-          <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs bg-purple-100 text-purple-700 shadow-2xs">
-              <Calendar className="w-4 h-4" />
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-white border border-slate-200/90 rounded-2xl p-4 shadow-2xs">
+          <div className="flex items-center gap-3.5 flex-1 min-w-0">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center font-black text-xs bg-purple-100 text-purple-700 shadow-2xs shrink-0">
+              <Calendar className="w-5 h-5" />
             </div>
-            <div>
-              <div className="text-[10px] font-extrabold uppercase tracking-wider text-purple-600">
-                EVENT SCOPED QUIZ WORKSPACE
+            <div className="flex-1 min-w-0">
+              <div className="text-[10px] font-extrabold uppercase tracking-wider text-purple-600 mb-0.5">
+                SELECT EVENT WORKSPACE
               </div>
-              <div className="text-sm font-black text-slate-800 flex items-center gap-2">
-                <span>{activeEvent ? activeEvent.title : "Assessment Workspace"}</span>
-                {activeEvent?.category && (
-                  <span className="text-[10px] font-bold px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200">
-                    {activeEvent.category}
-                  </span>
-                )}
+              <div className="flex items-center gap-2 max-w-md">
+                <select
+                  value={selectedEventId || "all"}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setSelectedEventId(val);
+                    if (val === "all") {
+                      setSearchParams({}, { replace: true });
+                    } else {
+                      setSearchParams({ eventId: val }, { replace: true });
+                    }
+                  }}
+                  className="w-full text-xs sm:text-sm font-black text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200 rounded-xl px-3 py-1.5 focus:ring-2 focus:ring-purple-500 outline-none cursor-pointer transition-all truncate"
+                >
+                  <option value="all">🌐 All Events ({quizzes.length} Total Quizzes across portal)</option>
+                  {events.map((ev) => {
+                    const count = quizzes.filter(
+                      (q) =>
+                        q.eventId === ev.id ||
+                        (q.eventTitle && ev.title && q.eventTitle.toLowerCase().trim() === ev.title.toLowerCase().trim())
+                    ).length;
+                    return (
+                      <option key={ev.id} value={ev.id}>
+                        📅 {ev.title} ({count} {count === 1 ? "Quiz" : "Quizzes"})
+                      </option>
+                    );
+                  })}
+                </select>
               </div>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
-            <span className="px-3 py-1.5 rounded-xl text-xs font-black bg-slate-50 text-slate-700 border border-slate-200/80 shadow-2xs flex items-center gap-1.5">
-              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-              <span>{filteredQuizzes.length} {filteredQuizzes.length === 1 ? "Quiz" : "Quizzes"} Linked</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <span className="px-3.5 py-2 rounded-xl text-xs font-black bg-slate-50 text-slate-700 border border-slate-200/80 shadow-2xs flex items-center gap-2">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>{filteredQuizzes.length} {filteredQuizzes.length === 1 ? "Quiz" : "Quizzes"} Visible</span>
             </span>
           </div>
         </div>
@@ -2114,12 +2093,25 @@ Answer: A`;
                   }
                 </p>
               </div>
-              <button
-                onClick={handleOpenCreateModal}
-                className="bg-blue-600 text-white font-bold text-xs px-5 py-2.5 rounded-xl cursor-pointer"
-              >
-                Create Quiz for {activeEvent ? activeEvent.title : "Event"}
-              </button>
+              <div className="flex items-center justify-center gap-3">
+                {selectedEventId !== "all" && quizzes.length > 0 && (
+                  <button
+                    onClick={() => {
+                      setSelectedEventId("all");
+                      setSearchParams({}, { replace: true });
+                    }}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs px-5 py-2.5 rounded-xl cursor-pointer transition-all"
+                  >
+                    View All Quizzes ({quizzes.length})
+                  </button>
+                )}
+                <button
+                  onClick={handleOpenCreateModal}
+                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-5 py-2.5 rounded-xl cursor-pointer transition-all shadow-sm"
+                >
+                  Create Quiz for {activeEvent ? activeEvent.title : "Event"}
+                </button>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -2233,18 +2225,20 @@ Answer: A`;
 
           {/* Quiz Selector Bar */}
           <div className="bg-white border border-slate-200 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-bold text-slate-500">Monitoring Quiz:</span>
-              <select
-                value={selectedQuizId}
-                onChange={(e) => setSelectedQuizId(e.target.value)}
-                className="bg-slate-50 border border-slate-200 text-xs font-bold text-[#0F172A] px-3 py-1.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                {filteredQuizzes.map((q) => (
-                  <option key={q.id} value={q.id}>{q.title}</option>
-                ))}
-              </select>
-            </div>
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-bold text-slate-500">Monitoring Quiz:</span>
+                <select
+                  value={selectedQuizId}
+                  onChange={(e) => setSelectedQuizId(e.target.value)}
+                  className="bg-slate-50 border border-slate-200 text-xs font-bold text-[#0F172A] px-3 py-1.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-xs sm:max-w-md truncate cursor-pointer"
+                >
+                  {(filteredQuizzes.length > 0 ? filteredQuizzes : quizzes).map((q) => (
+                    <option key={q.id} value={q.id}>
+                      {q.title} ({q.questions?.length || q.questionsCount || 0} Qs){q.eventTitle ? ` • ${q.eventTitle}` : ""}
+                    </option>
+                  ))}
+                </select>
+              </div>
 
             <div className="flex items-center gap-4 text-xs">
               <div className="flex items-center gap-1.5">
@@ -2351,10 +2345,12 @@ Answer: A`;
                 <select
                   value={selectedQuizId}
                   onChange={(e) => setSelectedQuizId(e.target.value)}
-                  className="bg-slate-50 border border-slate-200 text-xs font-bold text-[#0F172A] px-3 py-1.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20"
+                  className="bg-slate-50 border border-slate-200 text-xs font-bold text-[#0F172A] px-3 py-1.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 max-w-xs sm:max-w-md truncate cursor-pointer"
                 >
-                  {filteredQuizzes.map((q) => (
-                    <option key={q.id} value={q.id}>{q.title}</option>
+                  {(filteredQuizzes.length > 0 ? filteredQuizzes : quizzes).map((q) => (
+                    <option key={q.id} value={q.id}>
+                      {q.title} ({q.questions?.length || q.questionsCount || 0} Qs){q.eventTitle ? ` • ${q.eventTitle}` : ""}
+                    </option>
                   ))}
                 </select>
               </div>

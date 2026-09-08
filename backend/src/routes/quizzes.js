@@ -36,6 +36,28 @@ router.get(
   })
 );
 
+// GET /api/quizzes/:quizId/submissions - List all submissions for a quiz
+router.get(
+  '/:quizId/submissions',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const { quizId } = req.params;
+    const submissions = await QuizSubmission.find({ quizId }).sort({ score: -1, timeSpentSeconds: 1 }).lean();
+    res.json(submissions.map((s) => ({ ...s, id: s._id })));
+  })
+);
+
+// GET /api/quizzes/:quizId/sessions - List all sessions for a quiz
+router.get(
+  '/:quizId/sessions',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const { quizId } = req.params;
+    const sessions = await QuizSession.find({ quizId }).sort({ updatedAt: -1 }).lean();
+    res.json(sessions.map((s) => ({ ...s, id: s._id })));
+  })
+);
+
 // POST /api/quizzes - Create quiz
 router.post(
   '/',

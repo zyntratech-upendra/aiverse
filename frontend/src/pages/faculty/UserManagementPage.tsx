@@ -37,7 +37,8 @@ import {
   createUser as apiCreateUser, 
   updateUser as apiUpdateUser, 
   deleteUser as apiDeleteUser,
-  fetchOrganizers 
+  fetchOrganizers,
+  fetchSettings
 } from "../../services/apiClient";
 import { userService } from "../../services/userService";
 import Button from "../../components/ui/Button";
@@ -724,16 +725,10 @@ const UserManagementPage: React.FC = () => {
   React.useEffect(() => {
     const fetchRoles = async () => {
       try {
-        const docRef = doc(db, "settings", "portal_config");
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          if (data.availableRoles && Array.isArray(data.availableRoles)) {
-            setAvailableRoles(data.availableRoles);
-            if (data.availableRoles.length > 0) {
-              setFormRoleType(data.availableRoles[0]);
-            }
-          }
+        const data = await fetchSettings("portal_config");
+        if (data && data.availableRoles && Array.isArray(data.availableRoles) && data.availableRoles.length > 0) {
+          setAvailableRoles(data.availableRoles);
+          setFormRoleType(data.availableRoles[0]);
         }
       } catch (err) {
         console.error("Error loading available roles:", err);
@@ -786,29 +781,10 @@ const UserManagementPage: React.FC = () => {
   const handleToggleShowInAbout = async (userId: string, value: string) => {
     const isShow = value === "Yes";
     try {
-      // 1. Update in Supabase
       try {
-        await userService.updateUser(userId, { show_in_about: isShow });
+        await apiUpdateUser(userId, { showInAbout: isShow, show_in_about: isShow });
       } catch (e) {
-        console.warn("Supabase update show_in_about error:", e);
-      }
-
-      // 2. Update in Firestore
-      try {
-        const docRef = doc(db, "users", userId);
-        await setDoc(docRef, { showInAbout: isShow, showInAboutPage: isShow }, { merge: true });
-
-        const targetUser = users.find(u => u.id === userId);
-        if (targetUser && targetUser.email) {
-          const orgSnap = await getDocs(collection(db, "organizers"));
-          orgSnap.forEach(async (d) => {
-            if ((d.data().email || "").toLowerCase().trim() === targetUser.email.toLowerCase().trim()) {
-              await setDoc(doc(db, "organizers", d.id), { showInAbout: isShow, showInAboutPage: isShow }, { merge: true });
-            }
-          });
-        }
-      } catch (fsErr) {
-        console.warn("Firestore showInAbout sync error:", fsErr);
+        console.warn("API update show_in_about error:", e);
       }
 
       setUsers(prev => prev.map(u => u.id === userId ? { ...u, showInAbout: isShow ? "Yes" : "No" } : u));
