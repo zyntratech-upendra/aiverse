@@ -2247,6 +2247,8 @@ const EventManagementPage: React.FC = () => {
       dataCache.remove("public_events");
       dataCache.remove("all_events");
       dataCache.remove("faculty_events");
+      window.dispatchEvent(new Event("eventsUpdated"));
+      window.dispatchEvent(new Event("storage"));
 
       // Reset form fields
       setFormTitle("");

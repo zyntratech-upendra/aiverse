@@ -41,7 +41,7 @@ interface Event {
 
 const EventsPage: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeTab, setActiveTab] = useState<"All" | "Workshop" | "Hackathon" | "Seminar" | "Completed">("All");
+  const [activeTab, setActiveTab] = useState<"All" | "Hackathon" | "Workshop" | "Seminar" | "Quiz" | "Completed">("All");
   const [events, setEvents] = useState<Event[]>(() => dataCache.get<Event[]>("public_events") || []);
   const [loading, setLoading] = useState<boolean>(() => !dataCache.get<Event[]>("public_events"));
 
@@ -68,10 +68,12 @@ const EventsPage: React.FC = () => {
             eventType = "Hackathon";
           } else if (catUpper.includes("LECTURE") || catUpper.includes("SEMINAR")) {
             eventType = "Seminar";
-          } else if (catUpper.includes("NETWORK") || catUpper.includes("MEETUP")) {
+          } else if (catUpper.includes("NETWORK") || catUpper.includes("MEETUP") || catUpper.includes("ALUMNI")) {
             eventType = "Networking";
           } else if (catUpper.includes("QUIZ")) {
             eventType = "Quiz";
+          } else if (catUpper.includes("TECH") || catUpper.includes("WORKSHOP")) {
+            eventType = "Workshop";
           }
           
           let img = sparkImg;
@@ -80,6 +82,8 @@ const EventsPage: React.FC = () => {
           
           if (data.posterPreview) {
             img = data.posterPreview;
+          } else if (data.posterImages && data.posterImages[0]?.preview) {
+            img = data.posterImages[0].preview;
           }
 
           let timeText = data.time || "10:00 AM";
@@ -88,24 +92,26 @@ const EventsPage: React.FC = () => {
             if (data.endTime) timeText += ` - ${data.endTime}`;
           }
 
-          const rawStatus = (data.status || "Opened").trim();
-          const normStatus = rawStatus.toLowerCase() === "draft" ? "Draft" : (rawStatus.toLowerCase() === "completed" || data.isPastEvent) ? "Completed" : "Opened";
+          const rawStatus = String(data.status || "Opened").trim();
+          const isExplicitlyDraft = rawStatus.toLowerCase() === "draft";
+          const isExplicitlyCompleted = rawStatus.toLowerCase() === "completed" || Boolean(data.isPastEvent);
+          const normStatus = isExplicitlyCompleted ? "Completed" : isExplicitlyDraft ? "Draft" : "Opened";
 
           list.push({
             id: eventId,
             title: title || "Untitled Event",
             type: eventType,
             category: data.category || eventType,
-            date: data.date || "TBD",
+            date: data.date || data.startDate || "TBD",
             time: timeText,
-            location: data.location || "Virtual Hub",
-            description: data.description || "",
+            location: data.location || data.venue || "Virtual Hub",
+            description: data.description || data.shortDescription || "",
             image: img,
             status: normStatus as Event["status"],
             currentReg: Math.max(0, Number(data.currentReg) || 0),
             maxReg: data.maxReg || 100,
             endDate: data.endDate || data.startDate || "",
-            isPastEvent: Boolean(data.isPastEvent),
+            isPastEvent: isExplicitlyCompleted,
             registrationFee: data.registrationFee !== undefined ? Number(data.registrationFee) : 0,
             pricingType: data.pricingType === "per_team" || data.pricingModel === "per_team" ? "per_team" : "per_person",
             isPaidEvent: data.isPaidEvent !== undefined ? Boolean(data.isPaidEvent) : (Number(data.registrationFee) > 0),
@@ -119,7 +125,7 @@ const EventsPage: React.FC = () => {
             const parsedEnd = Date.parse(ev.endDate);
             if (!isNaN(parsedEnd)) return parsedEnd;
           }
-          if (ev.date) {
+          if (ev.date && ev.date !== "TBD") {
             const dStr = ev.date.trim();
             const parsedDirect = Date.parse(dStr);
             if (!isNaN(parsedDirect)) return parsedDirect;
@@ -165,18 +171,16 @@ const EventsPage: React.FC = () => {
             }
           }
 
-          if (typeof ev.createdAt === "number") return ev.createdAt;
           return 0;
         };
 
-        // Partition and sort by actual event date:
         const startOfToday = new Date().setHours(0, 0, 0, 0);
         const upcomingEvents: Event[] = [];
         const pastEvents: Event[] = [];
 
         list.forEach((ev) => {
           const evTime = getEventTimestamp(ev);
-          const endOfDay = new Date(evTime).setHours(23, 59, 59, 999);
+          const endOfDay = evTime > 0 ? new Date(evTime).setHours(23, 59, 59, 999) : Infinity;
           if (ev.status === "Completed" || ev.isPastEvent || (evTime > 0 && endOfDay < startOfToday)) {
             pastEvents.push(ev);
           } else {
@@ -184,19 +188,36 @@ const EventsPage: React.FC = () => {
           }
         });
 
-        upcomingEvents.sort((a, b) => getEventTimestamp(a) - getEventTimestamp(b));
+        // Upcoming events: newly created or closest upcoming first
+        upcomingEvents.sort((a, b) => {
+          const timeA = getEventTimestamp(a);
+          const timeB = getEventTimestamp(b);
+          if (timeA === 0 && timeB === 0) return 0;
+          if (timeA === 0) return -1;
+          if (timeB === 0) return 1;
+          return timeA - timeB;
+        });
+
         pastEvents.sort((a, b) => getEventTimestamp(b) - getEventTimestamp(a));
 
         const finalSorted = [...upcomingEvents, ...pastEvents];
         setEvents(finalSorted);
         dataCache.set("public_events", finalSorted);
       } catch (err) {
-        console.error("Error reading events from Firestore:", err);
+        console.error("Error reading events from API:", err);
       } finally {
         setLoading(false);
       }
     };
+
     loadEvents();
+    window.addEventListener("eventsUpdated", loadEvents);
+    window.addEventListener("storage", loadEvents);
+
+    return () => {
+      window.removeEventListener("eventsUpdated", loadEvents);
+      window.removeEventListener("storage", loadEvents);
+    };
   }, []);
 
   const parseEventDate = (dateStr?: string, endDateStr?: string): number => {
@@ -294,12 +315,21 @@ const EventsPage: React.FC = () => {
       matchesTab = isCompleted;
     } else if (activeTab === "All") {
       matchesTab = true;
+    } else if (activeTab === "Hackathon") {
+      matchesTab = event.type === "Hackathon" || (event.category || "").toUpperCase().includes("HACKATHON");
+    } else if (activeTab === "Workshop") {
+      matchesTab = event.type === "Workshop" || (event.category || "").toUpperCase().includes("WORKSHOP") || (event.category || "").toUpperCase().includes("TECH");
+    } else if (activeTab === "Seminar") {
+      matchesTab = event.type === "Seminar" || (event.category || "").toUpperCase().includes("SEMINAR") || (event.category || "").toUpperCase().includes("LECTURE");
+    } else if (activeTab === "Quiz") {
+      matchesTab = event.type === "Quiz" || (event.category || "").toUpperCase().includes("QUIZ");
     } else {
       matchesTab = event.type === activeTab;
     }
 
     const matchesSearch = event.title.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          event.description.toLowerCase().includes(searchQuery.toLowerCase());
+                          event.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+                          (event.category || "").toLowerCase().includes(searchQuery.toLowerCase());
     return matchesTab && matchesSearch;
   });
 
@@ -377,13 +407,14 @@ const EventsPage: React.FC = () => {
       {/* ================= TABS NAVIGATION SECTION ================= */}
       <section className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mt-6">
         <div className="flex border-b border-slate-200 overflow-x-auto">
-          {(["All", "Workshop", "Hackathon", "Seminar", "Completed"] as const).map((tab) => {
+          {(["All", "Hackathon", "Workshop", "Seminar", "Quiz", "Completed"] as const).map((tab) => {
             const isActive = activeTab === tab;
             const labelMap = {
               All: "All Events",
-              Workshop: "Workshops",
               Hackathon: "Hackathons",
+              Workshop: "Workshops",
               Seminar: "Seminars",
+              Quiz: "Quizzes",
               Completed: "Completed"
             };
             return (
