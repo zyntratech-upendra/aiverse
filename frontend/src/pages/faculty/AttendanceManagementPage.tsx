@@ -75,18 +75,15 @@ const AttendanceManagementPage: React.FC = () => {
 
         // 2. Fetch events from backend
         const rawEvents = await fetchEvents().catch(() => []);
-        const eventsList: any[] = Array.isArray(rawEvents) ? rawEvents : [];
+        const eventsList: any[] = Array.isArray(rawEvents) ? rawEvents : (rawEvents?.events || rawEvents?.data || []);
         const todayStr = new Date().toISOString().split("T")[0];
 
-        const activeDbEvents: EventCard[] = eventsList
+        let activeDbEvents: EventCard[] = eventsList
           .map((data: any) => {
             const categoryString = data.category || (data.type ? data.type.toUpperCase() : "GENERAL");
-            
-            // Check if event is completed, closed, finished, cancelled, or past
             const statusUpper = (data.status || "").toString().toUpperCase();
             const isCompletedStatus = ["COMPLETED", "CLOSED", "FINISHED", "CANCELLED", "PAST"].includes(statusUpper);
             const isPastFlag = Boolean(data.isPastEvent);
-            
             const dateStr = data.endDate || data.startDate;
             const isPastDate = Boolean(dateStr && /^\d{4}-\d{2}-\d{2}$/.test(dateStr) && dateStr < todayStr);
 
@@ -101,7 +98,7 @@ const AttendanceManagementPage: React.FC = () => {
             return {
               id: data.id || data._id || "",
               title: data.title || "Unnamed Event",
-              location: data.location || "General Classroom",
+              location: data.location || data.venue || "General Classroom",
               timeRange: data.timeRange || (data.startDate ? `${data.startDate} • ${data.startTime || ""}` : "10:00 AM - 12:00 PM"),
               category: categoryString,
               status: displayStatus,
@@ -110,6 +107,20 @@ const AttendanceManagementPage: React.FC = () => {
             };
           })
           .filter((ev): ev is EventCard => ev !== null);
+
+        // Fallback: If no live/future events matched, load all available events from database
+        if (activeDbEvents.length === 0 && eventsList.length > 0) {
+          activeDbEvents = eventsList.map((data: any) => ({
+            id: data.id || data._id || "",
+            title: data.title || "Unnamed Event",
+            location: data.location || data.venue || "General Classroom",
+            timeRange: data.timeRange || (data.startDate ? `${data.startDate} • ${data.startTime || ""}` : "10:00 AM - 12:00 PM"),
+            category: data.category || "GENERAL",
+            status: "LIVE" as const,
+            currentReg: Math.max(0, Number(data.currentReg) || 0),
+            maxReg: data.maxReg || 100
+          }));
+        }
 
         setEvents(activeDbEvents);
         if (activeDbEvents.length > 0) {

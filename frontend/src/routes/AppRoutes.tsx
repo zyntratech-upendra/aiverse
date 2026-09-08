@@ -119,7 +119,7 @@ const AppRoutes: React.FC = () => {
           <Route path="dashboard" element={<FacDashboardPage />} />
           <Route path="events" element={<EventManagementPage />} />
           <Route path="registrations" element={<RegistrationsManagementPage />} />
-          <Route path="organizers" element={<OrganizerManagementPage />} />
+          <Route path="organizers" element={<Navigate to="/faculty/dashboard" replace />} />
           <Route path="jury" element={<Navigate to="/faculty/dashboard" replace />} />
           <Route path="results" element={<FacResultsPage />} />
           <Route path="team" element={<Navigate to="/faculty/dashboard" replace />} />

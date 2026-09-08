@@ -7,7 +7,16 @@ import { db } from "../../config/firebase";
 import { collection, doc, getDocs, addDoc, deleteDoc, getDoc, setDoc, updateDoc, increment, writeBatch } from "firebase/firestore";
 import { userService } from "../../services/userService";
 import { deleteQuizzesByEventId, evaluateQuizAnswers } from "../../services/quizService";
-import { createEvent, updateEvent, deleteEvent, createRegistration } from "../../services/apiClient";
+import { 
+  fetchEvents, 
+  fetchEventById, 
+  fetchRegistrations, 
+  createEvent, 
+  updateEvent, 
+  deleteEvent, 
+  createRegistration,
+  updateRegistration 
+} from "../../services/apiClient";
 import { useModal } from "../../context/ModalContext";
 import {
   Calendar,
@@ -279,8 +288,10 @@ const EventManagementPage: React.FC = () => {
   useEffect(() => {
     const loadEvents = async () => {
       try {
-        const list = await (await import('../../services/apiClient')).fetchEvents();
-        const mapped = (list || []).map((data: any) => {
+        setLoadingEvents(true);
+        const rawList = await fetchEvents().catch(() => []);
+        const list = Array.isArray(rawList) ? rawList : (rawList?.events || rawList?.data || []);
+        const mapped = list.map((data: any) => {
           let image = sparkImg;
           if (data.posterPreview) image = data.posterPreview;
           else if (data.imageName === "hackathonImg" || data.category === "HACKATHONS") image = hackathonImg;
@@ -290,7 +301,7 @@ const EventManagementPage: React.FC = () => {
             id: data._id || data.id,
             title: data.title || "",
             date: data.date || data.startDate || "",
-            location: data.location || "",
+            location: data.location || data.venue || "",
             category: data.category || "WORKSHOPS",
             status: data.status || "Draft",
             currentReg: Math.max(0, Number(data.currentReg) || 0),
@@ -391,16 +402,16 @@ const EventManagementPage: React.FC = () => {
     let poll: any = null;
     const loadRegs = async () => {
       try {
-        const snapshot = await getDocs(collection(db, "registrations"));
+        const rawRegs = await fetchRegistrations().catch(() => []);
+        const snapshot = Array.isArray(rawRegs) ? rawRegs : (rawRegs?.registrations || rawRegs?.data || []);
         const list: any[] = [];
         const grantedIds: string[] = [];
         const curEid = (eventAccessEvent?.id ? String(eventAccessEvent.id) : "").trim();
         const curTitle = (eventAccessEvent?.title || "").toLowerCase().trim();
         const cleanCurEid = curEid.replace(/[Il]/g, "i").toLowerCase();
 
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          const regId = docSnap.id;
+        snapshot.forEach((data: any) => {
+          const regId = data.id || data._id;
           const regEid = (data.eventId ? String(data.eventId) : "").trim();
           const regTitle = (data.eventTitle || "").toLowerCase().trim();
 
@@ -440,10 +451,9 @@ const EventManagementPage: React.FC = () => {
     let pollEv: any = null;
     const loadEv = async () => {
       try {
-        const docSnap = await getDoc(doc(db, "events", eventAccessEvent.id));
-        if (docSnap.exists()) {
-          const evData = docSnap.data();
-          setEventAccessEvent((prev: any) => ({ ...prev, ...evData, id: docSnap.id }));
+        const evData = await fetchEventById(eventAccessEvent.id).catch(() => null);
+        if (evData) {
+          setEventAccessEvent((prev: any) => ({ ...prev, ...evData, id: evData.id || evData._id || eventAccessEvent.id }));
         }
       } catch (err) {
         console.error("Error loading event doc:", err);

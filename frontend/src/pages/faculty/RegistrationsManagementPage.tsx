@@ -22,7 +22,11 @@ import {
   Calendar
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
-import { fetchRegistrations as apiFetchRegistrations, deleteParticipantCascade } from "../../services/apiClient";
+import { 
+  fetchRegistrations as apiFetchRegistrations, 
+  updateRegistration,
+  deleteParticipantCascade 
+} from "../../services/apiClient";
 import { sendResendEmail } from "../../utils/resendEmailService";
 import { buildRegistrationConfirmationEmail } from "../../utils/emailTemplates";
 import { userService } from "../../services/userService";
@@ -347,8 +351,8 @@ const RegistrationsManagementPage: React.FC = () => {
   const handleConfirmRegistrationAndSendEmail = async (reg: RegistrationItem) => {
     setConfirmingRegId(reg.id);
     try {
-      // 1. Update status to Confirmed in Firestore
-      await updateDoc(doc(db, "registrations", reg.id), {
+      // 1. Update status to Confirmed in backend database
+      await updateRegistration(reg.id, {
         status: "Confirmed",
         paymentStatus: "Confirmed",
         confirmedAt: Date.now()
@@ -416,8 +420,7 @@ const RegistrationsManagementPage: React.FC = () => {
   const handleSaveRoster = async () => {
     if (!editForm) return;
     try {
-      const regRef = doc(db, "registrations", editForm.id);
-      await updateDoc(regRef, {
+      await updateRegistration(editForm.id, {
         groupName: editForm.groupName,
         teamLeadName: editForm.teamLeadName,
         teamLeadEmail: editForm.teamLeadEmail,

@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { useParams, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-import { db } from "../../config/firebase";
-import { doc, getDoc, updateDoc } from "firebase/firestore";
 import type { Quiz, QuizSubmission } from "../../types/quiz";
 import { getDeterministicSessionId, evaluateQuizAnswers, getQuizById } from "../../services/quizService";
+import { fetchSubmission } from "../../services/apiClient";
 import SEO from "../../components/layout/SEO";
 import { 
   CheckCircle2, 
@@ -47,9 +46,9 @@ export const QuizCompletionPage: React.FC = () => {
         let currentSub = submission;
         if (!currentSub && user) {
           const sessionId = getDeterministicSessionId(quizId, user.uid);
-          const docSnap = await getDoc(doc(db, "quizSubmissions", sessionId));
-          if (docSnap.exists()) {
-            currentSub = { id: docSnap.id, ...docSnap.data() } as QuizSubmission;
+          const subData = await fetchSubmission(sessionId).catch(() => null);
+          if (subData && (subData.id || subData._id)) {
+            currentSub = { id: subData.id || subData._id, ...subData } as QuizSubmission;
           }
         }
 
@@ -62,17 +61,6 @@ export const QuizCompletionPage: React.FC = () => {
             evaluatedAt: Date.now()
           };
           setSubmission(updatedSub);
-
-          // Persist backfill to Firestore
-          updateDoc(doc(db, "quizSubmissions", currentSub.id), {
-            score: evalData.score,
-            maxScore: evalData.maxScore,
-            percentage: evalData.percentage,
-            correctCount: evalData.correctCount,
-            incorrectCount: evalData.incorrectCount,
-            passed: evalData.passed,
-            evaluatedAt: Date.now()
-          }).catch(() => {});
         } else if (currentSub) {
           setSubmission(currentSub);
         }

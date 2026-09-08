@@ -5,19 +5,19 @@ const Quiz = require('../models/Quiz');
 const QuizSession = require('../models/QuizSession');
 const QuizSubmission = require('../models/QuizSubmission');
 const QuizAnswer = require('../models/QuizAnswer');
-const { requireAuth, ensureSessionOwnership } = require('../middleware/auth');
+const { requireAuth, optionalAuth, ensureSessionOwnership } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 
 // POST /api/quizzes/:quizId/sessions -> create or restore authoritative session
 router.post(
   '/quizzes/:quizId/sessions',
-  requireAuth,
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const quizId = req.params.quizId;
     const user = {
-      uid: req.user.uid,
-      email: req.user.email || '',
-      displayName: req.user.name || 'Participant',
+      uid: (req.user && req.user.uid) || req.body.userId || (req.body.user && req.body.user.uid) || 'participant',
+      email: (req.user && req.user.email) || req.body.userEmail || (req.body.user && req.body.user.email) || '',
+      displayName: (req.user && req.user.name) || req.body.userName || (req.body.user && req.body.user.name) || 'Participant',
     };
     const team = req.body.team || {};
 
@@ -69,7 +69,7 @@ router.post(
 // GET /api/sessions/:sessionId -> Fetch session info
 router.get(
   '/sessions/:sessionId',
-  requireAuth,
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const { sessionId } = req.params;
     const session = await QuizSession.findById(sessionId).lean();
@@ -77,6 +77,53 @@ router.get(
       return res.status(404).json({ success: false, error: 'Session not found' });
     }
     res.json({ ...session, id: session._id });
+  })
+);
+
+// GET /api/sessions/:sessionId/draft -> Fetch draft answers
+router.get(
+  '/sessions/:sessionId/draft',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const { sessionId } = req.params;
+    const draft = await QuizAnswer.findById(sessionId).lean();
+    if (!draft) {
+      return res.json({ sessionId, answers: {} });
+    }
+    res.json({ ...draft, id: draft._id });
+  })
+);
+
+// POST /api/sessions/:sessionId/draft -> Save draft answers
+router.post(
+  '/sessions/:sessionId/draft',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const { sessionId } = req.params;
+    const { answers = {}, clientTimestamp = Date.now(), violationsCount, violationLogs } = req.body || {};
+    const now = Date.now();
+
+    const updateDoc = {
+      sessionId,
+      answers,
+      lastAutosavedAt: now,
+      clientTimestamp,
+    };
+    if (violationsCount !== undefined) updateDoc.violationsCount = violationsCount;
+    if (violationLogs) updateDoc.violationLogs = violationLogs;
+
+    await QuizAnswer.findOneAndUpdate(
+      { _id: sessionId },
+      { $set: updateDoc },
+      { upsert: true }
+    );
+
+    await QuizSession.updateOne(
+      { _id: sessionId },
+      { $set: { lastAutosavedAt: now, updatedAt: now } }
+    );
+
+    res.json({ success: true, sessionId, lastAutosavedAt: now });
   })
 );
 
@@ -138,15 +185,23 @@ function evaluateQuiz(quiz, answers = {}) {
 // POST /api/sessions/:sessionId/submit -> Final submission & evaluation
 router.post(
   '/sessions/:sessionId/submit',
-  requireAuth,
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const sessionId = req.params.sessionId;
-    const {
+    let {
       answers = {},
       isAutoSubmitted = false,
       violationsCount = 0,
       violationLogs = [],
     } = req.body || {};
+
+    // If answers is empty, try loading from draft
+    if (!answers || Object.keys(answers).length === 0) {
+      const draftDoc = await QuizAnswer.findById(sessionId).lean();
+      if (draftDoc && draftDoc.answers) {
+        answers = draftDoc.answers;
+      }
+    }
 
     // 1. Check if already submitted (idempotency & double-submit protection)
     let existingSubmission = await QuizSubmission.findById(sessionId).lean();
@@ -155,40 +210,37 @@ router.post(
     }
 
     // 2. Retrieve session and quiz
-    const sess = await QuizSession.findById(sessionId).lean();
-    if (!sess) {
-      return res.status(404).json({ success: false, error: 'Session not found' });
-    }
-
-    const quiz = await Quiz.findById(sess.quizId).lean();
+    let sess = await QuizSession.findById(sessionId).lean();
+    const quizId = sess ? sess.quizId : sessionId.split('_')[0];
+    const quiz = await Quiz.findById(quizId).lean();
     const now = Date.now();
     const evalResult = evaluateQuiz(quiz, answers);
 
     const totalQuestions = (quiz && quiz.questions && quiz.questions.length) || Object.keys(answers).length;
     const answeredCount = Object.keys(answers).filter((k) => !!answers[k]).length;
-    const timeSpentSeconds = Math.max(1, Math.floor((now - (sess.startTime || now)) / 1000));
+    const timeSpentSeconds = Math.max(1, Math.floor((now - (sess?.startTime || now)) / 1000));
 
     const submissionPayload = {
       _id: sessionId,
       sessionId,
-      quizId: sess.quizId,
-      quizTitle: sess.quizTitle || (quiz && quiz.title) || 'Quiz',
-      userId: sess.userId,
-      userEmail: sess.userEmail || '',
-      userName: sess.userName || 'Participant',
-      teamId: sess.teamId || '',
-      teamName: sess.teamName || '',
+      quizId: quizId,
+      quizTitle: (sess && sess.quizTitle) || (quiz && quiz.title) || 'Quiz',
+      userId: (sess && sess.userId) || sessionId.split('_')[1] || 'participant',
+      userEmail: (sess && sess.userEmail) || '',
+      userName: (sess && sess.userName) || 'Participant',
+      teamId: (sess && sess.teamId) || '',
+      teamName: (sess && sess.teamName) || '',
       answers,
       answeredCount,
       unansweredCount: evalResult.unansweredCount,
       totalQuestions,
       timeSpentSeconds,
-      startTime: sess.startTime || now,
+      startTime: (sess && sess.startTime) || now,
       submittedAt: now,
       isAutoSubmitted,
       isFinal: true,
-      violationsCount: Number(violationsCount) || sess.violationsCount || 0,
-      violationLogs: Array.isArray(violationLogs) && violationLogs.length > 0 ? violationLogs : sess.violationLogs || [],
+      violationsCount: Number(violationsCount) || (sess && sess.violationsCount) || 0,
+      violationLogs: Array.isArray(violationLogs) && violationLogs.length > 0 ? violationLogs : (sess && sess.violationLogs) || [],
       score: evalResult.score,
       maxScore: evalResult.maxScore,
       percentage: evalResult.percentage,
@@ -218,7 +270,7 @@ router.post(
 // GET /api/sessions/:sessionId/submission -> Fetch final submission
 router.get(
   '/sessions/:sessionId/submission',
-  requireAuth,
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const { sessionId } = req.params;
     const submission = await QuizSubmission.findById(sessionId).lean();
@@ -229,10 +281,10 @@ router.get(
   })
 );
 
-// POST /api/sessions/:sessionId/autosave -> Upsert draft and touch session
+// POST /api/sessions/:sessionId/autosave -> Upsert draft and touch session (alias)
 router.post(
   '/sessions/:sessionId/autosave',
-  requireAuth,
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const { sessionId } = req.params;
     const { answers = {}, clientTimestamp = Date.now(), violationsCount, violationLogs } = req.body || {};

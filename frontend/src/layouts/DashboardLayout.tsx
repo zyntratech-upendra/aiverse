@@ -45,7 +45,6 @@ const DashboardLayout: React.FC = () => {
     { path: "/faculty/events", label: "Events", icon: Calendar },
     { path: "/faculty/registrations", label: "Registrations", icon: ClipboardList },
     { path: "/faculty/attendance", label: "Attendance", icon: ClipboardCheck },
-    { path: "/faculty/organizers", label: "Organizers", icon: ShieldCheck },
     { path: "/faculty/users", label: "User Management", icon: Users },
     { path: "/faculty/contacts", label: "Contact Inquiries", icon: Mail },
     { path: "/faculty/results", label: "Results", icon: BarChart2 },

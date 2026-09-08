@@ -1,8 +1,6 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "../../config/firebase";
 import { 
   getQuizById, 
   getOrCreateQuizSession, 
@@ -139,9 +137,8 @@ export const QuizTakingPage: React.FC = () => {
 
     const checkQuizStatus = async () => {
       try {
-        const snap = await getDoc(doc(db, "quizzes", quizId));
-        if (!snap.exists() || !isMounted) return;
-        const data = snap.data();
+        const data = await getQuizById(quizId, false).catch(() => null);
+        if (!data || !isMounted) return;
         const isStopped = data.status === "completed" || (data.scheduledEndTime && data.scheduledEndTime <= Date.now());
         if (isStopped && !isSubmitting && isMounted) {
           setShowTimeoutModal(true);
