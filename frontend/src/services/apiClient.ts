@@ -399,7 +399,11 @@ export async function createRegistration(regObj: any) {
     headers: authHeaders(),
     body: JSON.stringify(regObj),
   });
-  return res.json();
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    throw new Error(data.error || data.message || 'Failed to create registration');
+  }
+  return data;
 }
 
 export async function updateRegistration(id: string, patch: any) {

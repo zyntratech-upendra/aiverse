@@ -249,7 +249,7 @@ const RegistrationPage: React.FC = () => {
   };
 
   const handleRemoveTeammate = (index: number) => {
-    if (event && members.length > event.minTeamSize - 1) {
+    if (event && members.length > Math.max(0, event.minTeamSize - 1)) {
       setMembers(members.filter((_, idx) => idx !== index));
     }
   };
@@ -297,22 +297,43 @@ const RegistrationPage: React.FC = () => {
   };
 
   const validateStep2 = () => {
+    const leadEmails = [
+      leadCollegeEmail.trim().toLowerCase(),
+      leadPersonalEmail.trim().toLowerCase(),
+    ].filter(Boolean);
+
+    const seenMemberEmails = new Set<string>();
+
     for (let i = 0; i < members.length; i++) {
       const member = members[i];
-      if (!member.name.trim()) {
-        alert(`Please enter a name for Member ${i + 1}.`);
+      const mName = member.name.trim();
+      const mEmail = member.email.trim().toLowerCase();
+      const mStudentId = member.studentId.trim();
+
+      if (!mName) {
+        alert(`Please enter a name for Member ${i + 2}.`);
         return false;
       }
-      if (!member.email.trim() || !EMAIL_REGEX.test(member.email.trim())) {
-        alert(`Please enter a valid email address with a domain (e.g. member@college.edu.in or member@gmail.com) for Member ${i + 1}.`);
+      if (!mEmail || !EMAIL_REGEX.test(mEmail)) {
+        alert(`Please enter a valid email address with a domain (e.g. member@college.edu.in or member@gmail.com) for Member ${i + 2}.`);
         return false;
       }
-      if (!member.studentId.trim()) {
-        alert(`Please enter a Student ID for Member ${i + 1}.`);
+      if (leadEmails.includes(mEmail)) {
+        alert(`Member ${i + 2}'s email (${member.email}) cannot be the same as the Team Lead's email. Each participant must have a unique email.`);
         return false;
       }
-      if (member.studentId.includes("@")) {
-        alert(`Student ID for Member ${i + 1} appears to be an email address. Please make sure Email and Student ID fields are not swapped.`);
+      if (seenMemberEmails.has(mEmail)) {
+        alert(`Duplicate email (${member.email}) found for Member ${i + 2}. Each team member must have a unique email.`);
+        return false;
+      }
+      seenMemberEmails.add(mEmail);
+
+      if (!mStudentId) {
+        alert(`Please enter a Student ID / Roll No for Member ${i + 2}.`);
+        return false;
+      }
+      if (mStudentId.includes("@")) {
+        alert(`Student ID for Member ${i + 2} appears to be an email address. Please make sure Email and Student ID fields are not swapped.`);
         return false;
       }
     }
@@ -436,12 +457,25 @@ const RegistrationPage: React.FC = () => {
       const commonQuizPassword = "Aiverse@vitb";
       const isEventLoginAllowed = Boolean((event as any)?.allowLoginAccess);
 
+      const cleanMembers = isQuiz
+        ? []
+        : (members || [])
+            .map((m) => ({
+              name: m.name.trim(),
+              email: m.email.trim().toLowerCase(),
+              studentId: m.studentId.trim(),
+              phone: (m.phone || "").trim(),
+            }))
+            .filter((m) => m.name && m.email);
+
+      const actualTeamSize = isQuiz ? 1 : Math.max(1, cleanMembers.length + 1);
+
       const payload: any = {
         eventId: event.id,
         eventTitle: event.title,
         category: event.category || (isQuiz ? "QUIZ" : "Tech Event"),
         isQuiz: Boolean(isQuiz),
-        groupName: isQuiz ? "Individual Registration" : (event.maxTeamSize > 1 ? groupName : "Individual RSVP"),
+        groupName: isQuiz ? "Individual Registration" : (event.maxTeamSize > 1 ? (groupName.trim() || `${leadName.trim()}'s Team`) : "Individual RSVP"),
         fullName: leadName.trim(),
         teamLeadName: leadName.trim(),
         teamLeadEmail: leadPersonalEmail.trim() || leadCollegeEmail.trim(), // Primary communication email for credentials & updates
@@ -459,8 +493,8 @@ const RegistrationPage: React.FC = () => {
         teamPassword: isQuiz ? commonQuizPassword : undefined,
         accessGranted: isQuiz ? isEventLoginAllowed : false,
         loginAccessGranted: isQuiz ? isEventLoginAllowed : false,
-        members: isQuiz ? [] : members,
-        teamSize: isQuiz ? 1 : members.length + 1,
+        members: cleanMembers,
+        teamSize: actualTeamSize,
         // Food preferences
         isVishnuStudent: isVishnuDomain,
         needsFood: false,
@@ -485,14 +519,17 @@ const RegistrationPage: React.FC = () => {
 
       let finalRegId = `REG-${Date.now()}`;
 
-      // 1. Create in Backend MongoDB API
+      // 1. Create in Backend MongoDB API (enforces uniqueness per event)
       try {
         const backendRes = await createRegistration(payload);
         if (backendRes?.id || backendRes?.registration?.id || backendRes?._id) {
           finalRegId = backendRes.id || backendRes?.registration?.id || backendRes?._id;
         }
-      } catch (backendErr) {
-        console.warn("[RegistrationPage] Backend createRegistration notice:", backendErr);
+      } catch (backendErr: any) {
+        console.error("[RegistrationPage] Backend createRegistration error:", backendErr);
+        alert(backendErr.message || "Failed to create registration. Duplicate registration or invalid data.");
+        setSubmitting(false);
+        return;
       }
 
       // 2. Add document to Firestore registrations collection (sync)
@@ -1390,11 +1427,22 @@ const RegistrationPage: React.FC = () => {
                       <p className="text-[10px] text-slate-450 font-semibold mt-0.5">Add the members who will be joining your group.</p>
                     </div>
                     <span className="px-2.5 py-1 bg-blue-50 text-blue-700 font-black rounded-full text-[9px] border border-blue-100/30">
-                      {members.length === 1 ? "1 Member Added" : `${members.length} Members Added`}
+                      {members.length === 0 ? "Solo (1 Member - Lead Only)" : `${members.length + 1} Total Members (${members.length} Teammates)`}
                     </span>
                   </div>
 
                   <div className="space-y-4 max-h-[450px] overflow-y-auto pr-1">
+                    {members.length === 0 && (
+                      <div className="p-6 text-center border border-dashed border-slate-200 rounded-2xl bg-slate-50/50 space-y-2">
+                        <div className="w-10 h-10 rounded-full bg-blue-50 text-blue-600 mx-auto flex items-center justify-center">
+                          <Users className="h-5 w-5" />
+                        </div>
+                        <h4 className="text-xs font-bold text-slate-750">Solo Team (1 Member - Team Lead)</h4>
+                        <p className="text-[11px] text-slate-450 max-w-sm mx-auto">
+                          You are currently registering as a 1-member team. If other teammates are joining your group (up to {event.maxTeamSize} members), click <strong>"Add Another Member"</strong> below. Otherwise, click <strong>"Proceed to Review"</strong> to continue.
+                        </p>
+                      </div>
+                    )}
                     {members.map((member, idx) => (
                       <div key={idx} className="p-4 border border-slate-100 bg-slate-50/10 rounded-2xl space-y-3.5 relative">
                         <div className="flex justify-between items-center">
