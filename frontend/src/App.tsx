@@ -4,9 +4,12 @@ import { ModalProvider } from "./context/ModalContext";
 import AppRoutes from "./routes/AppRoutes";
 import { ErrorBoundary } from "./components/common/ErrorBoundary";
 
+import { LaunchSplash } from "./components/common/LaunchSplash";
+
 function App() {
   return (
     <ErrorBoundary>
+      <LaunchSplash />
       <BrowserRouter>
         <AuthProvider>
           <ModalProvider>
