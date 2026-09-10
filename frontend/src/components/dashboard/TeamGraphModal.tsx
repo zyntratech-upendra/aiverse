@@ -1,16 +1,16 @@
 import React, { useState, useEffect, useMemo } from "react";
-import { 
-  X, 
-  Users, 
-  Network, 
-  ArrowLeft, 
-  ArrowRight, 
-  ArrowUp, 
-  ArrowDown, 
-  GripVertical, 
-  Save, 
-  Check, 
-  RotateCcw, 
+import {
+  X,
+  Users,
+  Network,
+  ArrowLeft,
+  ArrowRight,
+  ArrowUp,
+  ArrowDown,
+  GripVertical,
+  Save,
+  Check,
+  RotateCcw,
   Search,
   MoveHorizontal,
   Plus
@@ -48,10 +48,10 @@ const mapUserToInitialRole = (user: UserItem, rolesList: string[]): string => {
 
   // 1. Faculty / Staff
   if (
-    combined.includes("faculty") || 
-    combined.includes("convener") || 
+    combined.includes("faculty") ||
+    combined.includes("convener") ||
     combined.includes("conviner") ||
-    combined.includes("advisor") || 
+    combined.includes("advisor") ||
     combined.includes("staff")
   ) {
     return "Faculty Coordinators";
@@ -113,12 +113,12 @@ const mapUserToInitialRole = (user: UserItem, rolesList: string[]): string => {
   return rolesList[0] || "General";
 };
 
-export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({ 
-  isOpen, 
-  onClose, 
-  users, 
+export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
+  isOpen,
+  onClose,
+  users,
   availableRoles,
-  onUsersUpdated 
+  onUsersUpdated
 }) => {
   const [roles, setRoles] = useState<string[]>([]);
   const [membersByRole, setMembersByRole] = useState<Record<string, UserItem[]>>({});
@@ -142,7 +142,7 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
     const initData = async () => {
       try {
         let loadedRoles: string[] = [];
-        
+
         // 1. Fetch settings from portal_config
         const configData = await fetchSettings("portal_config");
         if (configData && Array.isArray(configData.roleOrder) && configData.roleOrder.length > 0) {
@@ -428,7 +428,7 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
       setRoles(parsed.roles);
       setMembersByRole(parsed.members);
       setErrorMsg("");
-    } catch {}
+    } catch { }
   };
 
   if (!isOpen) return null;
@@ -438,10 +438,10 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5 lg:p-6 bg-slate-900/70 backdrop-blur-md animate-in fade-in duration-200">
       <div className="bg-slate-50 w-full max-w-[96vw] h-[92vh] rounded-[2rem] shadow-2xl flex flex-col overflow-hidden border border-slate-200">
-        
+
         {/* Header Bar */}
         <div className="px-6 py-4 sm:px-8 sm:py-5 bg-white border-b border-slate-200 flex flex-wrap items-center justify-between gap-4 shrink-0 shadow-xs">
-          
+
           <div className="flex items-center gap-3 sm:gap-4">
             <div className="w-11 h-11 rounded-2xl bg-blue-50 border border-blue-100 flex items-center justify-center text-blue-600 shadow-inner shrink-0">
               <Network className="h-5 w-5" />
@@ -496,11 +496,10 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
               type="button"
               onClick={handleSaveChanges}
               disabled={isSaving || !hasUnsavedChanges}
-              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-md cursor-pointer ${
-                hasUnsavedChanges 
-                  ? "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20 hover:scale-[1.02]" 
+              className={`px-4 py-2 rounded-xl text-xs font-bold flex items-center gap-2 transition-all shadow-md cursor-pointer ${hasUnsavedChanges
+                  ? "bg-blue-600 hover:bg-blue-700 text-white shadow-blue-500/20 hover:scale-[1.02]"
                   : "bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed shadow-none"
-              }`}
+                }`}
             >
               {isSaving ? (
                 <>
@@ -550,10 +549,10 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
         {/* Scrollable Horizontal Kanban Board */}
         <div className="flex-1 p-4 sm:p-6 overflow-x-auto overflow-y-hidden custom-scrollbar bg-slate-100/60">
           <div className="flex gap-5 h-full items-start min-w-max pb-4">
-            
+
             {roles.map((roleName, roleIdx) => {
               const members = membersByRole[roleName] || [];
-              const filteredMembers = searchQuery.trim() 
+              const filteredMembers = searchQuery.trim()
                 ? members.filter(m => (m.name || "").toLowerCase().includes(searchQuery.toLowerCase()) || (m.email || "").toLowerCase().includes(searchQuery.toLowerCase()))
                 : members;
 
@@ -570,15 +569,14 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
                     if (dragOverRole === roleName) setDragOverRole(null);
                   }}
                   onDrop={(e) => handleMemberDropOnRole(e, roleName)}
-                  className={`w-[290px] sm:w-[320px] flex flex-col h-full rounded-2xl sm:rounded-3xl border transition-all duration-200 shadow-xs ${
-                    isDragOver 
-                      ? "bg-blue-50/90 border-blue-400 ring-2 ring-blue-300 shadow-lg scale-[1.01]" 
+                  className={`w-[290px] sm:w-[320px] flex flex-col h-full rounded-2xl sm:rounded-3xl border transition-all duration-200 shadow-xs ${isDragOver
+                      ? "bg-blue-50/90 border-blue-400 ring-2 ring-blue-300 shadow-lg scale-[1.01]"
                       : "bg-white border-slate-200/90"
-                  }`}
+                    }`}
                 >
-                  
+
                   {/* Column Header (Movable Role) */}
-                  <div 
+                  <div
                     draggable
                     onDragStart={(e) => handleRoleDragStart(e, roleIdx)}
                     onDragOver={(e) => e.preventDefault()}
@@ -604,7 +602,7 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
                       <span className="text-xs font-black px-2 py-0.5 rounded-full bg-slate-100 text-slate-700 border border-slate-200">
                         {members.length}
                       </span>
-                      
+
                       {/* Move Column Left */}
                       <button
                         type="button"
@@ -615,7 +613,7 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
                       >
                         <ArrowLeft className="h-3.5 w-3.5" />
                       </button>
-                      
+
                       {/* Move Column Right */}
                       <button
                         type="button"
@@ -661,10 +659,10 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
                               {/* Member Avatar */}
                               <div className="w-9 h-9 rounded-xl overflow-hidden bg-slate-100 border border-slate-200 shrink-0 flex items-center justify-center shadow-inner">
                                 {member.image && member.image.startsWith("http") ? (
-                                  <img 
-                                    src={member.image} 
-                                    alt={member.name} 
-                                    className="w-full h-full object-cover object-top" 
+                                  <img
+                                    src={member.image}
+                                    alt={member.name}
+                                    className="w-full h-full object-cover object-top"
                                   />
                                 ) : (
                                   <span className="text-xs font-black text-blue-600">{initials}</span>
@@ -679,18 +677,17 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
                                 <p className="text-[10px] text-slate-400 truncate mt-0.5" title={member.email}>
                                   {member.email}
                                 </p>
-                                
+
                                 <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
                                   <span className="text-[9px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100/80 truncate max-w-[140px]">
                                     {posText}
                                   </span>
 
                                   {member.status && (
-                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-md ${
-                                      member.status.toLowerCase() === "active" 
-                                        ? "bg-emerald-50 text-emerald-600 border border-emerald-100" 
+                                    <span className={`text-[8px] font-bold px-1.5 py-0.5 rounded-md ${member.status.toLowerCase() === "active"
+                                        ? "bg-emerald-50 text-emerald-600 border border-emerald-100"
                                         : "bg-slate-100 text-slate-500"
-                                    }`}>
+                                      }`}>
                                       {member.status}
                                     </span>
                                   )}
@@ -700,7 +697,7 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
 
                             {/* Card Quick Actions: Move Up/Down & Move to Role */}
                             <div className="mt-2.5 pt-2 border-t border-slate-100 flex items-center justify-between text-slate-400 text-[10px]">
-                              
+
                               {/* Reorder in Column Buttons */}
                               <div className="flex items-center gap-1">
                                 <button

@@ -3,8 +3,17 @@ import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import SEO from "../../components/layout/SEO";
 import Papa from "papaparse";
-import { db } from "../../config/firebase";
-import { collection, doc, getDocs, addDoc, deleteDoc, getDoc, setDoc, updateDoc, increment, writeBatch } from "firebase/firestore";
+import { 
+  db, 
+  collection, 
+  doc, 
+  getDocs, 
+  deleteDoc, 
+  getDoc, 
+  setDoc, 
+  updateDoc, 
+  writeBatch 
+} from "../../config/firebase";
 import { userService } from "../../services/userService";
 import { deleteQuizzesByEventId, evaluateQuizAnswers } from "../../services/quizService";
 import { 
@@ -14,8 +23,7 @@ import {
   createEvent, 
   updateEvent, 
   deleteEvent, 
-  createRegistration,
-  updateRegistration 
+  createRegistration 
 } from "../../services/apiClient";
 import { useModal } from "../../context/ModalContext";
 import {
@@ -68,6 +76,7 @@ import MemberSelectCombobox from "../../components/ui/MemberSelectCombobox";
 import { sendResendEmail } from "../../utils/resendEmailService";
 import { buildRoundPromotionEmail } from "../../utils/emailTemplates";
 import { dataCache } from "../../utils/dataCache";
+import { EventLaunchSplash, type EventLaunchData } from "../../components/common/EventLaunchSplash";
 
 // Import local assets
 import sparkImg from "../../assets/images/spark.png";
@@ -95,10 +104,29 @@ const EventManagementPage: React.FC = () => {
   const [events, setEvents] = useState<EventItem[]>(cachedEvents || []);
   const [loadingEvents, setLoadingEvents] = useState<boolean>(!cachedEvents);
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const speakerFileInputRef = React.useRef<HTMLInputElement>(null);
-  const juryFileInputRef = React.useRef<HTMLInputElement>(null);
   const paymentQrFileInputRef = React.useRef<HTMLInputElement>(null);
   const ticketBgFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  // Celebratory Launch Splash state when saving or publishing an event
+  const [launchedEventData, setLaunchedEventData] = useState<EventLaunchData | null>(null);
+  const [isLaunchSplashOpen, setIsLaunchSplashOpen] = useState<boolean>(false);
+
+  const handleCloseLaunchSplash = () => {
+    setIsLaunchSplashOpen(false);
+    setLaunchedEventData(null);
+    setEditingEventId(null);
+    setView("list");
+  };
+
+  const handleViewLaunchedEvent = (targetId?: string) => {
+    setIsLaunchSplashOpen(false);
+    setLaunchedEventData(null);
+    setEditingEventId(null);
+    setView("list");
+    if (targetId) {
+      handleOpenEventDetails(targetId);
+    }
+  };
 
   // Client-side image compression utility to keep Firestore documents well below the 1MB limit
   const compressImageFile = (
@@ -231,36 +259,6 @@ const EventManagementPage: React.FC = () => {
       } catch {
         const reader = new FileReader();
         reader.onloadend = () => setFormPaymentQrImagePreview(reader.result as string);
-        reader.readAsDataURL(file);
-      }
-    }
-  };
-
-  const handleSpeakerFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setFormSpeakerImageFilename(file.name);
-      try {
-        const compressed = await compressImageFile(file, 400, 400, 0.75);
-        setFormSpeakerImagePreview(compressed);
-      } catch {
-        const reader = new FileReader();
-        reader.onloadend = () => setFormSpeakerImagePreview(reader.result as string);
-        reader.readAsDataURL(file);
-      }
-    }
-  };
-
-  const handleJuryFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (file) {
-      setFormJuryImageFilename(file.name);
-      try {
-        const compressed = await compressImageFile(file, 400, 400, 0.75);
-        setFormJuryImagePreview(compressed);
-      } catch {
-        const reader = new FileReader();
-        reader.onloadend = () => setFormJuryImagePreview(reader.result as string);
         reader.readAsDataURL(file);
       }
     }
@@ -1953,20 +1951,6 @@ const EventManagementPage: React.FC = () => {
   const [formTicketTextY, setFormTicketTextY] = useState<number>(80);
   const [formTicketTextColor, setFormTicketTextColor] = useState<string>("#FFFFFF");
 
-  const getSpeakerSectionTitle = () => {
-    if (formCategory === "Hackathon" || formCategory === "Tech Event") return "Jury Information";
-    if (formCategory === "Workshop") return "Tech Speaker Information";
-    if (formCategory === "Quiz") return "Quiz Coordinator / Host Information";
-    return "Speaker Information";
-  };
-
-  const getSpeakerPrefix = () => {
-    if (formCategory === "Hackathon" || formCategory === "Tech Event") return "Jury";
-    if (formCategory === "Workshop") return "Tech Speaker";
-    if (formCategory === "Quiz") return "Quiz Coordinator";
-    return "Speaker";
-  };
-
   // Pagination states
   const [currentPage, setCurrentPage] = useState(1);
   const itemsPerPage = 3;
@@ -2071,6 +2055,7 @@ const EventManagementPage: React.FC = () => {
         speakerBio: formSpeakerBio,
         speakerLinkedin: formSpeakerLinkedin,
         speakerImagePreview: safeSpeakerPreview,
+        speakerImageFilename: formSpeakerImageFilename,
         hasAgenda: formHasAgenda,
         agendaItems: formHasAgenda ? formAgendaItems : [],
         agendaTime1: formAgendaItems[0]?.time || "",
@@ -2249,6 +2234,20 @@ const EventManagementPage: React.FC = () => {
       dataCache.remove("faculty_events");
       window.dispatchEvent(new Event("eventsUpdated"));
       window.dispatchEvent(new Event("storage"));
+
+      // Trigger celebratory Launch Splash Animation for this event
+      const launchInfo: EventLaunchData = {
+        title: formTitle.trim() || "AI Verse Event",
+        category: formCategory,
+        date: displayDate,
+        location: formLocation || "Virtual Hub",
+        poster: formPosterImages[0]?.preview || imageFile,
+        status: formStatus || "Opened",
+        eventId: targetEventId || editingEventId || undefined,
+        isEditing: Boolean(editingEventId)
+      };
+      setLaunchedEventData(launchInfo);
+      setIsLaunchSplashOpen(true);
 
       // Reset form fields
       setFormTitle("");
@@ -5095,6 +5094,35 @@ const EventManagementPage: React.FC = () => {
 
               </div>
             )}
+          </div>
+
+          {/* BOTTOM SAVE / CANCEL ACTION BAR */}
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 p-5 bg-white rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.015)] mt-4">
+            <div className="flex items-center gap-2 text-xs font-bold text-slate-500">
+              <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse" />
+              <span>{editingEventId ? "Ready to save changes and launch event" : "Ready to publish and launch new event"}</span>
+            </div>
+            <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+              <button
+                type="button"
+                onClick={() => {
+                  setEditingEventId(null);
+                  setView("list");
+                }}
+                className="px-5 py-2.5 border border-slate-200 text-slate-650 font-bold rounded-2xl hover:bg-slate-50 transition-all text-xs bg-white cursor-pointer"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={isSavingEvent}
+                onClick={handleCreateEvent}
+                className="px-6 py-2.5 bg-[#2563EB] hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-bold rounded-2xl shadow-md shadow-blue-600/10 hover:shadow-lg transition-all text-xs flex items-center gap-2 cursor-pointer"
+              >
+                {isSavingEvent && <Loader2 className="w-3.5 h-3.5 animate-spin" />}
+                <span>{isSavingEvent ? "Saving Event..." : (editingEventId ? "Save Changes" : "Publish Event")}</span>
+              </button>
+            </div>
           </div>
         </div>
       )}
@@ -8805,6 +8833,14 @@ const EventManagementPage: React.FC = () => {
         </div>,
         document.body
       )}
+
+      {/* ═══ LAUNCH CELEBRATION SPLASH WHEN SAVING / LAUNCHING AN EVENT ═══ */}
+      <EventLaunchSplash
+        isOpen={isLaunchSplashOpen}
+        event={launchedEventData}
+        onClose={handleCloseLaunchSplash}
+        onViewEvent={handleViewLaunchedEvent}
+      />
     </div>
   );
 };

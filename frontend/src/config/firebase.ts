@@ -45,6 +45,7 @@ export interface QuerySnapshot<T = any> {
 export interface CollectionRef {
   type: 'collection';
   name: string;
+  collectionName?: string;
 }
 
 export interface DocRef {
@@ -69,6 +70,7 @@ export const db = {
 export const collection = (_dbInstance: any, collectionName: string): CollectionRef => ({
   type: 'collection',
   name: collectionName,
+  collectionName,
 });
 
 export const doc = (_dbOrCol: any, colOrId?: string, maybeId?: string): DocRef => {
@@ -145,7 +147,7 @@ export const getDoc = async (docRef: DocRef): Promise<DocumentSnapshot> => {
 
 export const getDocs = async (queryOrCol: CollectionRef | QueryRef): Promise<QuerySnapshot> => {
   try {
-    const colName = queryOrCol.collectionName || (queryOrCol as any).name;
+    const colName = queryOrCol.type === 'query' ? queryOrCol.collectionName : (queryOrCol.collectionName || queryOrCol.name);
     const endpoint = resolveEndpoint(colName);
     const url = new URL(endpoint, window.location.origin);
 
@@ -188,7 +190,7 @@ export const getDocs = async (queryOrCol: CollectionRef | QueryRef): Promise<Que
   }
 };
 
-export const setDoc = async (docRef: DocRef, data: any, options?: { merge?: boolean }): Promise<void> => {
+export const setDoc = async (docRef: DocRef, data: any, _options?: { merge?: boolean }): Promise<void> => {
   const endpoint = resolveEndpoint(docRef.collectionName);
   const payload = { ...data, id: docRef.id, _id: docRef.id };
 
@@ -250,7 +252,7 @@ export const addDoc = async (colRef: CollectionRef, data: any): Promise<DocRef> 
   return { type: 'doc', collectionName: colRef.name, id };
 };
 
-export const writeBatch = () => {
+export const writeBatch = (_db?: any) => {
   const ops: Array<() => Promise<void>> = [];
   return {
     set: (docRef: DocRef, data: any, options?: any) => ops.push(() => setDoc(docRef, data, options)),
@@ -298,7 +300,7 @@ export const app = { name: '[DEFAULT]', options: {} };
 export const auth = { currentUser: null };
 export const storage = {};
 export const getFunctions = () => ({});
-export const httpsCallable = (_funcs: any, _name: string) => async (data: any) => ({ data: { success: true } });
+export const httpsCallable = (_funcs: any, _name: string) => async (_data?: any) => ({ data: { success: true } });
 export const isReady = true;
 export const initializationError = null;
 export const firebaseConfig = {};
