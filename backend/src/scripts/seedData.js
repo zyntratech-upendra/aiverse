@@ -365,28 +365,6 @@ async function seed() {
       bio: 'Professor & AI Lab Incharge at Vishnu Institute of Technology.',
       order: 2,
     },
-    {
-      _id: 'org-ananya-verma',
-      name: 'Ananya Verma',
-      role: 'Technical Lead & ML Researcher',
-      category: 'Core Team',
-      email: 'ananya@aiverse.in',
-      linkedin: 'https://linkedin.com',
-      image: 'https://images.unsplash.com/photo-1580489944761-15a19d654956?auto=format&fit=crop&w=400&q=80',
-      bio: 'Specializing in computer vision and deep reinforcement learning.',
-      order: 3,
-    },
-    {
-      _id: 'org-vikram-reddy',
-      name: 'Vikram Reddy',
-      role: 'Operations & Event Manager',
-      category: 'Core Team',
-      email: 'vikram@aiverse.in',
-      linkedin: 'https://linkedin.com',
-      image: 'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?auto=format&fit=crop&w=400&q=80',
-      bio: 'Managing logistical workflows, stage setup, and student registrations.',
-      order: 4,
-    },
   ];
 
   for (const o of organizers) {
