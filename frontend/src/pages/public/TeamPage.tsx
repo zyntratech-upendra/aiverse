@@ -545,15 +545,15 @@ const TeamPage: React.FC = () => {
                   )}
                 </div>
 
-                {/* Team Cards: Compact Horizontal Side-Scroll on Mobile, Responsive Grid on Desktop */}
-                <div className="flex overflow-x-auto snap-x snap-mandatory gap-3 sm:gap-7 pb-4 sm:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 sm:overflow-visible [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
+                {/* Team Cards: Horizontal Side-Scroll */}
+                <div className="flex overflow-x-auto snap-x snap-mandatory gap-3 sm:gap-7 pb-6 -mx-4 px-4 sm:-mx-2 sm:px-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
                   {members.map((member, idx) => {
                     const formattedRole = formatRoleLabel(member.position || member.role || member.roleType || "Member");
 
                     return (
                       <div
                         key={member.id || idx}
-                        className="w-[190px] xs:w-[210px] sm:w-auto shrink-0 sm:shrink snap-start bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-3 sm:p-5 flex flex-col justify-between shadow-xs hover:shadow-xl hover:border-blue-200 hover:-translate-y-1.5 transition-all duration-300 group"
+                        className="w-[190px] xs:w-[210px] sm:w-[260px] shrink-0 snap-start bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-3 sm:p-5 flex flex-col justify-between shadow-xs hover:shadow-xl hover:border-blue-200 hover:-translate-y-1.5 transition-all duration-300 group"
                       >
                         <div>
                           {/* Profile Image Frame (Compact on Mobile) */}
