@@ -657,16 +657,18 @@ const TeamPage: React.FC = () => {
                     </span>
                   </div>
 
-                  {members.length > 1 && (
+                  {members.length > 1 && definition.id !== "faculty-coordinators" && (
                     <span className="sm:hidden text-[10px] font-bold text-slate-400 tracking-wider uppercase flex items-center gap-1 bg-slate-100/80 px-2 py-0.5 rounded-md">
                       Swipe &rarr;
                     </span>
                   )}
                 </div>
 
-                {/* Team Cards: Horizontal Side-Scroll for Faculty/Staff, Grid for others on desktop */}
+                {/* Team Cards: 4 members per row for Faculty Coordinators, Grid for others on desktop */}
                 <div className={
-                  definition.id === "faculty-coordinators" || definition.id === "club-organizers"
+                  definition.id === "faculty-coordinators"
+                    ? "grid grid-cols-1 xs:grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-7"
+                    : definition.id === "club-organizers"
                     ? "flex overflow-x-auto snap-x snap-mandatory gap-3 sm:gap-7 pb-6 -mx-4 px-4 sm:-mx-2 sm:px-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
                     : "flex overflow-x-auto snap-x snap-mandatory gap-3 sm:gap-7 pb-4 sm:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 sm:overflow-visible [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
                 }>
@@ -677,7 +679,9 @@ const TeamPage: React.FC = () => {
                       <div
                         key={member.id || idx}
                         className={
-                          definition.id === "faculty-coordinators" || definition.id === "club-organizers"
+                          definition.id === "faculty-coordinators"
+                            ? "w-full bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-3 sm:p-5 flex flex-col justify-between shadow-xs hover:shadow-xl hover:border-blue-200 hover:-translate-y-1.5 transition-all duration-300 group"
+                            : definition.id === "club-organizers"
                             ? "w-[190px] xs:w-[210px] sm:w-[260px] shrink-0 snap-start bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-3 sm:p-5 flex flex-col justify-between shadow-xs hover:shadow-xl hover:border-blue-200 hover:-translate-y-1.5 transition-all duration-300 group"
                             : "w-[190px] xs:w-[210px] sm:w-auto shrink-0 sm:shrink snap-start bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-3 sm:p-5 flex flex-col justify-between shadow-xs hover:shadow-xl hover:border-blue-200 hover:-translate-y-1.5 transition-all duration-300 group"
                         }
