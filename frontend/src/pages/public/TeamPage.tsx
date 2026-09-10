@@ -242,8 +242,8 @@ const TeamPage: React.FC = () => {
     const mType = (member.roleType || "").toLowerCase().trim();
     const combined = `${mPos} ${mRole} ${mType}`.toLowerCase().trim();
 
-    // Faculty members belong to faculty coordinators section
-    if (combined.includes("faculty") || combined.includes("convener") || combined.includes("advisor")) {
+    // Faculty and staff members belong to faculty coordinators section
+    if (combined.includes("faculty") || combined.includes("convener") || combined.includes("advisor") || combined.includes("staff")) {
       return false;
     }
 
@@ -362,30 +362,56 @@ const TeamPage: React.FC = () => {
     return false;
   };
 
-  // Group members with "Club Organizers" at the very starting of the page
+  // Helper to get formatted display role for a member
+  const getMemberDisplayRole = (member: MemberData): string => {
+    const combined = `${member.position || ""} ${member.role || ""} ${member.roleType || ""}`.toLowerCase();
+    
+    if (combined.includes("faculty") || combined.includes("convener") || combined.includes("advisor")) {
+      if (combined.includes("convener")) return "Convener";
+      if (combined.includes("advisor")) return "Faculty Advisor";
+      return "Faculty Coordinator";
+    }
+    
+    if (combined.includes("staff")) {
+      return "Staff Member";
+    }
+    
+    return formatRoleLabel(member.position || member.role || member.roleType || "Member");
+  };
+
+  // Group members with "Faculty Coordinators" (Faculty & Staff) and "Club Organizers" at the very starting of the page
   const groupedSections = useMemo(() => {
     const activeRolesList = configuredRoles.length > 0 ? configuredRoles : DEFAULT_ROLE_HIERARCHY;
     const assignedMemberIds = new Set<string>();
     const activeSections: Array<{ definition: { id: string; title: string; order: number }; members: MemberData[] }> = [];
 
     // =========================================================================
-    // STEP 1: Faculty Coordinators (if present in members)
+    // STEP 1: Faculty Coordinators & Staff Members (Displayed together in Faculty Coordinators)
     // =========================================================================
     const facultyMembers = dbMembers.filter(m => {
       const combined = `${m.position || ""} ${m.role || ""} ${m.roleType || ""}`.toLowerCase();
       return combined.includes("faculty") || combined.includes("convener") || combined.includes("advisor");
     });
+    facultyMembers.sort(compareMembersByRank);
 
-    if (facultyMembers.length > 0) {
-      facultyMembers.sort(compareMembersByRank);
-      facultyMembers.forEach(m => assignedMemberIds.add(m.id || m.email || `${m.name}-${m.role}`));
+    const staffMembers = dbMembers.filter(m => {
+      const combined = `${m.position || ""} ${m.role || ""} ${m.roleType || ""}`.toLowerCase();
+      if (combined.includes("faculty") || combined.includes("convener") || combined.includes("advisor")) return false;
+      return combined.includes("staff");
+    });
+    staffMembers.sort(compareMembersByRank);
+
+    const combinedFacultyAndStaff = [...facultyMembers, ...staffMembers];
+
+    if (combinedFacultyAndStaff.length > 0) {
+      combinedFacultyAndStaff.forEach(m => assignedMemberIds.add(m.id || m.email || `${m.name}-${m.role}`));
       activeSections.push({
         definition: {
           id: "faculty-coordinators",
           title: "Faculty Coordinators",
           order: 1
         },
-        members: facultyMembers
+        members: combinedFacultyAndStaff
       });
     }
 
@@ -416,9 +442,23 @@ const TeamPage: React.FC = () => {
 
     // =========================================================================
     // STEP 3: Department Roles in Configured Hierarchy Order
-    // (Excluding individual leadership titles that are already in Club Organizers)
+    // (Excluding individual leadership titles that are already in Club Organizers / Faculty)
     // =========================================================================
-    const leadershipRoleKeywords = ["organizer", "co-organizer", "co organizer", "secretary", "facilitator", "club organizer", "club organizers", "faculty coordinator", "faculty coordinators"];
+    const leadershipRoleKeywords = [
+      "organizer", 
+      "co-organizer", 
+      "co organizer", 
+      "secretary", 
+      "facilitator", 
+      "club organizer", 
+      "club organizers", 
+      "faculty coordinator", 
+      "faculty coordinators",
+      "faculty",
+      "staff",
+      "staff member",
+      "staff members"
+    ];
 
     const departmentRoles = activeRolesList.filter(roleName => {
       const rLower = roleName.toLowerCase().trim();
@@ -552,7 +592,7 @@ const TeamPage: React.FC = () => {
                     : "flex overflow-x-auto snap-x snap-mandatory gap-3 sm:gap-7 pb-4 sm:pb-0 -mx-4 px-4 sm:mx-0 sm:px-0 sm:grid sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 sm:overflow-visible [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
                 }>
                   {members.map((member, idx) => {
-                    const formattedRole = formatRoleLabel(member.position || member.role || member.roleType || "Member");
+                    const formattedRole = getMemberDisplayRole(member);
 
                     return (
                       <div
