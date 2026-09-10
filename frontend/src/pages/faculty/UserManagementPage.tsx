@@ -50,6 +50,7 @@ import { compressImageBase64 } from "../../utils/imageCompressor";
 
 export interface UserItem {
   id: string;
+  _id?: string;
   name: string;
   email: string;
   personal_email?: string;
@@ -57,6 +58,8 @@ export interface UserItem {
   phone?: string;
   role: "Faculty Coordinator" | "Student Organizer" | "Volunteer" | "Guest" | "Student Member" | "Organizer" | "Convener" | "Event Manager" | "System Admin" | "Jury Evaluator" | string;
   position?: string;
+  sub_role?: string;
+  order?: number;
   status: "Active" | "Pending" | "Deactivated" | string;
   image?: string;
   showInAbout?: "Yes" | "No";
@@ -144,54 +147,97 @@ const UserManagementPage: React.FC = () => {
   const [users, setUsers] = useState<UserItem[]>([]);
 
   // Fetch users from database
-  React.useEffect(() => {
-    const loadUsers = async () => {
+  const loadUsers = React.useCallback(async () => {
+    try {
+      const combinedList: UserItem[] = [];
+      const seenEmails = new Set<string>();
+
+      // 1. Fetch from backend users collection
       try {
-        const combinedList: UserItem[] = [];
-        const seenEmails = new Set<string>();
+        const backendUsers = await apiFetchUsers();
+        if (backendUsers && backendUsers.length > 0) {
+          backendUsers.forEach((u: any) => {
+            const name = (u.name || u.display_name || u.displayName || "").trim();
+            const email = (u.email || "").toLowerCase().trim();
+            if (!name && !email) return;
 
-        // 1. Fetch from backend users collection
-        try {
-          const backendUsers = await apiFetchUsers();
-          if (backendUsers && backendUsers.length > 0) {
-            backendUsers.forEach((u: any) => {
-              const name = (u.name || u.display_name || u.displayName || "").trim();
-              const email = (u.email || "").toLowerCase().trim();
-              if (!name && !email) return;
-              if (name.toLowerCase() === "unnamed user" && !email) return;
+            if (email) seenEmails.add(email);
+            combinedList.push({
+              id: u.id || u._id || "",
+              name: name || "User",
+              email: u.email || "",
+              personal_email: u.personal_email || u.personalEmail || "",
+              personalEmail: u.personal_email || u.personalEmail || "",
+              phone: u.phone || u.phoneNumber || "",
+              role: (u.role || u.roleType || "Student Member") as any,
+              position: u.position || u.sub_role || "",
+              status: (u.status || "Active") as any,
+              image: u.image || u.avatar || "",
+              showInAbout: (u.showInAbout === true || u.showInAbout === "Yes" || u.show_in_about) ? "Yes" : "No",
+              bio: u.bio || "",
+              linkedin: u.linkedin || "",
+              github: u.github || ""
+            });
+          });
+        }
+      } catch (backErr) {
+        console.warn("[UserManagement] Notice fetching users from backend:", backErr);
+      }
 
+      // 2. Fetch from Supabase
+      try {
+        const supaUsers = await userService.getUsers();
+        if (supaUsers && supaUsers.length > 0) {
+          supaUsers.forEach((su: any) => {
+            const email = (su.email || "").toLowerCase().trim();
+            const rawName = (su.name || su.display_name || "").trim();
+
+            if (email && seenEmails.has(email)) {
+              const idx = combinedList.findIndex(item => (item.email || "").toLowerCase().trim() === email);
+              if (idx >= 0) {
+                combinedList[idx] = {
+                  ...combinedList[idx],
+                  personal_email: combinedList[idx].personal_email || su.personal_email || "",
+                  personalEmail: combinedList[idx].personalEmail || su.personal_email || "",
+                  image: combinedList[idx].image || su.image || "",
+                  bio: combinedList[idx].bio || su.bio || "",
+                  linkedin: combinedList[idx].linkedin || su.linkedin || "",
+                  github: combinedList[idx].github || su.github || "",
+                  phone: combinedList[idx].phone || su.phone || "",
+                };
+              }
+            } else {
               if (email) seenEmails.add(email);
               combinedList.push({
-                id: u.id || u._id || u._doc || "",
-                name: name || "User",
-                email: u.email || "",
-                personal_email: u.personal_email || u.personalEmail || "",
-                personalEmail: u.personal_email || u.personalEmail || "",
-                phone: u.phone || u.phoneNumber || "",
-                role: (u.role || "Guest") as any,
-                position: u.position || u.sub_role || "",
-                status: (u.status || "Active") as any,
-                image: u.image || "",
-                showInAbout: (u.show_in_about || u.showInAbout) ? "Yes" : "No",
-                bio: u.bio || "",
-                linkedin: u.linkedin || "",
-                github: u.github || ""
+                id: su.id || "",
+                name: rawName || "Member",
+                email: su.email || "",
+                personal_email: su.personal_email || "",
+                personalEmail: su.personal_email || "",
+                phone: su.phone || "",
+                role: (su.role || "Student Member") as any,
+                position: su.position || su.role || "",
+                status: (su.status || "Active") as any,
+                image: su.image || "",
+                showInAbout: su.show_in_about ? "Yes" : "No",
+                bio: su.bio || "",
+                linkedin: su.linkedin || "",
+                github: su.github || ""
               });
-            });
-          }
-        } catch (backendErr) {
-          console.warn("[UserManagement] Notice fetching users from backend:", backendErr);
+            }
+          });
         }
+      } catch (supaErr) {
+        console.warn("[UserManagement] Notice fetching users from Supabase:", supaErr);
+      }
 
-        // 2. Fetch and merge from backend organizers
-        try {
-          const organizers = await fetchOrganizers().catch(() => []);
-          (organizers || []).forEach((org: any) => {
+      // 3. Fetch organizers
+      try {
+        const orgs = await fetchOrganizers();
+        if (orgs && orgs.length > 0) {
+          orgs.forEach((org: any) => {
             const email = (org.email || "").toLowerCase().trim();
             const rawName = (org.name || org.displayName || org.username || "").trim();
-
-            if (!rawName && !email) return;
-            if (rawName.toLowerCase() === "unnamed user" && !email) return;
 
             if (email && seenEmails.has(email)) {
               const idx = combinedList.findIndex(item => (item.email || "").toLowerCase().trim() === email);
@@ -206,6 +252,24 @@ const UserManagementPage: React.FC = () => {
                   github: combinedList[idx].github || org.github || "",
                   phone: combinedList[idx].phone || org.phone || org.phoneNumber || "",
                 };
+              } else {
+                 if (email) seenEmails.add(email);
+                 combinedList.push({
+                  id: org.id || org._id || "",
+                  name: rawName || "Organizer",
+                  email: org.email || "",
+                  personal_email: org.personal_email || org.personalEmail || "",
+                  personalEmail: org.personal_email || org.personalEmail || "",
+                  phone: org.phone || org.phoneNumber || "",
+                  role: (org.role || org.roleType || "Organizer") as any,
+                  position: org.position || org.sub_role || "",
+                  status: (org.status || "Active") as any,
+                  image: org.image || "",
+                  showInAbout: (org.showInAbout === true || org.showInAbout === "Yes" || org.show_in_about) ? "Yes" : "No",
+                  bio: org.bio || "",
+                  linkedin: org.linkedin || "",
+                  github: org.github || ""
+                });
               }
             } else {
               if (email) seenEmails.add(email);
@@ -227,30 +291,33 @@ const UserManagementPage: React.FC = () => {
               });
             }
           });
-        } catch (orgErr) {
-          console.warn("[UserManagement] Notice fetching organizers:", orgErr);
         }
-
-        // Filter out system administrative accounts and participant accounts from Club User Management
-        const validUsers = combinedList.filter((u) => {
-          const email = (u.email || "").toLowerCase().trim();
-          const role = String(u.role || "").toLowerCase().trim();
-          const name = (u.name || "").toLowerCase().trim();
-
-          if (SYSTEM_STAFF_EMAILS.includes(email) || email === "participant@aiverse.in") return false;
-          if (role === "participant" || role.includes("participant") || email.includes("participant") || email.startsWith("team")) return false;
-          if (name === "participant user" || name === "system admin" || name === "jury evaluator") return false;
-
-          return true;
-        });
-
-        setUsers(validUsers);
-      } catch (err) {
-        console.error("Error fetching users from database:", err);
+      } catch (orgErr) {
+        console.warn("[UserManagement] Notice fetching organizers:", orgErr);
       }
-    };
-    loadUsers();
+
+      // Filter out system administrative accounts and participant accounts from Club User Management
+      const validUsers = combinedList.filter((u) => {
+        const email = (u.email || "").toLowerCase().trim();
+        const role = String(u.role || "").toLowerCase().trim();
+        const name = (u.name || "").toLowerCase().trim();
+
+        if (SYSTEM_STAFF_EMAILS.includes(email) || email === "participant@aiverse.in") return false;
+        if (role === "participant" || role.includes("participant") || email.includes("participant") || email.startsWith("team")) return false;
+        if (name === "participant user" || name === "system admin" || name === "jury evaluator") return false;
+
+        return true;
+      });
+
+      setUsers(validUsers);
+    } catch (err) {
+      console.error("Error fetching users from database:", err);
+    }
   }, []);
+
+  React.useEffect(() => {
+    loadUsers();
+  }, [loadUsers]);
 
   // States
   const [searchQuery, setSearchQuery] = useState("");
@@ -2379,7 +2446,9 @@ const UserManagementPage: React.FC = () => {
       <TeamGraphModal 
         isOpen={showGraphModal} 
         onClose={() => setShowGraphModal(false)} 
-        users={users} 
+        users={users}
+        availableRoles={availableRoles}
+        onUsersUpdated={loadUsers}
       />
     </div>
   );

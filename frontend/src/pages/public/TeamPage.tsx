@@ -10,8 +10,31 @@ import Button from "../../components/ui/Button";
 import SEO from "../../components/layout/SEO";
 import { fetchSettings, fetchUsers, fetchOrganizers } from "../../services/apiClient";
 import { userService } from "../../services/userService";
-import { formatRoleLabel } from "../faculty/UserManagementPage";
 import { dataCache } from "../../utils/dataCache";
+
+const formatRoleLabel = (role: string): string => {
+  if (!role) return "Member";
+  const rLower = role.toLowerCase().trim();
+  if (rLower === "conviner" || rLower === "convener") return "Convener";
+  if (rLower === "media handing") return "Media Handling";
+  if (rLower === "pr and marketing") return "PR & Marketing";
+  if (rLower === "video and photography") return "Video & Photography";
+  if (rLower === "student organizer") return "Student Organizer";
+  if (rLower === "student co-organizer") return "Student Co-Organizer";
+  if (rLower === "faculty coordinator") return "Faculty Coordinator";
+  if (rLower === "mobile app developer") return "Mobile App Developer";
+  if (rLower === "web app developer" || rLower === "wed dev" || rLower === "web dev") return "Web Developer";
+  if (rLower === "event manager") return "Event Manager";
+  if (rLower === "volunteer") return "Volunteer";
+  if (rLower === "student member") return "Student Member";
+  if (rLower === "jury evaluator") return "Jury Evaluator";
+  if (rLower === "system admin") return "System Admin";
+
+  return role
+    .split(" ")
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(" ");
+};
 
 // Import local assets
 import heroImg from "../../assets/images/aether_hero.png";
@@ -36,6 +59,7 @@ interface MemberData {
   role: string;
   position?: string;
   roleType?: string;
+  order?: number;
   image: string;
   bio?: string;
   github?: string;
@@ -45,8 +69,8 @@ interface MemberData {
 
 const DEFAULT_ROLE_HIERARCHY = [
   "Faculty Coordinators",
-  "Student Leads",
-  "Technical",
+  "Club Organizers",
+  "Technical and Web Dev",
   "Design",
   "Content and Media",
   "Video and Photography",
@@ -85,11 +109,12 @@ const TeamPage: React.FC = () => {
           fetchOrganizers()
         ]);
 
-        // Process config roles
+        // Process config roles (prioritizing roleOrder from Team Roles Graph)
         if (configRes.status === "fulfilled" && configRes.value) {
           const configData = configRes.value;
-          if (configData.availableRoles && Array.isArray(configData.availableRoles) && configData.availableRoles.length > 0) {
-            setConfiguredRoles(configData.availableRoles);
+          const roles = configData.roleOrder || configData.availableRoles;
+          if (roles && Array.isArray(roles) && roles.length > 0) {
+            setConfiguredRoles(roles);
           }
         }
 
@@ -133,6 +158,7 @@ const TeamPage: React.FC = () => {
                   linkedin: combinedList[idx].linkedin || data.linkedin || "",
                   github: combinedList[idx].github || data.github || "",
                   position: combinedList[idx].position || data.position || data.role || "",
+                  order: data.order !== undefined ? data.order : combinedList[idx].order,
                 };
               }
             } else if (email) {
@@ -146,6 +172,7 @@ const TeamPage: React.FC = () => {
                 position: data.position || data.role || "",
                 roleType: data.roleType || data.role || "Organizer",
                 status: data.status || "Active",
+                order: data.order,
                 image: data.image || "",
                 bio: data.bio || "",
                 linkedin: data.linkedin || "",
@@ -170,6 +197,7 @@ const TeamPage: React.FC = () => {
                   linkedin: combinedList[idx].linkedin || data.linkedin || "",
                   github: combinedList[idx].github || data.github || "",
                   position: combinedList[idx].position || data.position || data.roleType || "",
+                  order: data.order !== undefined ? data.order : combinedList[idx].order,
                 };
               }
             } else if (email) {
@@ -183,6 +211,7 @@ const TeamPage: React.FC = () => {
                 position: data.position || data.sub_role || data.role || "",
                 roleType: data.roleType || data.role || "Organizer",
                 status: data.status || "Active",
+                order: data.order,
                 image: data.image || "",
                 bio: data.bio || "",
                 linkedin: data.linkedin || "",
@@ -324,6 +353,13 @@ const TeamPage: React.FC = () => {
   };
 
   const compareMembersByRank = (a: MemberData, b: MemberData): number => {
+    // If explicit order is set via Team Roles Graph, respect it
+    if (a.order !== undefined && b.order !== undefined && a.order !== b.order) {
+      return a.order - b.order;
+    }
+    if (a.order !== undefined && b.order === undefined) return -1;
+    if (a.order === undefined && b.order !== undefined) return 1;
+
     const rankA = getSubRoleRank(a);
     const rankB = getSubRoleRank(b);
     if (rankA !== rankB) return rankA - rankB;
@@ -337,6 +373,22 @@ const TeamPage: React.FC = () => {
     const mType = (member.roleType || "").toLowerCase().trim();
     const combined = `${mPos} ${mRole} ${mType}`.toLowerCase().trim();
     const target = targetRole.toLowerCase().trim();
+
+    // Special handling for consolidated "Technical and Web Dev"
+    if (
+      target === "technical and web dev" ||
+      target === "technical and webdev" ||
+      target === "technical & web dev"
+    ) {
+      return (
+        combined.includes("technical") ||
+        combined.includes("web dev") ||
+        combined.includes("wed dev") ||
+        combined.includes("web developer") ||
+        combined.includes("web development") ||
+        combined.includes("web app developer")
+      );
+    }
 
     // Exact matches
     if (mRole === target || mPos === target || mType === target) return true;
@@ -460,10 +512,37 @@ const TeamPage: React.FC = () => {
       "staff members"
     ];
 
-    const departmentRoles = activeRolesList.filter(roleName => {
+    const rawDepartmentRoles = activeRolesList.filter(roleName => {
       const rLower = roleName.toLowerCase().trim();
       return !leadershipRoleKeywords.includes(rLower);
     });
+
+    // Consolidate Technical and Web Dev into one single section
+    const departmentRoles: string[] = [];
+    let technicalAndWebDevAdded = false;
+
+    rawDepartmentRoles.forEach(roleName => {
+      const rLower = roleName.toLowerCase().trim();
+      if (
+        rLower === "technical" ||
+        rLower === "web dev" ||
+        rLower === "wed dev" ||
+        rLower === "technical and web dev" ||
+        rLower === "technical and webdev" ||
+        rLower === "technical & web dev"
+      ) {
+        if (!technicalAndWebDevAdded) {
+          departmentRoles.push("Technical and Web Dev");
+          technicalAndWebDevAdded = true;
+        }
+      } else {
+        departmentRoles.push(roleName);
+      }
+    });
+
+    if (!technicalAndWebDevAdded) {
+      departmentRoles.unshift("Technical and Web Dev");
+    }
 
     let currentOrder = 3;
     departmentRoles.forEach(roleName => {
