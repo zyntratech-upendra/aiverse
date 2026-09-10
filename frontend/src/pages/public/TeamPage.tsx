@@ -64,22 +64,13 @@ const EXCLUDED_SYSTEM_EMAILS = [
   "studentorganizer@aiverse.in",
   "jurry@aiverse.in",
   "jury@aiverse.in",
-  "participant@aiverse.in",
-  "ananya@aiverse.in",
-  "vikram@aiverse.in"
+  "participant@aiverse.in"
 ];
 
 const BLANK_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2394A3B8'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E";
 
 const TeamPage: React.FC = () => {
-  const [dbMembers, setDbMembers] = useState<MemberData[]>(() => {
-    const cached = dataCache.get<MemberData[]>("public_team") || [];
-    return cached.filter(m => {
-      const name = (m.name || "").toLowerCase().trim();
-      const email = (m.email || "").toLowerCase().trim();
-      return !name.includes("ananya verma") && !name.includes("vikram reddy") && email !== "ananya@aiverse.in" && email !== "vikram@aiverse.in";
-    });
-  });
+  const [dbMembers, setDbMembers] = useState<MemberData[]>(() => dataCache.get<MemberData[]>("public_team") || []);
   const [configuredRoles, setConfiguredRoles] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(() => !dataCache.get<MemberData[]>("public_team"));
 
@@ -213,8 +204,6 @@ const TeamPage: React.FC = () => {
 
           if (EXCLUDED_SYSTEM_EMAILS.includes(email)) return false;
           if (name === "system admin" || name === "jury evaluator" || name === "jury panelist") return false;
-          if (name.includes("ananya verma") || name.includes("vikram reddy")) return false;
-          if (m.id === "org-ananya-verma" || m.id === "org-vikram-reddy") return false;
           if (role === "system admin" || role === "jury evaluator") return false;
           if (status === "deactivated") return false;
 
