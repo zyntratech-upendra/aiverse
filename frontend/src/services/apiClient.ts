@@ -1,4 +1,28 @@
 const API_BASE = ((import.meta.env.VITE_API_BASE as string) || 'http://localhost:4000/api').replace(/\/+$/, '');
+
+// Retry helper for transient network/backend failures
+async function fetchWithRetry(url: string, options: RequestInit, retries = 2, delayMs = 1000): Promise<Response> {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      const res = await fetch(url, options);
+      if (res.ok || res.status < 500) return res; // Don't retry client errors (4xx)
+      if (attempt < retries) {
+        console.warn(`[apiClient] Server error ${res.status} on ${url}, retrying (${attempt + 1}/${retries})...`);
+        await new Promise(r => setTimeout(r, delayMs * (attempt + 1)));
+      } else {
+        return res;
+      }
+    } catch (err) {
+      if (attempt < retries) {
+        console.warn(`[apiClient] Network error on ${url}, retrying (${attempt + 1}/${retries})...`, (err as Error).message);
+        await new Promise(r => setTimeout(r, delayMs * (attempt + 1)));
+      } else {
+        throw err;
+      }
+    }
+  }
+  throw new Error(`Failed after ${retries} retries: ${url}`);
+}
 let TOKEN: string | null = null;
 
 // Initialize token from localStorage if available
@@ -382,7 +406,8 @@ export async function deleteEvent(eventId: string) {
 // ==========================================
 export async function fetchRegistrations(query?: { eventId?: string; userId?: string; userEmail?: string }) {
   const params = new URLSearchParams(query as any).toString();
-  const res = await fetch(`${API_BASE}/registrations${params ? `?${params}` : ''}`, { headers: authHeaders() });
+  const url = `${API_BASE}/registrations${params ? `?${params}` : ''}`;
+  const res = await fetchWithRetry(url, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to fetch registrations');
   return res.json();
 }
@@ -437,7 +462,8 @@ export async function deleteParticipantCascade(registrationId: string, emailList
 // ==========================================
 export async function fetchUsers(query?: { role?: string; email?: string }) {
   const params = new URLSearchParams(query as any).toString();
-  const res = await fetch(`${API_BASE}/users${params ? `?${params}` : ''}`, { headers: authHeaders() });
+  const url = `${API_BASE}/users${params ? `?${params}` : ''}`;
+  const res = await fetchWithRetry(url, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to fetch users');
   return res.json();
 }
