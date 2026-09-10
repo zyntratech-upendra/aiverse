@@ -9,6 +9,7 @@
     "sync-src": "node scripts/copy_src.js"
   },
   "dependencies": {
+    "firebase": "^12.19.0",
     "framer-motion": "^12.42.2",
     "jsqr": "^1.4.0",
     "lucide-react": "^1.23.0",

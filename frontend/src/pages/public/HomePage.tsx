@@ -4,10 +4,6 @@ import { motion } from "framer-motion";
 import {
   Sparkles,
   ArrowRight,
-  BarChart3,
-  Calendar,
-  Beaker,
-  TrendingUp,
   Rocket,
   Eye,
   BookOpen,
@@ -16,9 +12,9 @@ import {
 } from "lucide-react";
 import Button from "../../components/ui/Button";
 import SEO from "../../components/layout/SEO";
-import { db } from "../../config/firebase";
-import { collection, getDocs, query, orderBy } from "firebase/firestore";
+
 import { dataCache } from "../../utils/dataCache";
+import HeroImageCarousel from "../../components/home/HeroImageCarousel";
 
 // Fallback assets
 import sparkImg from "../../assets/images/spark.png";
@@ -62,18 +58,18 @@ const HomePage: React.FC = () => {
   useEffect(() => {
     const fetchHighlights = async () => {
       try {
-        const q = query(collection(db, "events"), orderBy("createdAt", "desc"));
-        const querySnapshot = await getDocs(q);
+        const API_BASE = ((import.meta.env.VITE_API_BASE as string) || 'http://localhost:4000/api').replace(/\/+$/, '');
+        const res = await fetch(`${API_BASE}/events`);
+        const eventsData: any[] = res.ok ? await res.json() : [];
         const list: HighlightEvent[] = [];
         const titlesSeen = new Set<string>();
 
-        querySnapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          if (data.status === "Draft") return;
+        for (const data of eventsData) {
+          if (data.status === "Draft") continue;
 
           const title = (data.title || "").trim();
 
-          if (title && titlesSeen.has(title.toLowerCase())) return;
+          if (title && titlesSeen.has(title.toLowerCase())) continue;
           if (title) titlesSeen.add(title.toLowerCase());
 
           let eventType = "Workshop";
@@ -89,7 +85,7 @@ const HomePage: React.FC = () => {
           }
 
           list.push({
-            id: docSnap.id,
+            id: data.id || data._id,
             title: title,
             category: eventType,
             date: data.date || "Oct 24",
@@ -97,7 +93,7 @@ const HomePage: React.FC = () => {
             image: img,
             iconType: eventType === "Hackathon" ? "globe" : "network"
           });
-        });
+        }
 
         if (list.length > 0) {
           const parseEventDate = (dateStr: string): number => {
@@ -268,104 +264,15 @@ const HomePage: React.FC = () => {
               </motion.div>
             </motion.div>
 
-            {/* Right Stat Cards Column */}
+            {/* Right Image Carousel Column */}
             <motion.div
               className="lg:col-span-5 relative min-h-[380px] flex items-center justify-center"
               initial={{ opacity: 0, x: 50 }}
               animate={{ opacity: 1, x: 0 }}
               transition={{ duration: 0.8, ease: "easeOut" as const }}
             >
-              {/* Stats card container with floating visual cards */}
-              <div className="space-y-4 max-w-[360px] w-full mx-auto relative lg:mr-0">
-                {/* Top Row: Two Square Cards */}
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Card 1: Active Members */}
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{
-                      opacity: 1,
-                      y: [0, -10, 0],
-                    }}
-                    transition={{
-                      y: {
-                        duration: 5.5,
-                        repeat: Infinity,
-                        ease: "easeInOut" as const
-                      },
-                      opacity: { duration: 0.5, delay: 0.1 }
-                    }}
-                    whileHover={{ scale: 1.03, transition: { duration: 0.2 } }}
-                    className="glass-panel rounded-card shadow-card p-6 flex flex-col justify-between aspect-square text-left transition-all duration-300 hover:shadow-cardHover hover:border-blue-200/50"
-                  >
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-blue-50 text-blue-600 shadow-inner">
-                      <BarChart3 className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <div className="text-3xl font-extrabold text-aether-dark tracking-tight">2.5k+</div>
-                      <div className="text-[11px] sm:text-xs text-slate-500 font-semibold tracking-wide mt-1">Participants</div>
-                    </div>
-                  </motion.div>
-
-                  {/* Card 2: Yearly Events */}
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{
-                      opacity: 1,
-                      y: [-6, 4, -6],
-                    }}
-                    transition={{
-                      y: {
-                        duration: 5,
-                        repeat: Infinity,
-                        ease: "easeInOut" as const
-                      },
-                      opacity: { duration: 0.5, delay: 0.2 }
-                    }}
-                    whileHover={{ scale: 1.03, transition: { duration: 0.2 } }}
-                    className="glass-panel rounded-card shadow-card p-6 flex flex-col justify-between aspect-square text-left transition-all duration-300 hover:shadow-cardHover hover:border-sky-200/50"
-                  >
-                    <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-sky-50 text-sky-600 shadow-inner">
-                      <Calendar className="h-5 w-5" />
-                    </div>
-                    <div>
-                      <div className="text-3xl font-extrabold text-aether-dark tracking-tight">20+</div>
-                      <div className="text-[11px] sm:text-xs text-slate-500 font-semibold tracking-wide mt-1">Yearly Events</div>
-                    </div>
-                  </motion.div>
-                </div>
-
-                {/* Bottom Row: Wide Card */}
-                <motion.div
-                  initial={{ opacity: 0, y: 20 }}
-                  animate={{
-                    opacity: 1,
-                    y: [4, -6, 4],
-                  }}
-                  transition={{
-                    y: {
-                      duration: 6.5,
-                      repeat: Infinity,
-                      ease: "easeInOut" as const
-                    },
-                    opacity: { duration: 0.5, delay: 0.3 }
-                  }}
-                  whileHover={{ scale: 1.02, transition: { duration: 0.2 } }}
-                  className="glass-panel rounded-card shadow-card p-6 flex items-center justify-between text-left transition-all duration-300 w-full hover:shadow-cardHover hover:border-emerald-200/50"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="w-12 h-12 rounded-xl flex items-center justify-center bg-emerald-50 text-emerald-600 shadow-inner">
-                      <Beaker className="h-6 w-6" />
-                    </div>
-                    <div>
-                      <div className="text-2xl sm:text-3xl font-extrabold text-aether-dark tracking-tight">300+</div>
-                      <div className="text-[11px] sm:text-xs text-slate-500 font-semibold tracking-wide mt-0.5">Innovative Projects Delivered</div>
-                    </div>
-                  </div>
-                  <div className="p-1.5 bg-emerald-50 text-emerald-600 rounded-lg shrink-0">
-                    <TrendingUp className="h-4 w-4" />
-                  </div>
-                </motion.div>
-              </div>
+              {/* Auto-sliding Image Carousel */}
+              <HeroImageCarousel />
             </motion.div>
 
           </div>
@@ -392,7 +299,7 @@ const HomePage: React.FC = () => {
               <motion.div variants={fadeInUp} className="lg:col-span-5 space-y-4">
                 <div className="relative rounded-2xl overflow-hidden aspect-[4/3] bg-slate-900 shadow-md group border border-slate-100">
                   <img
-                    src={sparkImg}
+                    src="/homepage/g.jpeg"
                     alt="AI Verse Community at VIT Bhimavaram"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
                   />
