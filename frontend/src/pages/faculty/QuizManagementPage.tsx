@@ -111,15 +111,14 @@ export const QuizManagementPage: React.FC = () => {
 
   // Automatically update selectedQuizId when filteredQuizzes or quizzes change
   useEffect(() => {
-    const listToPick = filteredQuizzes.length > 0 ? filteredQuizzes : quizzes;
-    if (listToPick.length > 0) {
-      if (!selectedQuizId || !listToPick.some((q) => q.id === selectedQuizId)) {
-        setSelectedQuizId(listToPick[0].id);
+    if (filteredQuizzes.length > 0) {
+      if (!selectedQuizId || !filteredQuizzes.some((q) => q.id === selectedQuizId)) {
+        setSelectedQuizId(filteredQuizzes[0].id);
       }
     } else {
       setSelectedQuizId("");
     }
-  }, [filteredQuizzes, quizzes, selectedQuizId]);
+  }, [filteredQuizzes, selectedQuizId]);
 
   // View state: "list" or "editor" (Full-page editor mode)
   const [isEditorMode, setIsEditorMode] = useState<boolean>(false);
@@ -2231,12 +2230,17 @@ Answer: A`;
                   value={selectedQuizId}
                   onChange={(e) => setSelectedQuizId(e.target.value)}
                   className="bg-slate-50 border border-slate-200 text-xs font-bold text-[#0F172A] px-3 py-1.5 rounded-xl focus:outline-none focus:ring-2 focus:ring-blue-500 max-w-xs sm:max-w-md truncate cursor-pointer"
+                  disabled={filteredQuizzes.length === 0}
                 >
-                  {(filteredQuizzes.length > 0 ? filteredQuizzes : quizzes).map((q) => (
-                    <option key={q.id} value={q.id}>
-                      {q.title} ({q.questions?.length || q.questionsCount || 0} Qs){q.eventTitle ? ` • ${q.eventTitle}` : ""}
-                    </option>
-                  ))}
+                  {filteredQuizzes.length > 0 ? (
+                    filteredQuizzes.map((q) => (
+                      <option key={q.id} value={q.id}>
+                        {q.title} ({q.questions?.length || q.questionsCount || 0} Qs){q.eventTitle ? ` • ${q.eventTitle}` : ""}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">No quizzes available</option>
+                  )}
                 </select>
               </div>
 
@@ -2346,12 +2350,17 @@ Answer: A`;
                   value={selectedQuizId}
                   onChange={(e) => setSelectedQuizId(e.target.value)}
                   className="bg-slate-50 border border-slate-200 text-xs font-bold text-[#0F172A] px-3 py-1.5 rounded-xl outline-none focus:ring-2 focus:ring-blue-500/20 max-w-xs sm:max-w-md truncate cursor-pointer"
+                  disabled={filteredQuizzes.length === 0}
                 >
-                  {(filteredQuizzes.length > 0 ? filteredQuizzes : quizzes).map((q) => (
-                    <option key={q.id} value={q.id}>
-                      {q.title} ({q.questions?.length || q.questionsCount || 0} Qs){q.eventTitle ? ` • ${q.eventTitle}` : ""}
-                    </option>
-                  ))}
+                  {filteredQuizzes.length > 0 ? (
+                    filteredQuizzes.map((q) => (
+                      <option key={q.id} value={q.id}>
+                        {q.title} ({q.questions?.length || q.questionsCount || 0} Qs){q.eventTitle ? ` • ${q.eventTitle}` : ""}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">No quizzes available</option>
+                  )}
                 </select>
               </div>
 

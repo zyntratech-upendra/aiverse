@@ -24,8 +24,7 @@ import {
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
-import { db } from "../../config/firebase";
-import { doc, getDoc, getDocs, collection, addDoc, updateDoc, increment } from "firebase/firestore";
+import { db, doc, getDoc, getDocs, collection, addDoc, updateDoc, increment } from "../../config/firebase";
 import { userService } from "../../services/userService";
 import { fetchEvents, fetchEventById, createRegistration, uploadImage, sendEmail } from "../../services/apiClient";
 
@@ -74,6 +73,8 @@ const RegistrationPage: React.FC = () => {
   const [leadPersonalEmail, setLeadPersonalEmail] = useState("");
   const [leadStudentId, setLeadStudentId] = useState("");
   const [leadPhone, setLeadPhone] = useState("");
+  const [leadCollegeName, setLeadCollegeName] = useState("");
+  const [leadCollegePlace, setLeadCollegePlace] = useState("");
 
   // Step 2 Form States (Additional Members & Food Preferences)
   const [members, setMembers] = useState<Teammate[]>([]);
@@ -293,6 +294,14 @@ const RegistrationPage: React.FC = () => {
       alert(isQuiz ? "Please enter your Phone Number." : "Please enter the Team Lead's Phone Number.");
       return false;
     }
+    if (!leadCollegeName.trim()) {
+      alert("Please enter the name of your college.");
+      return false;
+    }
+    if (!leadCollegePlace.trim()) {
+      alert("Please enter the place/location of your college.");
+      return false;
+    }
     return true;
   };
 
@@ -490,6 +499,8 @@ const RegistrationPage: React.FC = () => {
         teamLeadPhone: leadPhone.trim(),
         phoneNumber: leadPhone.trim(),
         phone: leadPhone.trim(),
+        collegeName: leadCollegeName.trim(),
+        collegePlace: leadCollegePlace.trim(),
         teamPassword: isQuiz ? commonQuizPassword : undefined,
         accessGranted: isQuiz ? isEventLoginAllowed : false,
         loginAccessGranted: isQuiz ? isEventLoginAllowed : false,
@@ -1133,6 +1144,37 @@ const RegistrationPage: React.FC = () => {
                         className="w-full px-4 py-2.5 border border-slate-200 rounded-2xl focus:outline-none focus:border-blue-500 font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all"
                       />
                     </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label htmlFor="reg-lead-college-name" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                          Name of the College <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          id="reg-lead-college-name"
+                          name="collegeName"
+                          type="text"
+                          placeholder="e.g. Vishnu Institute of Technology"
+                          value={leadCollegeName}
+                          onChange={(e) => setLeadCollegeName(e.target.value)}
+                          className="w-full px-4 py-2.5 border border-slate-200 rounded-2xl focus:outline-none focus:border-blue-500 font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="reg-lead-college-place" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                          Place of the College <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          id="reg-lead-college-place"
+                          name="collegePlace"
+                          type="text"
+                          placeholder="e.g. Bhimavaram"
+                          value={leadCollegePlace}
+                          onChange={(e) => setLeadCollegePlace(e.target.value)}
+                          className="w-full px-4 py-2.5 border border-slate-200 rounded-2xl focus:outline-none focus:border-blue-500 font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all"
+                        />
+                      </div>
+                    </div>
                   </div>
                 ) : (
                   <>
@@ -1253,6 +1295,37 @@ const RegistrationPage: React.FC = () => {
                           placeholder="1234567890"
                           value={leadPhone}
                           onChange={(e) => setLeadPhone(e.target.value)}
+                          className="w-full px-4 py-2.5 border border-slate-200 rounded-2xl focus:outline-none focus:border-blue-500 font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all"
+                        />
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label htmlFor="reg-team-lead-college-name" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                          Name of the College <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          id="reg-team-lead-college-name"
+                          name="collegeName"
+                          type="text"
+                          placeholder="e.g. Vishnu Institute of Technology"
+                          value={leadCollegeName}
+                          onChange={(e) => setLeadCollegeName(e.target.value)}
+                          className="w-full px-4 py-2.5 border border-slate-200 rounded-2xl focus:outline-none focus:border-blue-500 font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all"
+                        />
+                      </div>
+                      <div>
+                        <label htmlFor="reg-team-lead-college-place" className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                          Place of the College <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          id="reg-team-lead-college-place"
+                          name="collegePlace"
+                          type="text"
+                          placeholder="e.g. Bhimavaram"
+                          value={leadCollegePlace}
+                          onChange={(e) => setLeadCollegePlace(e.target.value)}
                           className="w-full px-4 py-2.5 border border-slate-200 rounded-2xl focus:outline-none focus:border-blue-500 font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all"
                         />
                       </div>
