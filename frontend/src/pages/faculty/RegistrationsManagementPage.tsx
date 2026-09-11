@@ -29,7 +29,6 @@ import {
 } from "../../services/apiClient";
 import { sendResendEmail } from "../../utils/resendEmailService";
 import { buildRegistrationConfirmationEmail } from "../../utils/emailTemplates";
-import { userService } from "../../services/userService";
 
 interface RegistrationItem {
   id: string;
@@ -44,6 +43,9 @@ interface RegistrationItem {
   teamLeadStudentId: string;
   phoneNumber: string;
   teamLeadPhone?: string;
+  collegeName?: string;
+  college?: string;
+  collegePlace?: string;
   branch: string;
   section: string;
   year: string;
@@ -271,7 +273,6 @@ const RegistrationsManagementPage: React.FC = () => {
         const primaryEmail = data.teamLeadEmail || personalEmail || collegeEmail || "";
 
         const rawStatus = (data.status || "").trim();
-        const rawPaymentStatus = (data.paymentStatus || "").trim();
         
         let resolvedStatus: "Confirmed" | "Not Confirmed" | "Waitlisted" = "Confirmed";
         if (rawStatus.toLowerCase() === "waitlisted") {
@@ -786,6 +787,11 @@ const RegistrationsManagementPage: React.FC = () => {
                               <span className="text-[10px] text-slate-450 font-medium">
                                 Lead: {reg.teamLeadName} {reg.teamLeadStudentId ? `(${reg.teamLeadStudentId})` : ""}
                               </span>
+                              {(reg.collegeName || reg.college || reg.collegePlace) && (
+                                <span className="text-[10px] text-slate-400 font-medium whitespace-normal leading-tight mt-0.5 max-w-[250px]">
+                                  {reg.collegeName || reg.college || "Unknown College"}{reg.collegePlace ? ` - ${reg.collegePlace}` : ""}
+                                </span>
+                              )}
                             </div>
                           </div>
                         </td>
@@ -980,7 +986,7 @@ const RegistrationsManagementPage: React.FC = () => {
       {/* Registration Details Modal */}
       {selectedReg && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-2xl max-w-4xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 text-left">
+          <div className="bg-white rounded-3xl border border-slate-100 shadow-2xl max-w-5xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 text-left">
             {/* Sticky Header */}
             <div className="p-5 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/80 shrink-0">
               <div>
@@ -1020,7 +1026,7 @@ const RegistrationsManagementPage: React.FC = () => {
                   <UsersIcon className="h-3.5 w-3.5 text-blue-600" />
                   Group Summary & Contact Details
                 </h4>
-                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 text-xs">
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4 text-xs">
                   {/* Group Name */}
                   <div className="space-y-1">
                     <span className="text-[10px] font-bold text-slate-400 block uppercase">Group Name</span>
@@ -1170,9 +1176,45 @@ const RegistrationsManagementPage: React.FC = () => {
                     )}
                   </div>
 
+                  {/* College Details */}
+                  <div className="space-y-1">
+                    <span className="text-[10px] font-bold text-slate-400 block uppercase">College Info</span>
+                    {isEditing ? (
+                      <div className="space-y-1">
+                        <input 
+                          type="text" 
+                          placeholder="College Name"
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-500 bg-white" 
+                          value={editForm?.collegeName || editForm?.college || ""}
+                          onChange={(e) => setEditForm(prev => prev ? { ...prev, collegeName: e.target.value } : null)}
+                        />
+                        <input 
+                          type="text" 
+                          placeholder="College Place"
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:outline-none focus:border-blue-500 bg-white" 
+                          value={editForm?.collegePlace || ""}
+                          onChange={(e) => setEditForm(prev => prev ? { ...prev, collegePlace: e.target.value } : null)}
+                        />
+                      </div>
+                    ) : (
+                      <div className="flex flex-col mt-0.5">
+                        <span className="text-xs font-bold text-slate-800 truncate" title={selectedReg.collegeName || selectedReg.college}>
+                          <Building2 className="w-3 h-3 inline mr-1 text-slate-400" />
+                          {selectedReg.collegeName || selectedReg.college || "Not Provided"}
+                        </span>
+                        {selectedReg.collegePlace && (
+                          <span className="text-[10px] font-medium text-slate-450 truncate mt-0.5 block">
+                            <MapPin className="w-2.5 h-2.5 inline mr-1 text-slate-400" />
+                            {selectedReg.collegePlace}
+                          </span>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
                   {/* Food / Hospitality Preference */}
                   {selectedReg.foodPreference && (
-                    <div className="space-y-1 sm:col-span-2 md:col-span-3 pt-2 border-t border-slate-200/50 flex flex-wrap items-center justify-between gap-2">
+                    <div className="space-y-1 sm:col-span-2 md:col-span-4 pt-2 border-t border-slate-200/50 flex flex-wrap items-center justify-between gap-2">
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Dining / Food Preference:</span>
                         <span className="px-2.5 py-0.5 rounded-full text-xs font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">
@@ -1183,7 +1225,7 @@ const RegistrationsManagementPage: React.FC = () => {
                   )}
 
                   {/* Registration Date */}
-                  <div className="space-y-1 sm:col-span-2 md:col-span-3 pt-2 border-t border-slate-200/50 flex flex-wrap items-center justify-between gap-2 text-slate-500">
+                  <div className="space-y-1 sm:col-span-2 md:col-span-4 pt-2 border-t border-slate-200/50 flex flex-wrap items-center justify-between gap-2 text-slate-500">
                     <div className="flex items-center gap-1.5">
                       <Calendar className="w-3.5 h-3.5 text-slate-400 shrink-0" />
                       <span className="text-[11px] font-semibold text-slate-600">
