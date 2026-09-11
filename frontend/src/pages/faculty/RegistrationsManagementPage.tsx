@@ -19,7 +19,8 @@ import {
   Mail,
   Building2,
   GraduationCap,
-  Calendar
+  Calendar,
+  MapPin
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
 import { 
@@ -300,6 +301,8 @@ const RegistrationsManagementPage: React.FC = () => {
           teamLeadStudentId: studentId,
           phoneNumber: phone,
           teamLeadPhone: phone,
+          collegeName: data.collegeName || data.college || "",
+          collegePlace: data.collegePlace || "",
           branch: data.branch || data.department || "",
           section: data.section || "",
           year: data.year || "",
