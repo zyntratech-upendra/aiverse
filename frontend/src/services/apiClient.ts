@@ -263,6 +263,35 @@ export async function fetchQuizSubmissions(quizId: string) {
   return res.json();
 }
 
+export async function updateQuizSubmission(quizId: string, submissionId: string, patch: any) {
+  const res = await fetch(`${API_BASE}/quizzes/${quizId}/submissions/${submissionId}`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error('Failed to update submission score');
+  return res.json();
+}
+
+export async function batchUpdateQuizSubmissions(quizId: string, updates: any[]) {
+  try {
+    const res = await fetch(`${API_BASE}/quizzes/${quizId}/submissions-batch`, {
+      method: 'PUT',
+      headers: authHeaders(),
+      body: JSON.stringify({ updates }),
+    });
+    if (res.ok) return res.json();
+  } catch (e) {
+    console.warn('Batch endpoint failed, falling back to sequential update:', e);
+  }
+
+  // Fallback to parallel individual updates
+  await Promise.all(
+    updates.map((u) => updateQuizSubmission(quizId, u.id, u))
+  );
+  return { success: true, updatedCount: updates.length };
+}
+
 export async function fetchQuizSessions(quizId: string) {
   const res = await fetch(`${API_BASE}/quizzes/${quizId}/sessions`, { headers: authHeaders() });
   if (!res.ok) return [];

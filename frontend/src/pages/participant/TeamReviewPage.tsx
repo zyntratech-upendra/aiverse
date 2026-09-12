@@ -25,9 +25,8 @@ import {
   Loader2
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
-import { db } from "../../config/firebase";
-import { doc, getDoc, setDoc, updateDoc, collection, getDocs } from "firebase/firestore";
-import { fetchRegistrations } from "../../services/apiClient";
+import { db, doc, getDoc, setDoc, updateDoc } from "../../config/firebase";
+import { fetchRegistrations, updateRegistration } from "../../services/apiClient";
 
 interface TeamMember {
   name: string;
@@ -132,16 +131,31 @@ export const TeamReviewPage: React.FC<TeamReviewPageProps> = ({ embedded = false
             targetReg = allRegs.find((r) => r.id === user.registrationId);
           }
 
-          // Rank 1: Match by exact assigned email in teamLeadEmail, teamEmail, or members array
+          // Rank 1: Match by exact assigned email across ALL email fields on a registration
+          const matchesEmail = (r: any, email: string): boolean => {
+            const emailFields = [
+              r.teamLeadEmail, r.teamEmail, r.teamLeadCollegeEmail,
+              r.teamLeadPersonalEmail, r.collegeEmail, r.personalEmail,
+              r.email, r.userEmail, r.leadEmail
+            ];
+            for (const field of emailFields) {
+              if (field && typeof field === 'string' && field.toLowerCase().trim() === email) return true;
+            }
+            if (Array.isArray(r.members) && r.members.some((m: any) => m.email?.toLowerCase().trim() === email)) return true;
+            return false;
+          };
+
           if (!targetReg && cleanEmail) {
+            // Prefer team registrations first (non-quiz events)
             targetReg = allRegs.find((r) => {
-              const leadEmail = (r.teamLeadEmail || "").toLowerCase().trim();
-              const tEmail = (r.teamEmail || "").toLowerCase().trim();
-              if (leadEmail === cleanEmail) return true;
-              if (tEmail === cleanEmail) return true;
-              if (Array.isArray(r.members) && r.members.some((m: any) => m.email?.toLowerCase().trim() === cleanEmail)) return true;
-              return false;
+              if (r.isQuiz || r.category === 'QUIZ' || r.category === 'Quiz') return false;
+              return matchesEmail(r, cleanEmail);
             });
+            
+            // Fallback to any registration if no team registration found
+            if (!targetReg) {
+              targetReg = allRegs.find((r) => matchesEmail(r, cleanEmail));
+            }
           }
 
           // Rank 2: Match by userDocData teamName or user.teamName (if specific)
@@ -357,16 +371,38 @@ export const TeamReviewPage: React.FC<TeamReviewPageProps> = ({ embedded = false
           }))
         ];
 
-        await updateDoc(regRef, {
-          groupName: editForm.teamName,
-          eventTitle: editForm.projectTrack,
-          teamLeadName: editForm.leader.name,
-          teamLeadEmail: editForm.leader.email,
-          teamLeadStudentId: editForm.leader.rollNo,
-          phoneNumber: editForm.leader.phone,
-          members: updatedMembersPayload,
-          updatedAt: Date.now()
-        });
+        try {
+          await updateDoc(regRef, {
+            groupName: editForm.teamName,
+            eventTitle: editForm.projectTrack,
+            teamLeadName: editForm.leader.name,
+            teamLeadEmail: editForm.leader.email,
+            teamLeadStudentId: editForm.leader.rollNo,
+            phoneNumber: editForm.leader.phone,
+            members: updatedMembersPayload,
+            updatedAt: Date.now()
+          });
+        } catch (e) { console.warn("Firebase sync missed:", e); }
+
+        // Also update MongoDB backend (Primary DB)
+        try {
+          await updateRegistration(editForm.docId, {
+            groupName: editForm.teamName,
+            eventTitle: editForm.projectTrack,
+            teamLeadName: editForm.leader.name,
+            teamLeadEmail: editForm.leader.email,
+            teamLeadStudentId: editForm.leader.rollNo,
+            phoneNumber: editForm.leader.phone,
+            members: editForm.members.map(m => ({
+              name: m.name,
+              studentId: m.rollNo,
+              email: m.email,
+              role: m.role || "Member"
+            }))
+          });
+        } catch (e) {
+          console.error("Failed to update registration in MongoDB:", e);
+        }
       }
 
       setTeamData(editForm);

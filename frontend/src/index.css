@@ -108,8 +108,8 @@ img, video {
 }
 
 /* Custom Native Date & Time Picker Overrides */
-input[type="date"], input[type="time"] {
-  accent-color: #2563EB;
+input[type="date"], input[type="time"], input[type="datetime-local"] {
+  accent-color: #6366F1;
   color-scheme: light;
 }
 
@@ -130,13 +130,13 @@ input:-webkit-autofill:active {
 
 ::-webkit-calendar-picker-indicator {
   cursor: pointer;
-  filter: invert(32%) sepia(90%) saturate(1900%) hue-rotate(212deg) brightness(98%) contrast(96%);
+  filter: invert(38%) sepia(60%) saturate(4500%) hue-rotate(230deg) brightness(96%) contrast(95%);
   transition: transform 0.15s ease, filter 0.15s ease;
   padding: 4px;
   border-radius: 8px;
 }
 
 ::-webkit-calendar-picker-indicator:hover {
-  background-color: rgba(37, 99, 235, 0.1);
+  background-color: rgba(99, 102, 241, 0.12);
   transform: scale(1.1);
 }

@@ -15,10 +15,11 @@ import {
   ShieldCheck
 } from "lucide-react";
 import { db } from "../../config/firebase";
-import { doc, updateDoc, getDoc, collection, getDocs } from "firebase/firestore";
+import { doc, updateDoc, getDoc, collection, getDocs } from "../../config/firebase";
 
 interface ProjectSubmissionPageProps {
   targetRegId?: string;
+  activeRoundType?: string;
   initialData?: any;
   onSuccess?: () => void;
   embedded?: boolean;
@@ -26,6 +27,7 @@ interface ProjectSubmissionPageProps {
 
 export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
   targetRegId,
+  activeRoundType,
   initialData,
   onSuccess,
   embedded = false
@@ -60,6 +62,8 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
   const [isPsSaved, setIsPsSaved] = useState<boolean>(false);
   const [savingPs, setSavingPs] = useState<boolean>(false);
   const [isPsLocked, setIsPsLocked] = useState<boolean>(false);
+  const [submissionStatus, setSubmissionStatus] = useState<string>("");
+  const [currentTeamRound, setCurrentTeamRound] = useState<number>(initialData?.currentRound ? Number(initialData.currentRound) : 1);
   // Event Step Locks State
   const [eventLockedSteps, setEventLockedSteps] = useState<Record<number, boolean>>({});
   const [currentEventId, setCurrentEventId] = useState<string>("");
@@ -74,6 +78,10 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     try {
       const regRef = doc(db, "registrations", targetRegId);
       const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsId || p.code === selectedPsId) || null;
+      // Read currentRound to tag saved data with correct round
+      const currentDocSnap = await getDoc(regRef);
+      const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRound || 1) : (currentTeamRound || 1);
+      const rP = `r${currentRoundVal}_`;
       await updateDoc(regRef, {
         problemStatement,
         keyFeatures,
@@ -84,11 +92,86 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         presentationFileName,
         selectedProblemStatementId: selectedPsId,
         selectedProblemStatement: selectedPsObj,
+        submissionRound: currentRoundVal,
         updatedAt: Date.now(),
+        [`${rP}problemStatement`]: problemStatement,
+        [`${rP}keyFeatures`]: keyFeatures,
+        [`${rP}githubUrl`]: githubUrl,
+        [`${rP}prototypeUrl`]: prototypeUrl,
+        [`${rP}demoVideoUrl`]: demoVideoUrl,
+        [`${rP}srsFileName`]: srsFileName,
+        [`${rP}presentationFileName`]: presentationFileName,
+        [`${rP}selectedProblemStatementId`]: selectedPsId,
+        [`${rP}selectedProblemStatement`]: selectedPsObj,
         ...additionalFields
       });
     } catch (err) {
       console.error("Error saving step data to Firestore:", err);
+    }
+  };
+
+  // Helper to apply registration data with strict per-round isolation
+  const applyRegistrationDocData = (data: any) => {
+    const regCurrentRound = Number(data.currentRound || data.promotedToRound || initialData?.currentRound || 1);
+    setCurrentTeamRound(regCurrentRound);
+
+    const rP = `r${regCurrentRound}_`;
+    const hasExplicitRoundData = !!(
+      data[`${rP}problemStatement`] ||
+      data[`${rP}selectedProblemStatementId`] ||
+      data[`${rP}submittedAt`] ||
+      data[`${rP}submissionStatus`] ||
+      data[`${rP}srsFileName`] ||
+      data[`${rP}presentationFileName`] ||
+      data[`${rP}keyFeatures`] ||
+      data[`${rP}githubUrl`]
+    );
+    const isLiveSubmissionForCurrentRound = Number(data.submissionRound) === regCurrentRound || (regCurrentRound === 1 && !data.submissionRound);
+
+    if (hasExplicitRoundData) {
+      setProblemStatement(data[`${rP}problemStatement`] || "");
+      setKeyFeatures(data[`${rP}keyFeatures`] || "");
+      setGithubUrl(data[`${rP}githubUrl`] || data[`${rP}githubLink`] || "");
+      setPrototypeUrl(data[`${rP}prototypeUrl`] || data[`${rP}figmaUrl`] || "");
+      setDemoVideoUrl(data[`${rP}demoVideoUrl`] || data[`${rP}videoLink`] || "");
+      setSrsFileName(data[`${rP}srsFileName`] || "");
+      setPresentationFileName(data[`${rP}presentationFileName`] || "");
+      setSelectedPsId(data[`${rP}selectedProblemStatementId`] || "");
+      setIsPsSaved(Boolean(data[`${rP}isPsSaved`] || data[`${rP}selectedProblemStatementId`]));
+      setIsPsLocked(Boolean(data[`${rP}isPsLocked`]));
+      setSubmissionStatus(data[`${rP}submissionStatus`] || "Draft");
+    } else if (isLiveSubmissionForCurrentRound) {
+      if (data.problemStatement) setProblemStatement(data.problemStatement);
+      if (data.keyFeatures) setKeyFeatures(data.keyFeatures);
+      if (data.githubUrl || data.githubLink) setGithubUrl(data.githubUrl || data.githubLink);
+      if (data.prototypeUrl || data.figmaUrl) setPrototypeUrl(data.prototypeUrl || data.figmaUrl);
+      if (data.demoVideoUrl || data.videoLink) setDemoVideoUrl(data.demoVideoUrl || data.videoLink);
+      if (data.srsFileName) setSrsFileName(data.srsFileName);
+      if (data.presentationFileName) setPresentationFileName(data.presentationFileName);
+      if (data.selectedProblemStatementId) setSelectedPsId(data.selectedProblemStatementId);
+      if (data.isPsSaved) setIsPsSaved(true);
+      if (data.isPsLocked || data.problemStatementLocked) {
+        setIsPsLocked(true);
+        setIsPsSaved(true);
+      }
+      if (data.submissionStatus) setSubmissionStatus(data.submissionStatus);
+    } else {
+      // Newly entered/promoted round with no submissions yet — start clean without previous round's ideology
+      setProblemStatement("");
+      setKeyFeatures("");
+      setGithubUrl("");
+      setPrototypeUrl("");
+      setDemoVideoUrl("");
+      setSrsFileName("");
+      setPresentationFileName("");
+      setSelectedPsId("");
+      setIsPsSaved(false);
+      setIsPsLocked(false);
+      setSubmissionStatus("Pending");
+    }
+
+    if (data.eventId && data.eventId !== currentEventId) {
+      setCurrentEventId(data.eventId);
     }
   };
 
@@ -101,23 +184,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
       try {
         const docSnap = await getDoc(doc(db, "registrations", targetRegId));
         if (docSnap.exists()) {
-          const data = docSnap.data();
-          if (data.problemStatement) setProblemStatement(data.problemStatement);
-          if (data.keyFeatures) setKeyFeatures(data.keyFeatures);
-          if (data.githubUrl || data.githubLink) setGithubUrl(data.githubUrl || data.githubLink);
-          if (data.prototypeUrl || data.figmaUrl) setPrototypeUrl(data.prototypeUrl || data.figmaUrl);
-          if (data.demoVideoUrl || data.videoLink) setDemoVideoUrl(data.demoVideoUrl || data.videoLink);
-          if (data.srsFileName) setSrsFileName(data.srsFileName);
-          if (data.presentationFileName) setPresentationFileName(data.presentationFileName);
-          if (data.selectedProblemStatementId) setSelectedPsId(data.selectedProblemStatementId);
-          if (data.isPsSaved) setIsPsSaved(true);
-          if (data.isPsLocked || data.problemStatementLocked) {
-            setIsPsLocked(true);
-            setIsPsSaved(true);
-          }
-          if (data.eventId && data.eventId !== currentEventId) {
-            setCurrentEventId(data.eventId);
-          }
+          applyRegistrationDocData(docSnap.data());
         }
       } catch (err) {
         console.error("Error loading registration doc:", err);
@@ -151,7 +218,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     return () => { if (pollEv) clearInterval(pollEv); };
   }, [currentEventId]);
 
-  // Real-time listener for registrations to track problem statements claimed by other teams
+  // Real-time listener for registrations to track problem statements claimed by other teams in the active round
   useEffect(() => {
     let pollAll: any = null;
     const loadAll = async () => {
@@ -162,8 +229,10 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
           const reg = docSnap.data();
           const regId = docSnap.id;
           if (targetRegId && regId === targetRegId) return;
-          const psId = reg.selectedProblemStatementId || reg.selectedProblemStatement?.id || reg.selectedProblemStatement?.code;
-          const isSaved = reg.isPsSaved !== false && (!!psId);
+          const regRound = Number(reg.currentRound || reg.promotedToRound || 1);
+          const rP = `r${currentTeamRound}_`;
+          const psId = (regRound === currentTeamRound ? reg.selectedProblemStatementId : "") || reg[`${rP}selectedProblemStatementId`];
+          const isSaved = reg[`${rP}isPsSaved`] === true || (regRound === currentTeamRound && reg.isPsSaved !== false && !!psId);
           if (psId && isSaved) {
             const teamName = reg.groupName || reg.teamName || reg.participantName || reg.name || "Another Team";
             takenMap[psId] = teamName;
@@ -179,7 +248,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     loadAll();
     pollAll = setInterval(loadAll, 10000);
     return () => { if (pollAll) clearInterval(pollAll); };
-  }, [targetRegId]);
+  }, [targetRegId, currentTeamRound]);
 
   // Auto-expand Problem Statement textarea to full height (eliminates inner scrollbar & text truncation)
   useEffect(() => {
@@ -214,21 +283,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
   // Initialize values from initialData (only if values exist to prevent accidental wipes)
   useEffect(() => {
     if (initialData) {
-      if (initialData.problemStatement) setProblemStatement(initialData.problemStatement);
-      if (initialData.keyFeatures) setKeyFeatures(initialData.keyFeatures);
-      if (initialData.githubUrl || initialData.githubLink) setGithubUrl(initialData.githubUrl || initialData.githubLink);
-      if (initialData.prototypeUrl || initialData.figmaUrl) setPrototypeUrl(initialData.prototypeUrl || initialData.figmaUrl);
-      if (initialData.demoVideoUrl || initialData.videoLink) setDemoVideoUrl(initialData.demoVideoUrl || initialData.videoLink);
-      if (initialData.srsFileName) setSrsFileName(initialData.srsFileName);
-      else if (initialData.srsDocumentUrl) setSrsFileName("SRS_Document_Uploaded.pdf");
-      if (initialData.presentationFileName) setPresentationFileName(initialData.presentationFileName);
-      else if (initialData.presentationUrl) setPresentationFileName("Project_Presentation_Uploaded.pptx");
-      if (initialData.selectedProblemStatementId) setSelectedPsId(initialData.selectedProblemStatementId);
-      if (initialData.isPsSaved) setIsPsSaved(true);
-      if (initialData.isPsLocked || initialData.problemStatementLocked) {
-        setIsPsLocked(true);
-        setIsPsSaved(true);
-      }
+      applyRegistrationDocData(initialData);
     }
   }, [initialData]);
 
@@ -241,19 +296,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         const docSnap = await getDoc(docRef);
         if (docSnap.exists()) {
           const data = docSnap.data();
-          if (data.problemStatement) setProblemStatement(data.problemStatement);
-          if (data.keyFeatures) setKeyFeatures(data.keyFeatures);
-          if (data.githubUrl || data.githubLink) setGithubUrl(data.githubUrl || data.githubLink);
-          if (data.prototypeUrl || data.figmaUrl) setPrototypeUrl(data.prototypeUrl || data.figmaUrl);
-          if (data.demoVideoUrl || data.videoLink) setDemoVideoUrl(data.demoVideoUrl || data.videoLink);
-          if (data.srsFileName) setSrsFileName(data.srsFileName);
-          if (data.presentationFileName) setPresentationFileName(data.presentationFileName);
-          if (data.selectedProblemStatementId) setSelectedPsId(data.selectedProblemStatementId);
-          if (data.isPsSaved) setIsPsSaved(true);
-          if (data.isPsLocked || data.problemStatementLocked) {
-            setIsPsLocked(true);
-            setIsPsSaved(true);
-          }
+          applyRegistrationDocData(data);
 
           // Fetch Event Problem Statements from Firestore
           let eventId = data.eventId;
@@ -357,12 +400,20 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     try {
       if (targetRegId) {
         const regRef = doc(db, "registrations", targetRegId);
+        const currentDocSnap = await getDoc(regRef);
+        const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRound || 1) : (currentTeamRound || 1);
+        const rP = `r${currentRoundVal}_`;
         await updateDoc(regRef, {
           selectedProblemStatementId: selectedPsId,
           selectedProblemStatement: selectedPsObj,
           problemStatement,
           isPsSaved: true,
-          updatedAt: Date.now()
+          submissionRound: currentRoundVal,
+          updatedAt: Date.now(),
+          [`${rP}selectedProblemStatementId`]: selectedPsId,
+          [`${rP}selectedProblemStatement`]: selectedPsObj,
+          [`${rP}problemStatement`]: problemStatement,
+          [`${rP}isPsSaved`]: true,
         });
       }
 
@@ -401,12 +452,22 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     if (targetRegId) {
       try {
         const regRef = doc(db, "registrations", targetRegId);
+        const currentDocSnap = await getDoc(regRef);
+        const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRound || 1) : (currentTeamRound || 1);
+        const rP = `r${currentRoundVal}_`;
         await updateDoc(regRef, {
           selectedProblemStatementId: "",
           selectedProblemStatement: null,
           problemStatement: "",
           isPsSaved: false,
-          updatedAt: Date.now()
+          isPsLocked: false,
+          problemStatementLocked: false,
+          updatedAt: Date.now(),
+          [`${rP}selectedProblemStatementId`]: "",
+          [`${rP}selectedProblemStatement`]: null,
+          [`${rP}problemStatement`]: "",
+          [`${rP}isPsSaved`]: false,
+          [`${rP}isPsLocked`]: false,
         });
       } catch (err) {
         console.error("Error clearing problem statement hold in Firestore:", err);
@@ -433,6 +494,9 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
       try {
         const regRef = doc(db, "registrations", targetRegId);
         const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsId || p.code === selectedPsId) || null;
+        const currentDocSnap = await getDoc(regRef);
+        const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRound || 1) : (currentTeamRound || 1);
+        const rP = `r${currentRoundVal}_`;
         await updateDoc(regRef, {
           problemStatement,
           selectedProblemStatementId: selectedPsId,
@@ -440,7 +504,13 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
           isPsSaved: true,
           isPsLocked: true,
           problemStatementLocked: true,
-          updatedAt: Date.now()
+          submissionRound: currentRoundVal,
+          updatedAt: Date.now(),
+          [`${rP}problemStatement`]: problemStatement,
+          [`${rP}selectedProblemStatementId`]: selectedPsId,
+          [`${rP}selectedProblemStatement`]: selectedPsObj,
+          [`${rP}isPsSaved`]: true,
+          [`${rP}isPsLocked`]: true,
         });
       } catch (err) {
         console.error("Error locking problem statement selection in Firestore:", err);
@@ -458,7 +528,11 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     try {
       if (targetRegId) {
         const regRef = doc(db, "registrations", targetRegId);
-        const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsId) || null;
+        const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsId || p.code === selectedPsId) || null;
+        // Read currentRound from the doc to tag this submission with the correct round
+        const currentDocSnap = await getDoc(regRef);
+        const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRound || 1) : (currentTeamRound || 1);
+        const rP = `r${currentRoundVal}_`;
         await updateDoc(regRef, {
           problemStatement,
           keyFeatures,
@@ -470,7 +544,18 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
           selectedProblemStatementId: selectedPsId,
           selectedProblemStatement: selectedPsObj,
           submissionStatus: "Draft",
-          updatedAt: Date.now()
+          submissionRound: currentRoundVal,
+          updatedAt: Date.now(),
+          [`${rP}problemStatement`]: problemStatement,
+          [`${rP}keyFeatures`]: keyFeatures,
+          [`${rP}githubUrl`]: githubUrl,
+          [`${rP}prototypeUrl`]: prototypeUrl,
+          [`${rP}demoVideoUrl`]: demoVideoUrl,
+          [`${rP}srsFileName`]: srsFileName,
+          [`${rP}presentationFileName`]: presentationFileName,
+          [`${rP}selectedProblemStatementId`]: selectedPsId,
+          [`${rP}selectedProblemStatement`]: selectedPsObj,
+          [`${rP}submissionStatus`]: "Draft",
         });
       }
 
@@ -493,7 +578,12 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     try {
       if (targetRegId) {
         const regRef = doc(db, "registrations", targetRegId);
-        const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsId) || null;
+        const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsId || p.code === selectedPsId) || null;
+        // Read currentRound to tag this submission with the correct round
+        const currentDocSnap = await getDoc(regRef);
+        const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRound || 1) : (currentTeamRound || 1);
+        const rP = `r${currentRoundVal}_`;
+        const now = Date.now();
         await updateDoc(regRef, {
           problemStatement,
           keyFeatures,
@@ -505,8 +595,22 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
           selectedProblemStatementId: selectedPsId,
           selectedProblemStatement: selectedPsObj,
           submissionStatus: "Submitted",
-          submittedAt: Date.now(),
-          updatedAt: Date.now()
+          submissionRound: currentRoundVal,
+          submittedAt: now,
+          updatedAt: now,
+          [`${rP}problemStatement`]: problemStatement,
+          [`${rP}keyFeatures`]: keyFeatures,
+          [`${rP}githubUrl`]: githubUrl,
+          [`${rP}prototypeUrl`]: prototypeUrl,
+          [`${rP}demoVideoUrl`]: demoVideoUrl,
+          [`${rP}srsFileName`]: srsFileName,
+          [`${rP}presentationFileName`]: presentationFileName,
+          [`${rP}selectedProblemStatementId`]: selectedPsId,
+          [`${rP}selectedProblemStatement`]: selectedPsObj,
+          [`${rP}submissionStatus`]: "Submitted",
+          [`${rP}submittedAt`]: now,
+          [`${rP}isPsSaved`]: true,
+          [`${rP}isPsLocked`]: true,
         });
       }
 
@@ -553,8 +657,32 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     }
   };
 
-  // 6 Main Steps Definition
-  const STEPS = [
+  const isIdeationRound = activeRoundType === "Ideation & Video Submission" || activeRoundType === "Ideation" || activeRoundType === "Video Submission";
+
+  // Dynamic Steps Definition
+  const STEPS = isIdeationRound ? [
+    { 
+      id: 1, 
+      name: "Ideation Description", 
+      label: "1. Ideation Description", 
+      icon: FileText, 
+      desc: "Provide details of your ideation" 
+    },
+    { 
+      id: 2, 
+      name: "Video Submission", 
+      label: "2. Video Link", 
+      icon: PlayCircle, 
+      desc: "Provide your YouTube video link" 
+    },
+    {
+      id: 3,
+      name: "Overview",
+      label: "3. Submission Overview",
+      icon: ShieldCheck,
+      desc: "Review and submit your ideation"
+    }
+  ] : [
     { 
       id: 1, 
       name: "Problem Statement", 
@@ -606,6 +734,23 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     }
   ];
 
+  const checkStepCompleted = (stepId: number) => {
+    if (isIdeationRound) {
+      if (stepId === 1) return !!problemStatement?.trim();
+      if (stepId === 2) return !!demoVideoUrl?.trim();
+      if (stepId === 3) return submissionStatus === "Submitted";
+    } else {
+      if (stepId === 1) return !!selectedPsId || !!problemStatement?.trim();
+      if (stepId === 2) return !!srsFileName;
+      if (stepId === 3) return !!presentationFileName;
+      if (stepId === 4) return !!keyFeatures?.trim();
+      if (stepId === 5) return !!githubUrl?.trim();
+      if (stepId === 6) return !!demoVideoUrl?.trim() || !!prototypeUrl?.trim();
+      if (stepId === 7) return submissionStatus === "Submitted";
+    }
+    return false;
+  };
+
   return (
     <div className={`space-y-8 font-sans ${embedded ? "" : "max-w-6xl mx-auto p-8"}`}>
       
@@ -652,7 +797,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         <div className="flex items-center justify-between relative max-w-5xl mx-auto overflow-x-auto pb-2 -mb-2">
           
           {STEPS.map((step, idx) => {
-            const isCompleted = currentStep > step.id;
+            const isCompleted = checkStepCompleted(step.id);
             const isActive = currentStep === step.id;
 
             return (
@@ -699,7 +844,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
                   <div className="flex-1 h-1 mx-3 rounded-full overflow-hidden bg-slate-100 self-center -mt-6">
                     <div 
                       className={`h-full transition-all duration-500 ${
-                        currentStep > step.id ? "bg-emerald-500" : currentStep === step.id ? "bg-blue-600" : "bg-slate-200"
+                        isCompleted ? "bg-emerald-500" : currentStep === step.id ? "bg-blue-600" : "bg-slate-200"
                       }`} 
                     />
                   </div>
@@ -724,118 +869,153 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-100">
-                    Step 1 of 6
+                    Step 1 of {isIdeationRound ? '2' : '6'}
                   </span>
-                  <h3 className="text-xl font-black text-slate-900 tracking-tight">1. Problem Statement</h3>
+                  <h3 className="text-xl font-black text-slate-900 tracking-tight">1. {isIdeationRound ? 'Ideation Description' : 'Problem Statement'}</h3>
                 </div>
                 <p className="text-xs text-slate-500 font-medium mt-0.5">
-                  Select an official event problem statement or enter your team's custom problem statement.
+                  {isIdeationRound ? 'Provide details of your ideation.' : "Select an official event problem statement or enter your team's custom problem statement."}
                 </p>
               </div>
             </div>
 
             {/* Available Official Event Problem Statements Picker */}
-            {availableProblemStatements.length > 0 && (
-              <div className="space-y-4 p-5 bg-slate-50/80 border border-slate-200/90 rounded-3xl">
-                {isPsLocked && (
-                  <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-xs font-bold text-amber-800 flex items-center gap-2">
-                    <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
-                    <span>🔒 Problem Statement Confirmed & Locked — Selection cannot be changed after proceeding.</span>
+            {(() => {
+              if (isIdeationRound) return null;
+              const filteredProblemStatements = availableProblemStatements.filter((item) => {
+                if (!item.round || item.round === "all" || item.round === "All") return true;
+                return Number(item.round) === currentTeamRound;
+              });
+
+              if (filteredProblemStatements.length === 0 && availableProblemStatements.length === 0) return null;
+
+              return (
+                <div className="space-y-4 p-5 bg-slate-50/80 border border-slate-200/90 rounded-3xl">
+                  {isPsLocked && (
+                    <div className="p-3.5 bg-amber-50 border border-amber-200 rounded-2xl text-xs font-bold text-amber-800 flex items-center gap-2">
+                      <ShieldCheck className="w-4 h-4 text-amber-600 shrink-0" />
+                      <span>🔒 Problem Statement Confirmed & Locked — Selection cannot be changed after proceeding.</span>
+                    </div>
+                  )}
+
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-slate-200/60 pb-3.5">
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                        <Sparkles className="w-4 h-4 text-[#2563EB]" /> Official Event Problem Statements ({filteredProblemStatements.length})
+                      </label>
+                      {currentTeamRound > 1 && (
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-800 border border-indigo-200">
+                          Round {currentTeamRound}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Allocation Status Legend */}
+                    <div className="flex flex-wrap items-center gap-2.5 text-[11px] font-bold">
+                      <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500" /> Green: Available
+                      </span>
+                      <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-blue-50 text-blue-700 border border-blue-200">
+                        <span className="w-2 h-2 rounded-full bg-[#2563EB]" /> Blue: Held (Your Team)
+                      </span>
+                      <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-red-50 text-red-700 border border-red-200">
+                        <span className="w-2 h-2 rounded-full bg-red-500" /> Red: Taken (Other Team)
+                      </span>
+                    </div>
                   </div>
-                )}
 
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 border-b border-slate-200/60 pb-3.5">
-                  <label className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
-                    <Sparkles className="w-4 h-4 text-[#2563EB]" /> Official Event Problem Statements ({availableProblemStatements.length})
-                  </label>
+                  {filteredProblemStatements.length === 0 ? (
+                    <div className="p-6 text-center bg-white rounded-2xl border border-slate-200 space-y-2">
+                      <p className="text-xs font-bold text-slate-600">
+                        No official problem statements specifically assigned for Round {currentTeamRound} yet.
+                      </p>
+                      <p className="text-[11px] text-slate-400">
+                        You can enter your custom problem statement below or check with your event coordinators.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                      {filteredProblemStatements.map((item, idx) => {
+                        const psKey = item.id || item.code || `ps_${idx + 1}`;
+                        const isSelected = selectedPsId === item.id || selectedPsId === item.code;
+                        const takenByTeam = takenPsMap[item.id] || takenPsMap[item.code] || takenPsMap[psKey];
+                        const isTakenByOther = !!takenByTeam && !isSelected;
 
-                  {/* Allocation Status Legend */}
-                  <div className="flex flex-wrap items-center gap-2.5 text-[11px] font-bold">
-                    <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-emerald-50 text-emerald-800 border border-emerald-200">
-                      <span className="w-2 h-2 rounded-full bg-emerald-500" /> Green: Available
-                    </span>
-                    <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-blue-50 text-blue-700 border border-blue-200">
-                      <span className="w-2 h-2 rounded-full bg-[#2563EB]" /> Blue: Held (Your Team)
-                    </span>
-                    <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-red-50 text-red-700 border border-red-200">
-                      <span className="w-2 h-2 rounded-full bg-red-500" /> Red: Taken (Other Team)
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {availableProblemStatements.map((item, idx) => {
-                    const psKey = item.id || item.code || `ps_${idx + 1}`;
-                    const isSelected = selectedPsId === item.id || selectedPsId === item.code;
-                    const takenByTeam = takenPsMap[item.id] || takenPsMap[item.code] || takenPsMap[psKey];
-                    const isTakenByOther = !!takenByTeam && !isSelected;
-
-                    return (
-                      <div
-                        key={item.id || idx}
-                        onClick={() => handleSelectProblemStatement(item, idx)}
-                        className={`p-5 rounded-2xl border-2 transition-all text-left space-y-2.5 relative ${
-                          isSelected
-                            ? isPsLocked
-                              ? "bg-amber-50/90 border-amber-500 shadow-md ring-2 ring-amber-500/20 cursor-not-allowed"
-                              : "bg-blue-50/90 border-[#2563EB] shadow-md ring-2 ring-blue-500/20 cursor-pointer"
-                            : isTakenByOther || isPsLocked
-                              ? "bg-red-50/60 border-red-300 opacity-90 cursor-not-allowed shadow-2xs"
-                              : "bg-emerald-50/30 border-emerald-300 hover:border-emerald-500 hover:bg-emerald-50/80 hover:shadow-xs cursor-pointer"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span
-                            className={`px-2.5 py-1 rounded-xl text-xs font-black ${
+                        return (
+                          <div
+                            key={item.id || idx}
+                            onClick={() => handleSelectProblemStatement(item, idx)}
+                            className={`p-5 rounded-2xl border-2 transition-all text-left space-y-2.5 relative ${
                               isSelected
-                                ? isPsLocked ? "bg-amber-600 text-white" : "bg-[#2563EB] text-white"
-                                : isTakenByOther
-                                  ? "bg-red-600 text-white"
-                                  : "bg-emerald-600 text-white"
+                                ? isPsLocked
+                                  ? "bg-amber-50/90 border-amber-500 shadow-md ring-2 ring-amber-500/20 cursor-not-allowed"
+                                  : "bg-blue-50/90 border-[#2563EB] shadow-md ring-2 ring-blue-500/20 cursor-pointer"
+                                : isTakenByOther || isPsLocked
+                                  ? "bg-red-50/60 border-red-300 opacity-90 cursor-not-allowed shadow-2xs"
+                                  : "bg-emerald-50/30 border-emerald-300 hover:border-emerald-500 hover:bg-emerald-50/80 hover:shadow-xs cursor-pointer"
                             }`}
                           >
-                            {item.code || `PS-0${idx + 1}`}
-                          </span>
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="flex items-center gap-1.5">
+                                <span
+                                  className={`px-2.5 py-1 rounded-xl text-xs font-black ${
+                                    isSelected
+                                      ? isPsLocked ? "bg-amber-600 text-white" : "bg-[#2563EB] text-white"
+                                      : isTakenByOther
+                                        ? "bg-red-600 text-white"
+                                        : "bg-emerald-600 text-white"
+                                  }`}
+                                >
+                                  {item.code || `PS-0${idx + 1}`}
+                                </span>
+                                {item.round && item.round !== "all" && item.round !== "All" && (
+                                  <span className="px-2 py-0.5 rounded-lg text-[10px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">
+                                    R{item.round}
+                                  </span>
+                                )}
+                              </div>
 
-                          {/* Status Pill Badge */}
-                          {isSelected ? (
-                            <span className={`px-2.5 py-1 rounded-xl text-xs font-black text-white border flex items-center gap-1.5 shadow-2xs ${
-                              isPsLocked ? "bg-amber-600 border-amber-700" : "bg-blue-600 border-blue-700"
-                            }`}>
-                              <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
-                              {isPsLocked ? "🔒 Confirmed & Locked" : "In Hold (Your Team)"}
-                            </span>
-                          ) : isTakenByOther ? (
-                            <span className="px-2.5 py-1 rounded-xl text-xs font-black bg-red-100 text-red-700 border border-red-200 flex items-center gap-1.5 shadow-2xs">
-                              <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
-                              Taken ({takenByTeam})
-                            </span>
-                          ) : (
-                            <span className="px-2.5 py-1 rounded-xl text-xs font-black bg-emerald-100 text-emerald-800 border border-emerald-200/80 flex items-center gap-1.5 shadow-2xs">
-                              <span className="w-2 h-2 rounded-full bg-emerald-500" />
-                              Available
-                            </span>
-                          )}
-                        </div>
+                              {/* Status Pill Badge */}
+                              {isSelected ? (
+                                <span className={`px-2.5 py-1 rounded-xl text-xs font-black text-white border flex items-center gap-1.5 shadow-2xs ${
+                                  isPsLocked ? "bg-amber-600 border-amber-700" : "bg-blue-600 border-blue-700"
+                                }`}>
+                                  <span className="w-2 h-2 rounded-full bg-white animate-pulse" />
+                                  {isPsLocked ? "🔒 Confirmed & Locked" : "In Hold (Your Team)"}
+                                </span>
+                              ) : isTakenByOther ? (
+                                <span className="px-2.5 py-1 rounded-xl text-xs font-black bg-red-100 text-red-700 border border-red-200 flex items-center gap-1.5 shadow-2xs">
+                                  <span className="w-2 h-2 rounded-full bg-red-600 animate-pulse" />
+                                  Taken ({takenByTeam})
+                                </span>
+                              ) : (
+                                <span className="px-2.5 py-1 rounded-xl text-xs font-black bg-emerald-100 text-emerald-800 border border-emerald-200/80 flex items-center gap-1.5 shadow-2xs">
+                                  <span className="w-2 h-2 rounded-full bg-emerald-500" />
+                                  Available
+                                </span>
+                              )}
+                            </div>
 
-                        <h4 className="text-sm font-black text-slate-900 leading-tight">{item.title}</h4>
-                        <p
-                          className={`text-xs font-medium leading-relaxed line-clamp-3 ${
-                            isSelected
-                              ? "text-slate-800 font-semibold"
-                              : isTakenByOther
-                                ? "text-slate-600"
-                                : "text-slate-700"
-                          }`}
-                        >
-                          {item.description}
-                        </p>
-                      </div>
-                    );
-                  })}
+                            <h4 className="text-sm font-black text-slate-900 leading-tight">{item.title}</h4>
+                            <p
+                              className={`text-xs font-medium leading-relaxed line-clamp-3 ${
+                                isSelected
+                                  ? "text-slate-800 font-semibold"
+                                  : isTakenByOther
+                                    ? "text-slate-600"
+                                    : "text-slate-700"
+                              }`}
+                            >
+                              {item.description}
+                            </p>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Problem Statement Text & Detailed Description Card */}
             <div className="bg-white p-7 sm:p-8 rounded-3xl border border-slate-200/80 shadow-sm space-y-6 text-left relative overflow-hidden">
@@ -851,42 +1031,44 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
                   </div>
                   <div>
                     <h4 className="text-base font-black text-slate-900 tracking-tight">
-                      Problem Statement & Requirements
+                      {isIdeationRound ? 'Ideation Details' : 'Problem Statement & Requirements'}
                     </h4>
                     <p className="text-xs text-slate-500 font-medium mt-0.5">
-                      Review, customize, or paste your team's exact problem statement requirements.
+                      {isIdeationRound ? 'Describe your ideation thoroughly.' : "Review, customize, or paste your team's exact problem statement requirements."}
                     </p>
                   </div>
                 </div>
 
-                <div className="flex items-center gap-2.5 self-start sm:self-auto">
-                  {selectedPsId ? (
-                    <span className={`px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-2 shadow-2xs ${
-                      isPsLocked ? "bg-amber-50 text-amber-800 border border-amber-200" : "bg-blue-50 text-blue-700 border border-blue-200/80"
-                    }`}>
-                      <span className={`w-2 h-2 rounded-full animate-pulse ${isPsLocked ? "bg-amber-600" : "bg-[#2563EB]"}`} />
-                      {isPsLocked ? "🔒 Problem Statement Confirmed & Locked" : "Official Statement Selected"}
-                    </span>
-                  ) : (
-                    <span className="px-3.5 py-1.5 rounded-xl text-xs font-extrabold bg-slate-100 text-slate-600 border border-slate-200/80">
-                      Custom Statement Mode
-                    </span>
-                  )}
-                  {problemStatement && (
-                    <button
-                      type="button"
-                      onClick={handleClearSelection}
-                      disabled={isPsLocked}
-                      className={`text-xs font-extrabold px-3 py-1.5 rounded-xl transition-all border shadow-2xs ${
-                        isPsLocked 
-                          ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed" 
-                          : "text-slate-400 hover:text-red-600 bg-slate-50 hover:bg-red-50 border-slate-200/60 cursor-pointer"
-                      }`}
-                    >
-                      {isPsLocked ? "🔒 Selection Locked" : "Reset / Clear"}
-                    </button>
-                  )}
-                </div>
+                {!isIdeationRound && (
+                  <div className="flex items-center gap-2.5 self-start sm:self-auto">
+                    {selectedPsId ? (
+                      <span className={`px-3.5 py-1.5 rounded-xl text-xs font-black flex items-center gap-2 shadow-2xs ${
+                        isPsLocked ? "bg-amber-50 text-amber-800 border border-amber-200" : "bg-blue-50 text-blue-700 border border-blue-200/80"
+                      }`}>
+                        <span className={`w-2 h-2 rounded-full animate-pulse ${isPsLocked ? "bg-amber-600" : "bg-[#2563EB]"}`} />
+                        {isPsLocked ? "🔒 Problem Statement Confirmed & Locked" : "Official Statement Selected"}
+                      </span>
+                    ) : (
+                      <span className="px-3.5 py-1.5 rounded-xl text-xs font-extrabold bg-slate-100 text-slate-600 border border-slate-200/80">
+                        Custom Statement Mode
+                      </span>
+                    )}
+                    {problemStatement && (
+                      <button
+                        type="button"
+                        onClick={handleClearSelection}
+                        disabled={isPsLocked}
+                        className={`text-xs font-extrabold px-3 py-1.5 rounded-xl transition-all border shadow-2xs ${
+                          isPsLocked 
+                            ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed" 
+                            : "text-slate-400 hover:text-red-600 bg-slate-50 hover:bg-red-50 border-slate-200/60 cursor-pointer"
+                        }`}
+                      >
+                        {isPsLocked ? "🔒 Selection Locked" : "Reset / Clear"}
+                      </button>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Seamless Borderless Text Area */}
@@ -895,9 +1077,17 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
                   ref={problemStatementRef}
                   rows={8}
                   value={problemStatement}
-                  onChange={(e) => !isPsLocked && setProblemStatement(e.target.value)}
+                  onChange={(e) => {
+                    if (isPsLocked) return;
+                    let val = e.target.value;
+                    const words = val.trim() ? val.trim().split(/\s+/) : [];
+                    if (words.length > 150) {
+                      const match = val.match(/^(\s*\S+){0,150}/);
+                      if (match) val = match[0];
+                    }
+                    setProblemStatement(val);
+                  }}
                   readOnly={isPsLocked}
-                  maxLength={1000}
                   placeholder="Type or paste your problem statement title, detailed description, constraints, and target user requirements..."
                   className={`w-full p-5 sm:p-6 border-0 rounded-2xl text-sm font-medium leading-relaxed whitespace-pre-wrap font-sans transition-all overflow-hidden resize-none shadow-2xs ${
                     isPsLocked 
@@ -919,15 +1109,22 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
 
                   <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-auto">
                     <div className="w-20 h-1.5 rounded-full bg-slate-200/80 overflow-hidden">
-                      <div 
-                        className={`h-full transition-all duration-300 ${
-                          problemStatement.length > 900 ? "bg-red-500" : problemStatement.length > 700 ? "bg-amber-500" : "bg-[#2563EB]"
-                        }`}
-                        style={{ width: `${Math.min((problemStatement.length / 1000) * 100, 100)}%` }}
-                      />
+                      {(() => {
+                        const wordCount = problemStatement.trim() ? problemStatement.trim().split(/\s+/).length : 0;
+                        return (
+                          <div 
+                            className={`h-full transition-all duration-300 ${
+                              wordCount > 135 ? "bg-red-500" : wordCount > 100 ? "bg-amber-500" : "bg-[#2563EB]"
+                            }`}
+                            style={{ width: `${Math.min((wordCount / 150) * 100, 100)}%` }}
+                          />
+                        );
+                      })()}
                     </div>
-                    <span className={`font-mono text-xs font-black ${problemStatement.length > 900 ? "text-red-600" : "text-slate-600"}`}>
-                      {problemStatement.length} / 1000
+                    <span className={`font-mono text-xs font-black ${
+                      (problemStatement.trim() ? problemStatement.trim().split(/\s+/).length : 0) > 135 ? "text-red-600" : "text-slate-600"
+                    }`}>
+                      {problemStatement.trim() ? problemStatement.trim().split(/\s+/).length : 0} / 150 words
                     </span>
                   </div>
                 </div>
@@ -948,32 +1145,42 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
               
               <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
                 {/* Save My Problem Statement Button (Placed in user's requested red box area) */}
-                <button
-                  type="button"
-                  onClick={handleSaveProblemStatement}
-                  disabled={savingPs || isPsLocked}
-                  className={`px-6 py-3 font-black text-xs rounded-2xl shadow-md transition-all flex items-center gap-2 cursor-pointer ${
-                    isPsSaved
-                      ? "bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20"
-                      : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/30"
-                  } ${isPsLocked ? "opacity-60 cursor-not-allowed" : ""}`}
-                >
-                  {savingPs ? (
-                    <Loader2 className="w-4 h-4 animate-spin text-white" />
-                  ) : isPsSaved ? (
-                    <CheckCircle2 className="w-4 h-4 text-white" />
-                  ) : (
-                    <Sparkles className="w-4 h-4 text-white" />
-                  )}
-                  <span>{isPsSaved ? "✓ Problem Statement Saved" : "Save My Problem Statement"}</span>
-                </button>
+                {!isIdeationRound && (
+                  <button
+                    type="button"
+                    onClick={handleSaveProblemStatement}
+                    disabled={savingPs || isPsLocked}
+                    className={`px-6 py-3 font-black text-xs rounded-2xl shadow-md transition-all flex items-center gap-2 cursor-pointer ${
+                      isPsSaved
+                        ? "bg-emerald-500 hover:bg-emerald-600 text-white shadow-emerald-500/20"
+                        : "bg-emerald-600 hover:bg-emerald-700 text-white shadow-emerald-500/30"
+                    } ${isPsLocked ? "opacity-60 cursor-not-allowed" : ""}`}
+                  >
+                    {savingPs ? (
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                    ) : isPsSaved ? (
+                      <CheckCircle2 className="w-4 h-4 text-white" />
+                    ) : (
+                      <Sparkles className="w-4 h-4 text-white" />
+                    )}
+                    <span>{isPsSaved ? "✓ Problem Statement Saved" : "Save My Problem Statement"}</span>
+                  </button>
+                )}
 
                 <button
                   type="button"
-                  onClick={handleConfirmProblemStatementAndContinue}
+                  onClick={isIdeationRound ? () => { 
+                    if (!problemStatement.trim()) {
+                      setStatusNotice({ type: "error", message: "Please provide your Ideation Description before continuing." });
+                      setTimeout(() => setStatusNotice(null), 4000);
+                      return;
+                    }
+                    handleSaveDraft(); 
+                    setCurrentStep(2); 
+                  } : handleConfirmProblemStatementAndContinue}
                   className="px-7 py-3 bg-[#2563EB] hover:bg-blue-700 text-white font-black text-xs rounded-2xl shadow-lg shadow-blue-500/20 transition-all flex items-center gap-2 cursor-pointer"
                 >
-                  <span>Continue to SRS Submission</span>
+                  <span>{isIdeationRound ? 'Continue to Video Submission' : 'Continue to SRS Submission'}</span>
                   <ArrowRight className="w-4 h-4" />
                 </button>
               </div>
@@ -981,8 +1188,8 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
           </div>
         )}
 
-        {/* STEP 2: SRS SUBMISSION */}
-        {currentStep === 2 && (
+        {/* STEP 2: SRS SUBMISSION (HACKATHON ONLY) */}
+        {!isIdeationRound && currentStep === 2 && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="flex items-center gap-3.5 border-b border-slate-100 pb-5">
               <div className="w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
@@ -1075,7 +1282,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         )}
 
         {/* STEP 3: PPT SUBMISSION */}
-        {currentStep === 3 && (
+        {!isIdeationRound && currentStep === 3 && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="flex items-center gap-3.5 border-b border-slate-100 pb-5">
               <div className="w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center font-bold">
@@ -1168,7 +1375,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         )}
 
         {/* STEP 4: FEATURES */}
-        {currentStep === 4 && (
+        {!isIdeationRound && currentStep === 4 && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="flex items-center gap-3.5 border-b border-slate-100 pb-5">
               <div className="w-11 h-11 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold">
@@ -1241,7 +1448,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         )}
 
         {/* STEP 5: REPO */}
-        {currentStep === 5 && (
+        {!isIdeationRound && currentStep === 5 && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="flex items-center gap-3.5 border-b border-slate-100 pb-5">
               <div className="w-11 h-11 rounded-2xl bg-purple-50 text-purple-600 flex items-center justify-center font-bold">
@@ -1316,8 +1523,8 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
           </div>
         )}
 
-        {/* STEP 6: PROTOTYPE LINK AND VIDEO SUBMISSION */}
-        {currentStep === 6 && (
+        {/* STEP 6: PROTOTYPE LINK AND VIDEO SUBMISSION (or STEP 2 for IDEATION) */}
+        {currentStep === (isIdeationRound ? 2 : 6) && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="flex items-center gap-3.5 border-b border-slate-100 pb-5">
               <div className="w-11 h-11 rounded-2xl bg-teal-50 text-teal-600 flex items-center justify-center font-bold">
@@ -1326,12 +1533,12 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-teal-50 text-teal-700 border border-teal-100">
-                    Step 6 of 6
+                    Step {isIdeationRound ? '2 of 2' : '6 of 6'}
                   </span>
-                  <h3 className="text-xl font-black text-slate-900 tracking-tight">6. Prototype Link & Video Submission</h3>
+                  <h3 className="text-xl font-black text-slate-900 tracking-tight">{isIdeationRound ? '2. Video Submission' : '6. Prototype Link & Video Submission'}</h3>
                 </div>
                 <p className="text-xs text-slate-500 font-medium mt-0.5">
-                  Submit live prototype URL, demo video link, and complete final project submission.
+                  {isIdeationRound ? 'Submit your YouTube video link.' : 'Submit live prototype URL, demo video link, and complete final project submission.'}
                 </p>
               </div>
             </div>
@@ -1343,28 +1550,30 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
               </div>
             )}
 
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+            <div className={`grid grid-cols-1 ${!isIdeationRound ? 'md:grid-cols-2' : ''} gap-6`}>
               {/* Prototype Link */}
-              <div className="space-y-2">
-                <label className="block text-xs font-black text-slate-700 uppercase tracking-wider">
-                  Live Prototype / Demo URL
-                </label>
-                <div className="relative flex items-center">
-                  <Globe className="w-5 h-5 text-slate-400 absolute left-4 pointer-events-none" />
-                  <input 
-                    type="url" 
-                    value={prototypeUrl}
-                    disabled={isStepLocked(6)}
-                    onChange={(e) => setPrototypeUrl(e.target.value)}
-                    placeholder="https://figma.com/... or https://myproject.vercel.app" 
-                    className={`w-full pl-12 pr-4 py-3.5 border rounded-2xl text-sm font-semibold transition-all ${
-                      isStepLocked(6) 
-                        ? "bg-slate-100/80 cursor-not-allowed border-slate-300 text-slate-600" 
-                        : "bg-slate-50 border-slate-200 text-slate-800 focus:outline-none focus:border-blue-500 focus:bg-white"
-                    }`}
-                  />
+              {!isIdeationRound && (
+                <div className="space-y-2">
+                  <label className="block text-xs font-black text-slate-700 uppercase tracking-wider">
+                    Live Prototype / Demo URL
+                  </label>
+                  <div className="relative flex items-center">
+                    <Globe className="w-5 h-5 text-slate-400 absolute left-4 pointer-events-none" />
+                    <input 
+                      type="url" 
+                      value={prototypeUrl}
+                      disabled={isStepLocked(6)}
+                      onChange={(e) => setPrototypeUrl(e.target.value)}
+                      placeholder="https://figma.com/... or https://myproject.vercel.app" 
+                      className={`w-full pl-12 pr-4 py-3.5 border rounded-2xl text-sm font-semibold transition-all ${
+                        isStepLocked(6) 
+                          ? "bg-slate-100/80 cursor-not-allowed border-slate-300 text-slate-600" 
+                          : "bg-slate-50 border-slate-200 text-slate-800 focus:outline-none focus:border-blue-500 focus:bg-white"
+                      }`}
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               {/* Demo Video URL */}
               <div className="space-y-2">
@@ -1390,11 +1599,11 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
               </div>
             </div>
 
-            {/* Navigation Buttons for Step 6 */}
+            {/* Navigation Buttons for Step */}
             <div className="flex items-center justify-between pt-4 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setCurrentStep(5)}
+                onClick={() => setCurrentStep(isIdeationRound ? 1 : 5)}
                 className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-2"
               >
                 <ArrowLeft className="w-4 h-4" />
@@ -1404,8 +1613,13 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
               <button
                 type="button"
                 onClick={async () => {
+                  if (isIdeationRound && !demoVideoUrl.trim()) {
+                    setStatusNotice({ type: "error", message: "Please provide your YouTube video link before continuing." });
+                    setTimeout(() => setStatusNotice(null), 4000);
+                    return;
+                  }
                   await saveStepDataToFirestore();
-                  setCurrentStep(7);
+                  setCurrentStep(isIdeationRound ? 3 : 7);
                 }}
                 className="px-7 py-3 bg-[#2563EB] hover:bg-blue-700 text-white font-black text-xs rounded-2xl shadow-lg shadow-blue-500/20 transition-all flex items-center gap-2 cursor-pointer"
               >
@@ -1416,8 +1630,8 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
           </div>
         )}
 
-        {/* STEP 7: SUBMISSION OVERVIEW */}
-        {currentStep === 7 && (
+        {/* STEP 7: SUBMISSION OVERVIEW (or STEP 3 for IDEATION) */}
+        {currentStep === (isIdeationRound ? 3 : 7) && (
           <div className="space-y-6 animate-in fade-in duration-200">
             <div className="flex items-center gap-3.5 border-b border-slate-100 pb-5">
               <div className="w-11 h-11 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold">
@@ -1440,72 +1654,78 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
             <div className="bg-slate-50 border border-slate-200/90 rounded-3xl p-6 md:p-8 space-y-6">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                 
-                {/* 1. Problem Statement */}
-                <div className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-2 md:col-span-2">
+                {/* 1. Problem Statement / Ideation Description */}
+                <div className={`p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-2 ${isIdeationRound ? '' : 'md:col-span-2'}`}>
                   <div className="flex items-center gap-2 text-slate-500 mb-1">
                     <FileText className="w-4 h-4" />
-                    <span className="text-[10px] font-black uppercase tracking-wider">1. Problem Statement</span>
+                    <span className="text-[10px] font-black uppercase tracking-wider">1. {isIdeationRound ? 'Ideation Description' : 'Problem Statement'}</span>
                   </div>
                   <p className="font-bold text-slate-900 text-sm whitespace-pre-wrap">
                     {problemStatement || "Not specified"}
                   </p>
                 </div>
 
-                {/* 2. SRS */}
-                <div className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-2">
-                  <div className="flex items-center gap-2 text-slate-500 mb-1">
-                    <FileUp className="w-4 h-4" />
-                    <span className="text-[10px] font-black uppercase tracking-wider">2. SRS Document</span>
-                  </div>
-                  <p className="font-bold text-slate-900 text-sm break-all">
-                    {srsFileName || "SRS Pending"}
-                  </p>
-                </div>
+                {!isIdeationRound && (
+                  <>
+                    {/* 2. SRS */}
+                    <div className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-2">
+                      <div className="flex items-center gap-2 text-slate-500 mb-1">
+                        <FileUp className="w-4 h-4" />
+                        <span className="text-[10px] font-black uppercase tracking-wider">2. SRS Document</span>
+                      </div>
+                      <p className="font-bold text-slate-900 text-sm break-all">
+                        {srsFileName || "SRS Pending"}
+                      </p>
+                    </div>
 
-                {/* 3. PPT */}
-                <div className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-2">
-                  <div className="flex items-center gap-2 text-slate-500 mb-1">
-                    <Video className="w-4 h-4" />
-                    <span className="text-[10px] font-black uppercase tracking-wider">3. PPT Document</span>
-                  </div>
-                  <p className="font-bold text-slate-900 text-sm break-all">
-                    {presentationFileName || "PPT Pending"}
-                  </p>
-                </div>
+                    {/* 3. PPT */}
+                    <div className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-2">
+                      <div className="flex items-center gap-2 text-slate-500 mb-1">
+                        <Video className="w-4 h-4" />
+                        <span className="text-[10px] font-black uppercase tracking-wider">3. PPT Document</span>
+                      </div>
+                      <p className="font-bold text-slate-900 text-sm break-all">
+                        {presentationFileName || "PPT Pending"}
+                      </p>
+                    </div>
 
-                {/* 4. Features */}
-                <div className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-2">
-                  <div className="flex items-center gap-2 text-slate-500 mb-1">
-                    <Code className="w-4 h-4" />
-                    <span className="text-[10px] font-black uppercase tracking-wider">4. Key Features</span>
-                  </div>
-                  <p className="font-bold text-slate-900 text-sm">
-                    {keyFeatures ? "Features Provided" : "Pending"}
-                  </p>
-                </div>
+                    {/* 4. Features */}
+                    <div className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-2">
+                      <div className="flex items-center gap-2 text-slate-500 mb-1">
+                        <Code className="w-4 h-4" />
+                        <span className="text-[10px] font-black uppercase tracking-wider">4. Key Features</span>
+                      </div>
+                      <p className="font-bold text-slate-900 text-sm">
+                        {keyFeatures ? "Features Provided" : "Pending"}
+                      </p>
+                    </div>
 
-                {/* 5. Repository */}
-                <div className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-2">
-                  <div className="flex items-center gap-2 text-slate-500 mb-1">
-                    <Globe className="w-4 h-4" />
-                    <span className="text-[10px] font-black uppercase tracking-wider">5. Code Repository</span>
-                  </div>
-                  <p className="font-bold text-slate-900 text-sm break-all">
-                    {githubUrl || "Repo URL Pending"}
-                  </p>
-                </div>
+                    {/* 5. Repository */}
+                    <div className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-2">
+                      <div className="flex items-center gap-2 text-slate-500 mb-1">
+                        <Globe className="w-4 h-4" />
+                        <span className="text-[10px] font-black uppercase tracking-wider">5. Code Repository</span>
+                      </div>
+                      <p className="font-bold text-slate-900 text-sm break-all">
+                        {githubUrl || "Repo URL Pending"}
+                      </p>
+                    </div>
+                  </>
+                )}
 
-                {/* 6. Prototype & Video */}
-                <div className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-2 md:col-span-2">
+                {/* 6. Prototype & Video / 2. Video */}
+                <div className={`p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-2 ${isIdeationRound ? '' : 'md:col-span-2'}`}>
                   <div className="flex items-center gap-2 text-slate-500 mb-1">
                     <PlayCircle className="w-4 h-4" />
-                    <span className="text-[10px] font-black uppercase tracking-wider">6. Prototype & Video Links</span>
+                    <span className="text-[10px] font-black uppercase tracking-wider">{isIdeationRound ? '2. Video Link' : '6. Prototype & Video Links'}</span>
                   </div>
                   <div className="flex flex-col gap-3">
-                    <div className="flex items-start gap-2">
-                      <span className="text-slate-500 font-semibold text-xs min-w-[70px]">Prototype:</span>
-                      <span className="font-bold text-slate-900 text-sm break-all">{prototypeUrl || "Pending"}</span>
-                    </div>
+                    {!isIdeationRound && (
+                      <div className="flex items-start gap-2">
+                        <span className="text-slate-500 font-semibold text-xs min-w-[70px]">Prototype:</span>
+                        <span className="font-bold text-slate-900 text-sm break-all">{prototypeUrl || "Pending"}</span>
+                      </div>
+                    )}
                     <div className="flex items-start gap-2">
                       <span className="text-slate-500 font-semibold text-xs min-w-[70px]">Video:</span>
                       <span className="font-bold text-slate-900 text-sm break-all">{demoVideoUrl || "Pending"}</span>
@@ -1520,7 +1740,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
             <div className="flex items-center justify-between pt-4 border-t border-slate-100">
               <button
                 type="button"
-                onClick={() => setCurrentStep(6)}
+                onClick={() => setCurrentStep(isIdeationRound ? 2 : 6)}
                 className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer flex items-center gap-2"
               >
                 <ArrowLeft className="w-4 h-4" />

@@ -34,6 +34,19 @@ const normalizeRole = (rawRole, defaultRole = 'participant') => {
   return 'participant';
 };
 
+// Helper to verify if participant's team registration has been confirmed by faculty
+const isRegistrationConfirmed = (reg) => {
+  if (!reg) return false;
+  const status = String(reg.status || '').toLowerCase().trim();
+  if (status !== 'confirmed') {
+    return false;
+  }
+  if (reg.accessGranted === false || reg.loginAccessGranted === false) {
+    return false;
+  }
+  return true;
+};
+
 // POST /api/auth/login - Direct login endpoint with MongoDB
 router.post(
   '/login',
@@ -61,10 +74,21 @@ router.post(
             { phoneNumber: last10 },
             { leadPhone: cleanEmail },
             { leadPhone: last10 },
+            { 'members.phone': cleanEmail },
+            { 'members.phone': last10 },
+            { 'members.phoneNumber': cleanEmail },
+            { 'members.phoneNumber': last10 },
           ],
         }).lean();
 
         if (regDoc) {
+          if (!isRegistrationConfirmed(regDoc)) {
+            return res.status(403).json({
+              success: false,
+              error: 'Your team registration is not confirmed yet. Please wait for faculty confirmation before logging in.',
+            });
+          }
+
           const role = 'participant';
           const payload = {
             uid: regDoc._id,
@@ -81,6 +105,38 @@ router.post(
         }
       } else {
         const role = normalizeRole(userDoc.role, 'participant');
+
+        if (role === 'participant') {
+          let regDoc = null;
+          if (userDoc.registration_id) {
+            regDoc = await Registration.findById(userDoc.registration_id).lean();
+          }
+          if (!regDoc) {
+            regDoc = await Registration.findOne({
+              $or: [
+                { phone: cleanEmail },
+                { phone: last10 },
+                { phoneNumber: cleanEmail },
+                { phoneNumber: last10 },
+                { leadPhone: cleanEmail },
+                { leadPhone: last10 },
+                { email: userDoc.email },
+                { 'members.phone': cleanEmail },
+                { 'members.phone': last10 },
+                { 'members.phoneNumber': cleanEmail },
+                { 'members.phoneNumber': last10 },
+                { 'members.email': userDoc.email },
+              ],
+            }).lean();
+          }
+          if (regDoc && !isRegistrationConfirmed(regDoc)) {
+            return res.status(403).json({
+              success: false,
+              error: 'Your team registration is not confirmed yet. Please wait for faculty confirmation before logging in.',
+            });
+          }
+        }
+
         const payload = {
           uid: userDoc.uid || userDoc._id,
           email: userDoc.email,
@@ -128,6 +184,37 @@ router.post(
       }
 
       const role = normalizeRole(userDoc.role, 'participant');
+
+      if (role === 'participant' && !PREDEFINED_EMAILS.includes(cleanEmail)) {
+        let regDoc = null;
+        if (userDoc.registration_id) {
+          regDoc = await Registration.findById(userDoc.registration_id).lean();
+        }
+        if (!regDoc) {
+          regDoc = await Registration.findOne({
+            $or: [
+              { email: cleanEmail },
+              { personal_email: cleanEmail },
+              { personalEmail: cleanEmail },
+              { userEmail: cleanEmail },
+              { teamEmail: cleanEmail },
+              { teamLeadEmail: cleanEmail },
+              { teamLeadPersonalEmail: cleanEmail },
+              { leadPersonalEmail: cleanEmail },
+              { collegeEmail: cleanEmail },
+              { teamLeadCollegeEmail: cleanEmail },
+              { 'members.email': cleanEmail },
+            ],
+          }).lean();
+        }
+        if (regDoc && !isRegistrationConfirmed(regDoc)) {
+          return res.status(403).json({
+            success: false,
+            error: 'Your team registration is not confirmed yet. Please wait for faculty confirmation before logging in.',
+          });
+        }
+      }
+
       const payload = {
         uid: userDoc.uid || userDoc._id,
         email: userDoc.email,
@@ -198,10 +285,29 @@ router.post(
 
     // Check in registrations collection
     const reg = await Registration.findOne({
-      $or: [{ email: cleanEmail }, { teamEmail: cleanEmail }, { leadPersonalEmail: cleanEmail }],
+      $or: [
+        { email: cleanEmail },
+        { personal_email: cleanEmail },
+        { personalEmail: cleanEmail },
+        { userEmail: cleanEmail },
+        { teamEmail: cleanEmail },
+        { teamLeadEmail: cleanEmail },
+        { teamLeadPersonalEmail: cleanEmail },
+        { leadPersonalEmail: cleanEmail },
+        { collegeEmail: cleanEmail },
+        { teamLeadCollegeEmail: cleanEmail },
+        { 'members.email': cleanEmail },
+      ],
     }).lean();
 
     if (reg) {
+      if (!isRegistrationConfirmed(reg)) {
+        return res.status(403).json({
+          success: false,
+          error: 'Your team registration is not confirmed yet. Please wait for faculty confirmation before logging in.',
+        });
+      }
+
       const payload = {
         uid: reg._id,
         email: cleanEmail,

@@ -9,6 +9,8 @@ import { extractTextFromPdf, parseQuestionsFromText } from "../../utils/pdfExtra
 import { extractQuizQuestionsWithGemini } from "../../utils/geminiQuizExtractor";
 import { userService } from "../../services/userService";
 import SEO from "../../components/layout/SEO";
+import DatePicker from "../../components/ui/DatePicker";
+import TimePicker from "../../components/ui/TimePicker";
 import {
   HelpCircle,
   Plus,
@@ -42,7 +44,12 @@ import {
   XCircle,
   Trophy,
   Medal,
-  Search
+  Search,
+  Clock,
+  RefreshCw,
+  Building2,
+  MapPin,
+  FileSpreadsheet
 } from "lucide-react";
 
 interface EventOption {
@@ -65,9 +72,9 @@ export const QuizManagementPage: React.FC = () => {
   const [selectedQuizId, setSelectedQuizId] = useState<string>("");
   const [selectedEventId, setSelectedEventId] = useState<string>(eventIdParam || "");
 
-  // Registrant & User Profile lookup maps for full registered names & roll numbers
-  const [registrantMap, setRegistrantMap] = useState<Map<string, { name: string; rollNo?: string; phone?: string; teamName?: string }>>(new Map());
-  const [userProfileMap, setUserProfileMap] = useState<Map<string, { name: string; rollNo?: string }>>(new Map());
+  // Registrant & User Profile lookup maps for Team Name, College Name, Place & Details
+  const [registrantMap, setRegistrantMap] = useState<Map<string, { name: string; rollNo?: string; phone?: string; teamName?: string; collegeName?: string; collegePlace?: string }>>(new Map());
+  const [userProfileMap, setUserProfileMap] = useState<Map<string, { name: string; rollNo?: string; collegeName?: string; collegePlace?: string }>>(new Map());
 
   // Search & Filter for Submissions Table
   const [subSearchQuery, setSubSearchQuery] = useState<string>("");
@@ -123,6 +130,9 @@ export const QuizManagementPage: React.FC = () => {
   // View state: "list" or "editor" (Full-page editor mode)
   const [isEditorMode, setIsEditorMode] = useState<boolean>(false);
   const [editingQuiz, setEditingQuiz] = useState<Partial<Quiz> | null>(null);
+  const [startingQuiz, setStartingQuiz] = useState<Quiz | null>(null);
+  const [startDuration, setStartDuration] = useState<number>(30);
+  const [isStarting, setIsStarting] = useState(false);
   const [customCategories, setCustomCategories] = useState<string[]>([]);
   const [saving, setSaving] = useState<boolean>(false);
   const [currentQuestionIndex, setCurrentQuestionIndex] = useState<number>(0);
@@ -141,81 +151,126 @@ export const QuizManagementPage: React.FC = () => {
   const [aiScanSuccess, setAiScanSuccess] = useState<boolean>(false);
   const [parsedBulkQuestions, setParsedBulkQuestions] = useState<QuizQuestion[]>([]);
 
+interface ExcelScoreRow {
+  id: string;
+  userId: string;
+  quizId: string;
+  rank: number;
+  rankLabel: string;
+  teamName: string;
+  collegeName: string;
+  collegePlace: string;
+  score: number;
+  maxScore: number;
+  percentage: number;
+  correctCount: number;
+  incorrectCount: number;
+  unansweredCount: number;
+  totalQuestions: number;
+  pointsPerQuestion: number;
+  passed: boolean;
+  remarks: string;
+  isModified: boolean;
+  originalScore: number;
+  originalMaxScore: number;
+  originalPassed: boolean;
+  originalRemarks: string;
+  originalCorrectCount: number;
+  originalIncorrectCount: number;
+  timeSpentSeconds: number;
+  submittedAt: number;
+  violationsCount: number;
+}
+
   // Active Tab for list mode
   const [activeTab, setActiveTab] = useState<"quizzes" | "live_monitor" | "submissions">("quizzes");
 
   // Inspect Participant Submission Modal
-  const [inspectingSubmission, setInspectingSubmission] = useState<(QuizSubmission & { rank?: number; rankLabel?: string; resolvedName?: string; rollNo?: string }) | null>(null);
+  const [inspectingSubmission, setInspectingSubmission] = useState<(QuizSubmission & { rank?: number; rankLabel?: string; resolvedName?: string; rollNo?: string; resolvedTeamName?: string; resolvedCollegeName?: string; resolvedCollegePlace?: string }) | null>(null);
   const [inspectFilter, setInspectFilter] = useState<"all" | "correct" | "incorrect" | "unanswered">("all");
 
-  // Helper to resolve real registered name and student details
+  // Excel Spreadsheet Score Editor Modal State (Alt + Shift + E)
+  const [isExcelEditorOpen, setIsExcelEditorOpen] = useState<boolean>(false);
+  const [excelRows, setExcelRows] = useState<ExcelScoreRow[]>([]);
+  const [excelSearchQuery, setExcelSearchQuery] = useState<string>("");
+  const [excelFilter, setExcelFilter] = useState<"all" | "modified" | "passed" | "failed">("all");
+  const [isSavingExcel, setIsSavingExcel] = useState<boolean>(false);
+  const [focusedRowId, setFocusedRowId] = useState<string | null>(null);
+
+  // Helper to resolve team name, college name, and place details
   const resolveParticipantInfo = React.useCallback(
-    (sub: { userName?: string; userEmail?: string; userId?: string }) => {
+    (sub: { userName?: string; userEmail?: string; userId?: string; teamName?: string }) => {
       const cleanEmail = (sub.userEmail || "").toLowerCase().trim();
       const emailPrefix = cleanEmail.split("@")[0] || "";
 
-      // 1. Check registrations collection by email (lead email, personal email, college email)
+      let resolvedTeam = (sub.teamName || "").trim();
+      let resolvedCollege = "";
+      let resolvedPlace = "";
+      let rollNo = "";
+      let displayName = "";
+
+      // 1. Check registrations collection by email or userId
       if (cleanEmail && registrantMap.has(cleanEmail)) {
         const reg = registrantMap.get(cleanEmail)!;
-        if (reg.name && reg.name.trim() && reg.name.toLowerCase() !== emailPrefix.toLowerCase()) {
-          return {
-            displayName: reg.name.trim(),
-            rollNo: reg.rollNo || "",
-            teamName: reg.teamName || "",
-            isRegisteredName: true
-          };
+        if (reg.teamName && (!resolvedTeam || resolvedTeam.toLowerCase() === "solo" || resolvedTeam.toLowerCase() === "general")) {
+          resolvedTeam = reg.teamName.trim();
         }
+        if (reg.collegeName) resolvedCollege = reg.collegeName.trim();
+        if (reg.collegePlace) resolvedPlace = reg.collegePlace.trim();
+        if (reg.rollNo) rollNo = reg.rollNo.trim();
+        if (reg.name) displayName = reg.name.trim();
+      } else if (sub.userId && registrantMap.has(sub.userId)) {
+        const reg = registrantMap.get(sub.userId)!;
+        if (reg.teamName && (!resolvedTeam || resolvedTeam.toLowerCase() === "solo" || resolvedTeam.toLowerCase() === "general")) {
+          resolvedTeam = reg.teamName.trim();
+        }
+        if (reg.collegeName) resolvedCollege = reg.collegeName.trim();
+        if (reg.collegePlace) resolvedPlace = reg.collegePlace.trim();
+        if (reg.rollNo) rollNo = reg.rollNo.trim();
+        if (reg.name) displayName = reg.name.trim();
       }
 
-      // 2. Check users collection / Supabase by userId or email
+      // 2. Check users collection
       if (sub.userId && userProfileMap.has(sub.userId)) {
         const u = userProfileMap.get(sub.userId)!;
-        if (u.name && u.name.trim() && u.name.toLowerCase() !== emailPrefix.toLowerCase() && u.name.toLowerCase() !== "participant") {
-          return {
-            displayName: u.name.trim(),
-            rollNo: u.rollNo || "",
-            teamName: "",
-            isRegisteredName: true
-          };
-        }
+        if (!resolvedCollege && u.collegeName) resolvedCollege = u.collegeName.trim();
+        if (!resolvedPlace && u.collegePlace) resolvedPlace = u.collegePlace.trim();
+        if (!rollNo && u.rollNo) rollNo = u.rollNo.trim();
+        if (!displayName && u.name) displayName = u.name.trim();
       }
       if (cleanEmail && userProfileMap.has(cleanEmail)) {
         const u = userProfileMap.get(cleanEmail)!;
-        if (u.name && u.name.trim() && u.name.toLowerCase() !== emailPrefix.toLowerCase() && u.name.toLowerCase() !== "participant") {
-          return {
-            displayName: u.name.trim(),
-            rollNo: u.rollNo || "",
-            teamName: "",
-            isRegisteredName: true
-          };
-        }
+        if (!resolvedCollege && u.collegeName) resolvedCollege = u.collegeName.trim();
+        if (!resolvedPlace && u.collegePlace) resolvedPlace = u.collegePlace.trim();
+        if (!rollNo && u.rollNo) rollNo = u.rollNo.trim();
+        if (!displayName && u.name) displayName = u.name.trim();
       }
 
-      // 3. Check existing sub.userName if it is already a genuine full name
-      const existingName = (sub.userName || "").trim();
-      if (
-        existingName &&
-        existingName.toLowerCase() !== emailPrefix.toLowerCase() &&
-        existingName.toLowerCase() !== "participant" &&
-        existingName.toLowerCase() !== "solo" &&
-        existingName.toLowerCase() !== "user" &&
-        existingName.toLowerCase() !== "unnamed user"
-      ) {
-        return {
-          displayName: existingName,
-          rollNo: "",
-          teamName: "",
-          isRegisteredName: true
-        };
+      // 3. Fallbacks for Vishnu domain or general defaults
+      if (cleanEmail.endsWith("@vishnu.edu.in")) {
+        if (!resolvedCollege) resolvedCollege = "Vishnu Institute of Technology";
+        if (!resolvedPlace) resolvedPlace = "Bhimavaram";
       }
 
       // 4. Fallback formatting
-      const formattedPrefix = emailPrefix ? emailPrefix.replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "Participant";
+      if (!resolvedTeam || resolvedTeam.toLowerCase() === "solo" || resolvedTeam.toLowerCase() === "participant" || resolvedTeam.toLowerCase() === "user") {
+        resolvedTeam = displayName ? `Team ${displayName}` : (emailPrefix ? `Team ${emailPrefix.toUpperCase()}` : "Team Alpha");
+      }
+
+      if (!resolvedCollege) {
+        resolvedCollege = "Vishnu Institute of Technology";
+      }
+
+      if (!resolvedPlace) {
+        resolvedPlace = "Bhimavaram";
+      }
+
       return {
-        displayName: formattedPrefix,
-        rollNo: "",
-        teamName: "",
-        isRegisteredName: false
+        displayName: displayName || (emailPrefix ? emailPrefix.replace(/[._-]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()) : "Participant"),
+        teamName: resolvedTeam,
+        collegeName: resolvedCollege,
+        collegePlace: resolvedPlace,
+        rollNo
       };
     },
     [registrantMap, userProfileMap]
@@ -240,10 +295,10 @@ export const QuizManagementPage: React.FC = () => {
         }));
         setEvents(evList);
 
-        // 3. Fetch Registrations to map registered full names & roll numbers
+        // 3. Fetch Registrations to map Team Names, College Names & Places
         try {
           const regData = await api.fetchRegistrations();
-          const regMap = new Map<string, { name: string; rollNo?: string; phone?: string; teamName?: string }>();
+          const regMap = new Map<string, { name: string; rollNo?: string; phone?: string; teamName?: string; collegeName?: string; collegePlace?: string }>();
           (regData || []).forEach((data: any) => {
             const primaryName = (data.fullName || data.teamLeadName || data.name || "").trim();
             const roll = data.rollNo || data.studentId || data.teamLeadStudentId || "";
@@ -251,21 +306,24 @@ export const QuizManagementPage: React.FC = () => {
             const collegeEm = (data.collegeEmail || data.teamLeadCollegeEmail || "").toLowerCase().trim();
             const personalEm = (data.personalEmail || data.teamLeadPersonalEmail || "").toLowerCase().trim();
             const teamEm = (data.teamEmail || data.teamLeadEmail || data.email || "").toLowerCase().trim();
-            const group = data.groupName || data.teamName || "";
+            const group = (data.groupName || data.teamName || "").trim();
+            const college = (data.collegeName || data.college || data.institute || data.institution || "").trim();
+            const place = (data.collegePlace || data.place || data.city || data.location || "").trim();
 
             const regInfo = {
               name: primaryName,
               rollNo: roll,
               phone,
-              teamName: group
+              teamName: group,
+              collegeName: college,
+              collegePlace: place
             };
 
-            if (primaryName) {
-              if (teamEm) regMap.set(teamEm, regInfo);
-              if (personalEm) regMap.set(personalEm, regInfo);
-              if (collegeEm) regMap.set(collegeEm, regInfo);
-              if (data.email) regMap.set(data.email.toLowerCase().trim(), regInfo);
-            }
+            if (teamEm) regMap.set(teamEm, regInfo);
+            if (personalEm) regMap.set(personalEm, regInfo);
+            if (collegeEm) regMap.set(collegeEm, regInfo);
+            if (data.email) regMap.set(data.email.toLowerCase().trim(), regInfo);
+            if (data.userId) regMap.set(data.userId, regInfo);
 
             // Map team members if any
             if (Array.isArray(data.members)) {
@@ -273,12 +331,16 @@ export const QuizManagementPage: React.FC = () => {
                 const mName = (m.name || m.fullName || "").trim();
                 const mEmail = (m.email || m.personalEmail || m.collegeEmail || "").toLowerCase().trim();
                 const mRoll = m.rollNo || m.studentId || "";
-                if (mEmail && mName) {
+                const mCollege = (m.college || m.collegeName || college).trim();
+                const mPlace = (m.collegePlace || m.place || place).trim();
+                if (mEmail) {
                   regMap.set(mEmail, {
-                    name: mName,
-                    rollNo: mRoll,
-                    phone: m.phone || "",
-                    teamName: group
+                    name: mName || primaryName,
+                    rollNo: mRoll || roll,
+                    phone: m.phone || phone,
+                    teamName: group,
+                    collegeName: mCollege,
+                    collegePlace: mPlace
                   });
                 }
               });
@@ -291,19 +353,20 @@ export const QuizManagementPage: React.FC = () => {
 
         // 4. Fetch Users
         try {
-          const uMap = new Map<string, { name: string; rollNo?: string }>();
+          const uMap = new Map<string, { name: string; rollNo?: string; collegeName?: string; collegePlace?: string }>();
           const usersData = await api.fetchUsers();
           (usersData || []).forEach((data: any) => {
             const rawName = (data.displayName || data.name || data.teamLeadName || "").trim();
             const cleanEmail = (data.email || "").toLowerCase().trim();
             const pEmail = (data.personalEmail || data.personal_email || "").toLowerCase().trim();
             const roll = data.rollNo || data.studentId || "";
+            const col = (data.college || data.collegeName || "").trim();
+            const plc = (data.collegePlace || data.place || data.city || data.location || "").trim();
             const uid = data.id || data._id;
-            if (rawName && rawName.toLowerCase() !== "unnamed user" && rawName.toLowerCase() !== "participant") {
-              if (uid) uMap.set(uid, { name: rawName, rollNo: roll });
-              if (cleanEmail) uMap.set(cleanEmail, { name: rawName, rollNo: roll });
-              if (pEmail) uMap.set(pEmail, { name: rawName, rollNo: roll });
-            }
+            const uInfo = { name: rawName, rollNo: roll, collegeName: col, collegePlace: plc };
+            if (uid) uMap.set(uid, uInfo);
+            if (cleanEmail) uMap.set(cleanEmail, uInfo);
+            if (pEmail) uMap.set(pEmail, uInfo);
           });
 
           // Supabase fallback
@@ -313,12 +376,11 @@ export const QuizManagementPage: React.FC = () => {
               const suName = (su.display_name || su.name || "").trim();
               const suEmail = (su.email || "").toLowerCase().trim();
               const suPEmail = (su.personal_email || "").toLowerCase().trim();
-              if (suName && suName.toLowerCase() !== "participant") {
-                if (su.id) uMap.set(su.id, { name: suName, rollNo: su.year || "" });
-                if (su.auth_id) uMap.set(su.auth_id, { name: suName, rollNo: su.year || "" });
-                if (suEmail) uMap.set(suEmail, { name: suName, rollNo: su.year || "" });
-                if (suPEmail) uMap.set(suPEmail, { name: suName, rollNo: su.year || "" });
-              }
+              const suInfo = { name: suName, rollNo: su.year || "", collegeName: "", collegePlace: "" };
+              if (su.id) uMap.set(su.id, suInfo);
+              if (su.auth_id) uMap.set(su.auth_id, suInfo);
+              if (suEmail) uMap.set(suEmail, suInfo);
+              if (suPEmail) uMap.set(suPEmail, suInfo);
             });
           } catch {}
 
@@ -339,8 +401,26 @@ export const QuizManagementPage: React.FC = () => {
 
   // Fetch sessions & submissions on-demand when quiz is selected
   const [refreshKey, setRefreshKey] = useState(0);
-  const _refreshSubmissions = () => setRefreshKey((k) => k + 1);
-  void _refreshSubmissions;
+  const [isRefreshingResults, setIsRefreshingResults] = useState(false);
+  
+  const handleRefreshResults = async () => {
+    setIsRefreshingResults(true);
+    try {
+      // 1. Refresh quizzes list
+      const freshQuizzes = await api.fetchAllQuizzes();
+      if (freshQuizzes) {
+        setQuizzes(freshQuizzes);
+      }
+      // 2. Trigger fetch of submissions & sessions for selected quiz
+      setRefreshKey((k) => k + 1);
+    } catch (err) {
+      console.warn("Error refreshing quiz results:", err);
+    } finally {
+      setTimeout(() => {
+        setIsRefreshingResults(false);
+      }, 500);
+    }
+  };
 
   useEffect(() => {
     if (!selectedQuizId) {
@@ -358,12 +438,21 @@ export const QuizManagementPage: React.FC = () => {
         ]);
 
         const targetQuiz = quizzes.find((q) => q.id === selectedQuizId);
+        
+        const overridden = (targetQuiz as any)?.overriddenScores;
+
         const subs: QuizSubmission[] = (subsData || []).map((raw: any) => {
-          if ((raw.score === undefined || raw.score === null) && targetQuiz && targetQuiz.questions && targetQuiz.questions.length > 0) {
-            const evalData = evaluateQuizAnswers(targetQuiz, raw.answers || {});
-            return { ...raw, ...evalData, evaluatedAt: Date.now() };
+          let updatedRaw = raw;
+          if (overridden && overridden[raw.id]) {
+            updatedRaw = { ...raw, ...overridden[raw.id] };
           }
-          return raw;
+          
+          if ((updatedRaw.score === undefined || updatedRaw.score === null) && targetQuiz && targetQuiz.questions && targetQuiz.questions.length > 0) {
+            const evalData = evaluateQuizAnswers(targetQuiz, updatedRaw.answers || {});
+            return {
+              ...updatedRaw, ...evalData, evaluatedAt: Date.now() };
+          }
+          return updatedRaw;
         });
 
         if (isMounted) {
@@ -395,6 +484,9 @@ export const QuizManagementPage: React.FC = () => {
       pointsPerQuestion: 2,
       totalMarks: 0,
       passingMarks: 0,
+      scheduledStartTime: undefined,
+      scheduledEndTime: undefined,
+      resultsPublished: false,
       status: "active",
       instructions: [
         "Each question has 4 options with single correct answer.",
@@ -468,12 +560,15 @@ export const QuizManagementPage: React.FC = () => {
         eventId: targetEvent ? targetEvent.id : (editingQuiz.eventId || ""),
         eventTitle: targetEvent ? targetEvent.title : (editingQuiz.eventTitle || ""),
         track: editingQuiz.track || (targetEvent?.category ? `${targetEvent.category} Track` : "General Track"),
-        durationMinutes: Number(editingQuiz.durationMinutes) || 30,
+        durationMinutes: (Number(editingQuiz.durationMinutes) || 30),
         pointsPerQuestion: ptsPerQ,
         totalMarks: calcTotalMarks,
         passingMarks: Number(editingQuiz.passingMarks) || Math.round(calcTotalMarks * 0.4),
         instructions: editingQuiz.instructions || [],
         status: editingQuiz.status || "active",
+        scheduledStartTime: editingQuiz.scheduledStartTime || null,
+        scheduledEndTime: editingQuiz.scheduledEndTime || null,
+        resultsPublished: editingQuiz.resultsPublished ?? false,
         questionsCount: qCount,
         questions: (editingQuiz.questions || []).map((q) => ({
           ...q,
@@ -543,43 +638,10 @@ export const QuizManagementPage: React.FC = () => {
     }
   };
 
-  const handleStartQuiz = async (quiz: Quiz) => {
-    const confirmed = await showConfirm({
-      title: `Start "${quiz.title}"?`,
-      message: `This will set the authoritative exam timer for ${quiz.durationMinutes} minutes from now and open testing access to all registered participants.`,
-      confirmText: "Start Exam Now",
-      cancelText: "Cancel",
-      type: "primary",
-      icon: "play"
-    });
-    if (!confirmed) return;
-    
-    try {
-      const now = Date.now();
-      const scheduledEndTime = now + (quiz.durationMinutes * 60 * 1000);
-      
-      await api.updateQuiz(quiz.id, {
-        status: "active",
-        scheduledStartTime: now,
-        scheduledEndTime: scheduledEndTime,
-        updatedAt: now
-      });
 
-      if (typeof window !== "undefined") {
-        sessionStorage.removeItem(`quiz_cache_${quiz.id}`);
-      }
-
-      setQuizzes(prev => prev.map(q => 
-        q.id === quiz.id ? { ...q, status: "active", scheduledStartTime: now, scheduledEndTime, updatedAt: now } : q
-      ));
-    } catch (err: any) {
-      console.error("Failed to start quiz:", err);
-      await showAlert({
-        title: "Error Starting Quiz",
-        message: "Error starting quiz: " + err.message,
-        type: "danger"
-      });
-    }
+  const handleStartQuiz = (quiz: Quiz) => {
+    setStartingQuiz(quiz);
+    setStartDuration(quiz.durationMinutes || 30);
   };
 
   const handleStopQuiz = async (quiz: Quiz) => {
@@ -618,6 +680,47 @@ export const QuizManagementPage: React.FC = () => {
     }
   };
 
+  // Toggle Publish / Hide Quiz Results
+  const handleTogglePublishResults = async (quiz: Quiz) => {
+    const nextState = !quiz.resultsPublished;
+    const confirmed = await showConfirm({
+      title: nextState ? "Publish Quiz Results?" : "Hide Quiz Results?",
+      message: nextState
+        ? `Publish results for "${quiz.title}"?\n\nParticipants will now be able to view their final scores, accuracy, and answer sheets.`
+        : `Hide results for "${quiz.title}"?\n\nParticipants will see "Results will be announced soon" on their completion receipts and dashboards.`,
+      confirmText: nextState ? "Publish Results" : "Hide Results",
+      cancelText: "Cancel",
+      type: nextState ? "info" : "warning",
+      icon: nextState ? "sparkles" : "alert"
+    });
+    if (!confirmed) return;
+
+    try {
+      const now = Date.now();
+      const updatedQuiz: Quiz = {
+        ...quiz,
+        resultsPublished: nextState,
+        updatedAt: now
+      };
+      await api.updateQuiz(quiz.id, updatedQuiz);
+      setQuizzes(prev => prev.map(q => q.id === quiz.id ? updatedQuiz : q));
+      await showAlert({
+        title: nextState ? "Results Published" : "Results Hidden",
+        message: nextState
+          ? `Quiz results for "${quiz.title}" are now live and visible to participants!`
+          : `Quiz results for "${quiz.title}" have been hidden from participants.`,
+        type: "success"
+      });
+    } catch (err: any) {
+      console.error("Failed to update results publication:", err);
+      await showAlert({
+        title: "Update Failed",
+        message: "Failed to update results publication status: " + err.message,
+        type: "danger"
+      });
+    }
+  };
+
   // Reset a specific participant's attempt
   const handleResetParticipant = async (sub: QuizSubmission) => {
     const confirmed = await showConfirm({
@@ -645,6 +748,37 @@ export const QuizManagementPage: React.FC = () => {
       await showAlert({
         title: "Reset Error",
         message: "Error resetting participant: " + err.message,
+        type: "danger"
+      });
+    }
+  };
+
+  const handleDeleteParticipant = async (sub: QuizSubmission) => {
+    const confirmed = await showConfirm({
+      title: "Delete Submission?",
+      message: `Are you sure you want to completely delete the submission for ${sub.userName || sub.userEmail}?\n\nThis will remove their record from the leaderboard. They will be able to retake the quiz if it is still active.`,
+      confirmText: "Delete",
+      cancelText: "Cancel",
+      type: "danger",
+      icon: "trash"
+    });
+    if (!confirmed) return;
+
+    try {
+      await resetParticipantQuizSession(sub.quizId, sub.userId);
+      setSubmissions(prev => prev.filter(s => s.id !== sub.id));
+      setActiveSessions(prev => prev.filter(s => s.userId !== sub.userId));
+      await showAlert({
+        title: "Submission Deleted",
+        message: `Quiz submission for ${sub.userName || "participant"} has been deleted successfully.`,
+        type: "success",
+        icon: "check"
+      });
+    } catch (err: any) {
+      console.error("Failed to delete participant session:", err);
+      await showAlert({
+        title: "Delete Error",
+        message: "Error deleting submission: " + err.message,
         type: "danger"
       });
     }
@@ -733,7 +867,9 @@ export const QuizManagementPage: React.FC = () => {
         rankLabel: `${rank}${placeSuffix}`,
         resolvedName: info.displayName,
         rollNo: info.rollNo,
-        resolvedTeamName: sub.teamName || info.teamName || "Solo"
+        resolvedTeamName: info.teamName || sub.teamName || "Team Alpha",
+        resolvedCollegeName: info.collegeName,
+        resolvedCollegePlace: info.collegePlace
       };
     });
   }, [submissions, resolveParticipantInfo]);
@@ -743,12 +879,13 @@ export const QuizManagementPage: React.FC = () => {
     return rankedSubmissions.filter((sub) => {
       if (subSearchQuery.trim()) {
         const q = subSearchQuery.toLowerCase().trim();
-        const matchName = sub.resolvedName.toLowerCase().includes(q) || (sub.userName && sub.userName.toLowerCase().includes(q));
+        const matchTeam = (sub.resolvedTeamName || "").toLowerCase().includes(q);
+        const matchCollege = (sub.resolvedCollegeName || "").toLowerCase().includes(q);
+        const matchPlace = (sub.resolvedCollegePlace || "").toLowerCase().includes(q);
         const matchEmail = (sub.userEmail || "").toLowerCase().includes(q);
         const matchRoll = sub.rollNo ? sub.rollNo.toLowerCase().includes(q) : false;
-        const matchTeam = (sub.resolvedTeamName || "").toLowerCase().includes(q);
         const matchRank = sub.rankLabel.toLowerCase() === q || `rank ${sub.rank}` === q || `#${sub.rank}` === q;
-        if (!matchName && !matchEmail && !matchRoll && !matchTeam && !matchRank) return false;
+        if (!matchTeam && !matchCollege && !matchPlace && !matchEmail && !matchRoll && !matchRank) return false;
       }
 
       if (subFilterState === "top3") return sub.rank <= 3;
@@ -760,7 +897,7 @@ export const QuizManagementPage: React.FC = () => {
     });
   }, [rankedSubmissions, subSearchQuery, subFilterState]);
 
-  // Export Results to CSV with Rank & Registered Names
+  // Export Results to CSV with Rank, Team Name, College & Place
   const handleExportCSV = async () => {
     if (rankedSubmissions.length === 0) {
       await showAlert({
@@ -774,10 +911,10 @@ export const QuizManagementPage: React.FC = () => {
     const targetQuiz = quizzes.find((q) => q.id === selectedQuizId);
     const headers = [
       "Rank / Place",
-      "Participant Name (Registered)",
-      "Email",
-      "Roll No / Student ID",
       "Team Name",
+      "College Name",
+      "Place / Location",
+      "Roll No / Student ID",
       "Score",
       "Max Score",
       "Percentage (%)",
@@ -801,10 +938,10 @@ export const QuizManagementPage: React.FC = () => {
 
       return [
         `"${s.rankLabel}"`,
-        `"${(s.resolvedName || s.userName || "N/A").replace(/"/g, '""')}"`,
-        `"${(s.userEmail || "N/A").replace(/"/g, '""')}"`,
+        `"${(s.resolvedTeamName || "Solo").replace(/"/g, '""')}"`,
+        `"${(s.resolvedCollegeName || "N/A").replace(/"/g, '""')}"`,
+        `"${(s.resolvedCollegePlace || "N/A").replace(/"/g, '""')}"`,
         `"${(s.rollNo || "N/A").replace(/"/g, '""')}"`,
-        `"${(s.resolvedTeamName || s.teamName || "Solo").replace(/"/g, '""')}"`,
         scoreVal,
         maxScoreVal,
         `"${pctVal}"`,
@@ -825,11 +962,552 @@ export const QuizManagementPage: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `quiz_${selectedQuizId}_ranked_scorecard.csv`);
+    link.setAttribute("download", `quiz_${selectedQuizId}_team_scorecard.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
   };
+
+  // Open Excel Sheet Score Editor Modal (Alt + Shift + E)
+  const handleOpenExcelScoreEditor = (focusSubmissionId?: string) => {
+    if (rankedSubmissions.length === 0) {
+      showAlert({
+        title: "No Submissions Found",
+        message: "There are no team submissions available to edit scores for this quiz.",
+        type: "info"
+      });
+      return;
+    }
+
+    const targetQuiz = quizzes.find((q) => q.id === selectedQuizId);
+    const ptsPerQ = targetQuiz?.pointsPerQuestion || 2;
+    const totalQCount = targetQuiz?.questions?.length || targetQuiz?.questionsCount || (targetQuiz?.totalMarks ? Math.round(targetQuiz.totalMarks / ptsPerQ) : 10);
+    const defaultMax = targetQuiz?.totalMarks || (totalQCount * ptsPerQ);
+    const passThreshold = targetQuiz?.passingMarks || Math.round(defaultMax * 0.4);
+
+    const rows: ExcelScoreRow[] = rankedSubmissions.map((s) => {
+      const curScore = s.score !== undefined && s.score !== null ? Number(s.score) : 0;
+      const curMax = s.maxScore || defaultMax;
+      const subTotalQ = s.totalQuestions || totalQCount;
+      const curCorrect = s.correctCount !== undefined ? s.correctCount : Math.min(subTotalQ, Math.round(curScore / ptsPerQ));
+      const curIncorrect = s.incorrectCount !== undefined ? s.incorrectCount : Math.max(0, subTotalQ - curCorrect);
+      const curPct = curMax > 0 ? Math.min(100, Math.max(0, Math.round((curScore / curMax) * 100))) : 0;
+      const curPassed = s.passed ?? (curScore >= passThreshold);
+      const curRemarks = (s as any).remarks || "";
+
+      return {
+        id: s.id,
+        userId: s.userId,
+        quizId: s.quizId || selectedQuizId,
+        rank: s.rank,
+        rankLabel: s.rankLabel,
+        teamName: s.resolvedTeamName || "Team Alpha",
+        collegeName: s.resolvedCollegeName || "Vishnu Institute of Technology",
+        collegePlace: s.resolvedCollegePlace || "Bhimavaram",
+        score: curScore,
+        maxScore: curMax,
+        percentage: curPct,
+        correctCount: curCorrect,
+        incorrectCount: curIncorrect,
+        unansweredCount: s.unansweredCount ?? 0,
+        totalQuestions: subTotalQ,
+        pointsPerQuestion: ptsPerQ,
+        passed: curPassed,
+        remarks: curRemarks,
+        isModified: false,
+        originalScore: curScore,
+        originalMaxScore: curMax,
+        originalPassed: curPassed,
+        originalRemarks: curRemarks,
+        originalCorrectCount: curCorrect,
+        originalIncorrectCount: curIncorrect,
+        timeSpentSeconds: s.timeSpentSeconds,
+        submittedAt: s.submittedAt,
+        violationsCount: s.violationsCount || 0
+      };
+    });
+
+    setExcelRows(rows);
+    setExcelSearchQuery("");
+    setExcelFilter("all");
+    setFocusedRowId(focusSubmissionId || null);
+    setIsExcelEditorOpen(true);
+  };
+
+  // Cell change handlers with strict upper bounds and points-per-question step syncing
+  const handleExcelCellScoreChange = (rowId: string, value: string) => {
+    const targetQuiz = quizzes.find((q) => q.id === selectedQuizId);
+    const ptsPerQ = targetQuiz?.pointsPerQuestion || 2;
+
+    setExcelRows((prev) =>
+      prev.map((row) => {
+        if (row.id !== rowId) return row;
+        const totalQ = row.totalQuestions || (row.maxScore > 0 ? Math.round(row.maxScore / ptsPerQ) : 10);
+        const rawNum = value === "" ? 0 : Number(value);
+        // Strict boundary: Score cannot exceed row.maxScore and cannot be negative
+        // Score must step by ptsPerQ
+        let validScore = isNaN(rawNum) ? 0 : Math.max(0, Math.min(row.maxScore, rawNum));
+        validScore = Math.round(validScore / ptsPerQ) * ptsPerQ;
+        
+        const maxSc = row.maxScore > 0 ? row.maxScore : 50;
+        const passMarks = targetQuiz?.passingMarks || Math.round(maxSc * 0.4);
+        
+        // Auto-calculate correct answers and incorrect answers based on points per question
+        const newCorrect = Math.min(totalQ, Math.round(validScore / ptsPerQ));
+        const newIncorrect = Math.max(0, totalQ - newCorrect);
+        const newPct = maxSc > 0 ? Math.min(100, Math.max(0, Math.round((validScore / maxSc) * 100))) : 0;
+        const newPassed = validScore >= passMarks;
+
+        const isModified =
+          validScore !== row.originalScore ||
+          row.maxScore !== row.originalMaxScore ||
+          newPassed !== row.originalPassed ||
+          row.remarks !== row.originalRemarks ||
+          newCorrect !== row.originalCorrectCount ||
+          newIncorrect !== row.originalIncorrectCount;
+
+        return {
+          ...row,
+          score: validScore,
+          correctCount: newCorrect,
+          incorrectCount: newIncorrect,
+          percentage: newPct,
+          passed: newPassed,
+          isModified
+        };
+      })
+    );
+  };
+
+  const handleExcelCellMaxScoreChange = (rowId: string, value: string) => {
+    const num = value === "" ? 50 : Number(value);
+    const targetQuiz = quizzes.find((q) => q.id === selectedQuizId);
+
+    setExcelRows((prev) =>
+      prev.map((row) => {
+        if (row.id !== rowId) return row;
+        const validMax = isNaN(num) || num <= 0 ? 50 : num;
+        // Clamp existing score so it never exceeds new max marks
+        const validScore = Math.min(validMax, row.score);
+        const passMarks = targetQuiz?.passingMarks || Math.round(validMax * 0.4);
+        const newPct = validMax > 0 ? Math.min(100, Math.max(0, Math.round((validScore / validMax) * 100))) : 0;
+        const newPassed = validScore >= passMarks;
+        const isModified =
+          validScore !== row.originalScore ||
+          validMax !== row.originalMaxScore ||
+          newPassed !== row.originalPassed ||
+          row.remarks !== row.originalRemarks ||
+          row.correctCount !== row.originalCorrectCount ||
+          row.incorrectCount !== row.originalIncorrectCount;
+
+        return {
+          ...row,
+          maxScore: validMax,
+          score: validScore,
+          percentage: newPct,
+          passed: newPassed,
+          isModified
+        };
+      })
+    );
+  };
+
+  const handleExcelCellCorrectChange = (rowId: string, value: string) => {
+    const targetQuiz = quizzes.find((q) => q.id === selectedQuizId);
+    const ptsPerQ = targetQuiz?.pointsPerQuestion || 2;
+
+    setExcelRows((prev) =>
+      prev.map((row) => {
+        if (row.id !== rowId) return row;
+        const totalQ = row.totalQuestions || (row.maxScore > 0 ? Math.round(row.maxScore / ptsPerQ) : 10);
+        const rawNum = value === "" ? 0 : Number(value);
+        // Strict boundary: Correct count cannot exceed total questions and cannot be negative
+        const validCorrect = isNaN(rawNum) ? 0 : Math.max(0, Math.min(totalQ, rawNum));
+        
+        // Auto-calculate score in steps of points per question (e.g. 2, 4, 6... or 5, 10, 15...)
+        const newScore = Math.min(row.maxScore, validCorrect * ptsPerQ);
+        const newIncorrect = Math.max(0, totalQ - validCorrect);
+        const maxSc = row.maxScore > 0 ? row.maxScore : 50;
+        const passMarks = targetQuiz?.passingMarks || Math.round(maxSc * 0.4);
+        const newPct = maxSc > 0 ? Math.min(100, Math.max(0, Math.round((newScore / maxSc) * 100))) : 0;
+        const newPassed = newScore >= passMarks;
+
+        const isModified =
+          newScore !== row.originalScore ||
+          row.maxScore !== row.originalMaxScore ||
+          newPassed !== row.originalPassed ||
+          row.remarks !== row.originalRemarks ||
+          validCorrect !== row.originalCorrectCount ||
+          newIncorrect !== row.originalIncorrectCount;
+
+        return {
+          ...row,
+          correctCount: validCorrect,
+          incorrectCount: newIncorrect,
+          score: newScore,
+          percentage: newPct,
+          passed: newPassed,
+          isModified
+        };
+      })
+    );
+  };
+
+  const handleExcelCellIncorrectChange = (rowId: string, value: string) => {
+    const targetQuiz = quizzes.find((q) => q.id === selectedQuizId);
+    const ptsPerQ = targetQuiz?.pointsPerQuestion || 2;
+
+    setExcelRows((prev) =>
+      prev.map((row) => {
+        if (row.id !== rowId) return row;
+        const totalQ = row.totalQuestions || (row.maxScore > 0 ? Math.round(row.maxScore / ptsPerQ) : 10);
+        const rawNum = value === "" ? 0 : Number(value);
+        // Strict boundary: Incorrect count cannot exceed total questions and cannot be negative
+        const validIncorrect = isNaN(rawNum) ? 0 : Math.max(0, Math.min(totalQ, rawNum));
+        
+        const newCorrect = Math.max(0, totalQ - validIncorrect);
+        const newScore = Math.min(row.maxScore, newCorrect * ptsPerQ);
+        const maxSc = row.maxScore > 0 ? row.maxScore : 50;
+        const passMarks = targetQuiz?.passingMarks || Math.round(maxSc * 0.4);
+        const newPct = maxSc > 0 ? Math.min(100, Math.max(0, Math.round((newScore / maxSc) * 100))) : 0;
+        const newPassed = newScore >= passMarks;
+
+        const isModified =
+          newScore !== row.originalScore ||
+          row.maxScore !== row.originalMaxScore ||
+          newPassed !== row.originalPassed ||
+          row.remarks !== row.originalRemarks ||
+          newCorrect !== row.originalCorrectCount ||
+          validIncorrect !== row.originalIncorrectCount;
+
+        return {
+          ...row,
+          correctCount: newCorrect,
+          incorrectCount: validIncorrect,
+          score: newScore,
+          percentage: newPct,
+          passed: newPassed,
+          isModified
+        };
+      })
+    );
+  };
+
+  const handleExcelCellRemarksChange = (rowId: string, value: string) => {
+    setExcelRows((prev) =>
+      prev.map((row) => {
+        if (row.id !== rowId) return row;
+        const isModified =
+          row.score !== row.originalScore ||
+          row.maxScore !== row.originalMaxScore ||
+          row.passed !== row.originalPassed ||
+          value !== row.originalRemarks ||
+          row.correctCount !== row.originalCorrectCount ||
+          row.incorrectCount !== row.originalIncorrectCount;
+
+        return {
+          ...row,
+          remarks: value,
+          isModified
+        };
+      })
+    );
+  };
+
+  const handleExcelCellPassedToggle = (rowId: string) => {
+    setExcelRows((prev) =>
+      prev.map((row) => {
+        if (row.id !== rowId) return row;
+        const newPassed = !row.passed;
+        const isModified =
+          row.score !== row.originalScore ||
+          row.maxScore !== row.originalMaxScore ||
+          newPassed !== row.originalPassed ||
+          row.remarks !== row.originalRemarks ||
+          row.correctCount !== row.originalCorrectCount ||
+          row.incorrectCount !== row.originalIncorrectCount;
+
+        return {
+          ...row,
+          passed: newPassed,
+          isModified
+        };
+      })
+    );
+  };
+
+  const handleExcelRevertRow = (rowId: string) => {
+    setExcelRows((prev) =>
+      prev.map((row) => {
+        if (row.id !== rowId) return row;
+        return {
+          ...row,
+          score: row.originalScore,
+          maxScore: row.originalMaxScore,
+          percentage: row.originalMaxScore > 0 ? Math.min(100, Math.max(0, Math.round((row.originalScore / row.originalMaxScore) * 100))) : 0,
+          correctCount: row.originalCorrectCount,
+          incorrectCount: row.originalIncorrectCount,
+          passed: row.originalPassed,
+          remarks: row.originalRemarks,
+          isModified: false
+        };
+      })
+    );
+  };
+
+  const handleExcelApplyBonus = (bonus: number) => {
+    const targetQuiz = quizzes.find((q) => q.id === selectedQuizId);
+    const ptsPerQ = targetQuiz?.pointsPerQuestion || 2;
+
+    setExcelRows((prev) =>
+      prev.map((row) => {
+        const totalQ = row.totalQuestions || (row.maxScore > 0 ? Math.round(row.maxScore / ptsPerQ) : 10);
+        const newScore = Math.max(0, Math.min(row.maxScore, row.score + bonus));
+        const newCorrect = Math.min(totalQ, Math.round(newScore / ptsPerQ));
+        const newIncorrect = Math.max(0, totalQ - newCorrect);
+        const maxSc = row.maxScore > 0 ? row.maxScore : 50;
+        const passMarks = targetQuiz?.passingMarks || Math.round(maxSc * 0.4);
+        const newPct = maxSc > 0 ? Math.min(100, Math.max(0, Math.round((newScore / maxSc) * 100))) : 0;
+        const newPassed = newScore >= passMarks;
+        const isModified =
+          newScore !== row.originalScore ||
+          row.maxScore !== row.originalMaxScore ||
+          newPassed !== row.originalPassed ||
+          row.remarks !== row.originalRemarks ||
+          newCorrect !== row.originalCorrectCount ||
+          newIncorrect !== row.originalIncorrectCount;
+
+        return {
+          ...row,
+          score: newScore,
+          correctCount: newCorrect,
+          incorrectCount: newIncorrect,
+          percentage: newPct,
+          passed: newPassed,
+          isModified
+        };
+      })
+    );
+  };
+
+  const handleExcelDiscardChanges = async () => {
+    const modifiedCount = excelRows.filter((r) => r.isModified).length;
+    if (modifiedCount > 0) {
+      const confirmed = await showConfirm({
+        title: "Discard All Changes?",
+        message: `You have ${modifiedCount} modified team score${modifiedCount === 1 ? "" : "s"}. Are you sure you want to revert all changes?`,
+        confirmText: "Discard Changes",
+        cancelText: "Keep Editing",
+        type: "warning",
+        icon: "rotate"
+      });
+      if (!confirmed) return;
+    }
+
+    setExcelRows((prev) =>
+      prev.map((r) => ({
+        ...r,
+        score: r.originalScore,
+        maxScore: r.originalMaxScore,
+        percentage: r.originalMaxScore > 0 ? Math.min(100, Math.max(0, Math.round((r.originalScore / r.originalMaxScore) * 100))) : 0,
+        correctCount: r.originalCorrectCount,
+        incorrectCount: r.originalIncorrectCount,
+        passed: r.originalPassed,
+        remarks: r.originalRemarks,
+        isModified: false
+      }))
+    );
+  };
+
+  const handleSaveAllExcelChanges = async () => {
+    const modifiedRows = excelRows.filter((r) => r.isModified);
+    if (modifiedRows.length === 0) {
+      await showAlert({
+        title: "No Changes Detected",
+        message: "No team scores have been modified in the spreadsheet.",
+        type: "info"
+      });
+      return;
+    }
+
+    try {
+      setIsSavingExcel(true);
+      const targetQuiz = quizzes.find((q) => q.id === selectedQuizId);
+      const currentOverridden = (targetQuiz as any)?.overriddenScores || {};
+      const newOverridden = { ...currentOverridden };
+
+      modifiedRows.forEach((r) => {
+        newOverridden[r.id] = {
+          score: r.score,
+          maxScore: r.maxScore,
+          percentage: r.percentage,
+          correctCount: r.correctCount,
+          incorrectCount: r.incorrectCount,
+          passed: r.passed,
+          remarks: r.remarks,
+          isScoreOverridden: true,
+          originalScore: r.originalScore,
+          scoreOverriddenAt: Date.now(),
+          evaluatedAt: Date.now()
+        };
+      });
+
+      // Save overriding scores into the quiz object directly to bypass backend endpoint issues
+      await api.updateQuiz(selectedQuizId, { overriddenScores: newOverridden });
+
+      // Update local state to reflect changes immediately
+      setQuizzes(prev => prev.map(q => q.id === selectedQuizId ? { ...q, overriddenScores: newOverridden } : q));
+      
+      setSubmissions(prev => prev.map(sub => {
+        if (newOverridden[sub.id]) {
+          return { ...sub, ...newOverridden[sub.id] };
+        }
+        return sub;
+      }));
+
+      // Mark excel rows as saved
+      setExcelRows((prev) =>
+        prev.map((r) => ({
+          ...r,
+          originalScore: r.score,
+          originalMaxScore: r.maxScore,
+          originalPassed: r.passed,
+          originalRemarks: r.remarks,
+          originalCorrectCount: r.correctCount,
+          originalIncorrectCount: r.incorrectCount,
+          isModified: false
+        }))
+      );
+
+      await showAlert({
+        title: "Scores Saved Successfully",
+        message: `Updated ${modifiedRows.length} team score${modifiedRows.length === 1 ? "" : "s"} locally via Quiz configuration.`,
+        type: "success"
+      });
+    } catch (err: any) {
+      console.error("Failed to batch save spreadsheet changes:", err);
+      await showAlert({
+        title: "Save Failed",
+        message: "Failed to save scores: " + err.message,
+        type: "danger"
+      });
+    } finally {
+      setIsSavingExcel(false);
+    }
+  };
+
+  const handleCloseExcelEditor = async () => {
+    const modifiedCount = excelRows.filter((r) => r.isModified).length;
+    if (modifiedCount > 0) {
+      const confirmed = await showConfirm({
+        title: "Unsaved Changes",
+        message: `You have ${modifiedCount} unsaved score changes in the spreadsheet. Do you want to discard them and close?`,
+        confirmText: "Discard & Close",
+        cancelText: "Keep Editing",
+        type: "warning",
+        icon: "alert"
+      });
+      if (!confirmed) return;
+    }
+    setIsExcelEditorOpen(false);
+  };
+
+  const handleExportExcelSheetCSV = () => {
+    const headers = [
+      "Rank / Place",
+      "Team Name",
+      "College Name",
+      "Place / Location",
+      "Score",
+      "Max Score",
+      "Percentage (%)",
+      "Status",
+      "Correct Count",
+      "Incorrect Count",
+      "Remarks / Notes"
+    ];
+
+    const rows = excelRows.map((r) => [
+      `"${r.rankLabel}"`,
+      `"${r.teamName.replace(/"/g, '""')}"`,
+      `"${r.collegeName.replace(/"/g, '""')}"`,
+      `"${r.collegePlace.replace(/"/g, '""')}"`,
+      r.score,
+      r.maxScore,
+      `"${r.percentage}%"`,
+      `"${r.passed ? "Passed" : "Below Cutoff"}"`,
+      r.correctCount,
+      r.incorrectCount,
+      `"${(r.remarks || "").replace(/"/g, '""')}"`
+    ]);
+
+    const csvContent = [headers.join(","), ...rows.map((r) => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `quiz_${selectedQuizId}_scores_spreadsheet.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const filteredExcelRows = React.useMemo(() => {
+    return excelRows.filter((r) => {
+      if (excelSearchQuery.trim()) {
+        const q = excelSearchQuery.toLowerCase().trim();
+        const matchTeam = r.teamName.toLowerCase().includes(q);
+        const matchCollege = r.collegeName.toLowerCase().includes(q);
+        const matchPlace = r.collegePlace.toLowerCase().includes(q);
+        const matchRemarks = r.remarks.toLowerCase().includes(q);
+        const matchRank = r.rankLabel.toLowerCase() === q || `rank ${r.rank}` === q || `#${r.rank}` === q;
+        if (!matchTeam && !matchCollege && !matchPlace && !matchRemarks && !matchRank) return false;
+      }
+
+      if (excelFilter === "modified") return r.isModified;
+      if (excelFilter === "passed") return r.passed;
+      if (excelFilter === "failed") return !r.passed;
+
+      return true;
+    });
+  }, [excelRows, excelSearchQuery, excelFilter]);
+
+  // Keyboard shortcut listener: Alt + Shift + E
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const isAltShiftE = e.altKey && e.shiftKey && (e.key === "e" || e.key === "E" || e.code === "KeyE" || e.key === "€");
+      if (isAltShiftE) {
+        e.preventDefault();
+        
+        if (isExcelEditorOpen) return;
+
+        if (inspectingSubmission) {
+          handleOpenExcelScoreEditor(inspectingSubmission.id);
+          return;
+        }
+
+        if (filteredSubmissions.length > 0) {
+          handleOpenExcelScoreEditor(filteredSubmissions[0].id);
+          return;
+        }
+
+        if (rankedSubmissions.length > 0) {
+          setActiveTab("submissions");
+          handleOpenExcelScoreEditor(rankedSubmissions[0].id);
+          return;
+        }
+
+        showAlert({
+          title: "No Submissions Available",
+          message: "There are no team submissions available to edit for this quiz yet.",
+          type: "info"
+        });
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isExcelEditorOpen, inspectingSubmission, filteredSubmissions, rankedSubmissions, activeTab, showAlert]);
 
   const inProgressSessions = activeSessions.filter((s) => s.status === "in_progress");
 
@@ -1448,8 +2126,8 @@ Answer: A`;
         {/* ================= GLOBAL SETTINGS MODAL ================= */}
         {showSettingsModal && (
           <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4 animate-in fade-in duration-200">
-            <div className="bg-white border border-slate-200 rounded-3xl max-w-xl w-full p-5 sm:p-6 space-y-4 shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden text-left">
-              <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="bg-white border border-slate-200 rounded-3xl max-w-xl w-full p-5 sm:p-6 shadow-2xl animate-in zoom-in-95 duration-200 overflow-hidden text-left max-h-[90vh] flex flex-col">
+              <div className="flex items-center justify-between pb-3 border-b border-slate-100 shrink-0">
                 <h3 className="text-lg font-black text-[#0F172A] flex items-center gap-2">
                   <FileText className="w-5 h-5 text-blue-600" />
                   <span>Assessment Settings</span>
@@ -1462,7 +2140,7 @@ Answer: A`;
                 </button>
               </div>
 
-              <div className="space-y-3.5 text-left">
+              <div className="space-y-3.5 text-left overflow-y-auto flex-1 min-h-0 pr-1">
                 {/* Quiz Title */}
                 <div className="space-y-1">
                   <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
@@ -1576,34 +2254,198 @@ Answer: A`;
                   />
                 </div>
 
-                {/* Duration & Status */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-700">Duration (Minutes)</label>
+                {/* Schedule: Start & End Date/Time */}
+                <div className="bg-gradient-to-r from-indigo-50/70 via-purple-50/40 to-blue-50/60 p-3.5 rounded-2xl border border-indigo-200/70 space-y-2.5">
+                  <label className="text-[11px] font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                    <Clock className="w-4 h-4 text-indigo-600" />
+                    <span>Quiz Schedule (Auto Start & End)</span>
+                  </label>
+                  <p className="text-[10px] text-slate-500 font-medium">
+                    Set when the quiz automatically opens and closes. Participants can only attempt the quiz within this window.
+                  </p>
+
+                  <div className="space-y-1 mt-2 mb-3">
+                    <label className="text-[11px] font-bold text-indigo-700 flex items-center gap-1.5">
+                      <Clock className="w-3.5 h-3.5" />
+                      <span>Participant Time Limit (Minutes)</span>
+                    </label>
+                    <p className="text-[9px] text-indigo-500 mb-1">Once started, participants must complete the quiz within this duration.</p>
                     <input
                       type="number"
                       min={1}
                       value={editingQuiz.durationMinutes || 30}
-                      onChange={(e) => setEditingQuiz({ ...editingQuiz, durationMinutes: Number(e.target.value) })}
-                      className="w-full px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none"
+                      onChange={(e) => setEditingQuiz({ ...editingQuiz, durationMinutes: Math.max(1, parseInt(e.target.value) || 30) })}
+                      className="w-full px-3 py-2 rounded-xl border border-indigo-200 bg-white text-slate-900 text-xs font-bold focus:ring-2 focus:ring-indigo-500 outline-none shadow-2xs"
+                      placeholder="e.g. 60"
                     />
                   </div>
-                  <div className="space-y-1">
-                    <label className="text-[11px] font-bold text-slate-700">Status</label>
-                    <select
-                      value={editingQuiz.status || "active"}
-                      onChange={(e) => setEditingQuiz({ ...editingQuiz, status: e.target.value as any })}
-                      className="w-full px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-bold text-slate-800 focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer"
-                    >
-                      <option value="active">Active / Published</option>
-                      <option value="draft">Draft (Hidden)</option>
-                      <option value="completed">Completed / Closed</option>
-                    </select>
+
+                  {/* Start Date & Time */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-indigo-700 block">Start Date & Time</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <DatePicker
+                        value={editingQuiz.scheduledStartTime ? (() => {
+                          const d = new Date(editingQuiz.scheduledStartTime);
+                          const year = d.getFullYear();
+                          const month = String(d.getMonth() + 1).padStart(2, "0");
+                          const day = String(d.getDate()).padStart(2, "0");
+                          return `${year}-${month}-${day}`;
+                        })() : ""}
+                        onChange={(dateVal) => {
+                          if (dateVal) {
+                            const [y, m, d] = dateVal.split("-").map(Number);
+                            const existing = editingQuiz.scheduledStartTime ? new Date(editingQuiz.scheduledStartTime) : new Date();
+                            existing.setFullYear(y, m - 1, d);
+                            if (!editingQuiz.scheduledStartTime) {
+                              existing.setHours(9, 0, 0, 0);
+                            }
+                            setEditingQuiz({ ...editingQuiz, scheduledStartTime: existing.getTime() });
+                          } else {
+                            setEditingQuiz({ ...editingQuiz, scheduledStartTime: undefined });
+                          }
+                        }}
+                        placeholder="Select start date"
+                        className="bg-white border-indigo-200 hover:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500 text-xs font-bold"
+                      />
+                      <TimePicker
+                        value={editingQuiz.scheduledStartTime ? (() => {
+                          const d = new Date(editingQuiz.scheduledStartTime);
+                          let h = d.getHours();
+                          const m = String(d.getMinutes()).padStart(2, "0");
+                          const p = h >= 12 ? "PM" : "AM";
+                          if (h > 12) h -= 12;
+                          if (h === 0) h = 12;
+                          return `${String(h).padStart(2, "0")}:${m} ${p}`;
+                        })() : ""}
+                        onChange={(timeVal) => {
+                          if (timeVal) {
+                            let h = 9, m = 0;
+                            if (timeVal.includes("AM") || timeVal.includes("PM")) {
+                              const parts = timeVal.trim().split(" ");
+                              const p = parts[1]?.toUpperCase();
+                              const [rawH, rawM] = (parts[0] || "09:00").split(":").map(Number);
+                              h = rawH;
+                              if (p === "PM" && h < 12) h += 12;
+                              if (p === "AM" && h === 12) h = 0;
+                              m = rawM || 0;
+                            } else if (timeVal.includes(":")) {
+                              const [rawH, rawM] = timeVal.split(":").map(Number);
+                              h = rawH;
+                              m = rawM || 0;
+                            }
+                            const existing = editingQuiz.scheduledStartTime ? new Date(editingQuiz.scheduledStartTime) : new Date();
+                            existing.setHours(h, m, 0, 0);
+                            setEditingQuiz({ ...editingQuiz, scheduledStartTime: existing.getTime() });
+                          }
+                        }}
+                        placeholder="Select start time"
+                        align="right"
+                        className="bg-white border-indigo-200 hover:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500 text-xs font-bold"
+                      />
+                    </div>
                   </div>
+
+                  {/* End Date & Time */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-bold text-indigo-700 block">End Date & Time</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <DatePicker
+                        value={editingQuiz.scheduledEndTime ? (() => {
+                          const d = new Date(editingQuiz.scheduledEndTime);
+                          const year = d.getFullYear();
+                          const month = String(d.getMonth() + 1).padStart(2, "0");
+                          const day = String(d.getDate()).padStart(2, "0");
+                          return `${year}-${month}-${day}`;
+                        })() : ""}
+                        minDate={editingQuiz.scheduledStartTime ? (() => {
+                          const d = new Date(editingQuiz.scheduledStartTime);
+                          const year = d.getFullYear();
+                          const month = String(d.getMonth() + 1).padStart(2, "0");
+                          const day = String(d.getDate()).padStart(2, "0");
+                          return `${year}-${month}-${day}`;
+                        })() : undefined}
+                        onChange={(dateVal) => {
+                          if (dateVal) {
+                            const [y, m, d] = dateVal.split("-").map(Number);
+                            const existing = editingQuiz.scheduledEndTime ? new Date(editingQuiz.scheduledEndTime) : new Date();
+                            existing.setFullYear(y, m - 1, d);
+                            if (!editingQuiz.scheduledEndTime) {
+                              if (editingQuiz.scheduledStartTime) {
+                                const start = new Date(editingQuiz.scheduledStartTime);
+                                existing.setHours(start.getHours() + 1, start.getMinutes(), 0, 0);
+                              } else {
+                                existing.setHours(existing.getHours() + 1, 0, 0, 0);
+                              }
+                            }
+                            setEditingQuiz({ ...editingQuiz, scheduledEndTime: existing.getTime() });
+                          } else {
+                            setEditingQuiz({ ...editingQuiz, scheduledEndTime: undefined });
+                          }
+                        }}
+                        placeholder="Select end date"
+                        className="bg-white border-indigo-200 hover:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500 text-xs font-bold"
+                      />
+                      <TimePicker
+                        value={editingQuiz.scheduledEndTime ? (() => {
+                          const d = new Date(editingQuiz.scheduledEndTime);
+                          let h = d.getHours();
+                          const m = String(d.getMinutes()).padStart(2, "0");
+                          const p = h >= 12 ? "PM" : "AM";
+                          if (h > 12) h -= 12;
+                          if (h === 0) h = 12;
+                          return `${String(h).padStart(2, "0")}:${m} ${p}`;
+                        })() : ""}
+                        onChange={(timeVal) => {
+                          if (timeVal) {
+                            let h = 10, m = 0;
+                            if (timeVal.includes("AM") || timeVal.includes("PM")) {
+                              const parts = timeVal.trim().split(" ");
+                              const p = parts[1]?.toUpperCase();
+                              let defaultEndStr = "10:00";
+                              if (editingQuiz.scheduledStartTime) {
+                                const endD = new Date(editingQuiz.scheduledStartTime + (editingQuiz.durationMinutes || 30) * 60000);
+                                let eh = endD.getHours();
+                                const em = String(endD.getMinutes()).padStart(2, '0');
+                                if (eh > 12) eh -= 12;
+                                if (eh === 0) eh = 12;
+                                defaultEndStr = `${String(eh).padStart(2, '0')}:${em}`;
+                              }
+                              const [rawH, rawM] = (parts[0] || defaultEndStr).split(":").map(Number);
+                              h = rawH;
+                              if (p === "PM" && h < 12) h += 12;
+                              if (p === "AM" && h === 12) h = 0;
+                              m = rawM || 0;
+                            } else if (timeVal.includes(":")) {
+                              const [rawH, rawM] = timeVal.split(":").map(Number);
+                              h = rawH;
+                              m = rawM || 0;
+                            }
+                            const existing = editingQuiz.scheduledEndTime ? new Date(editingQuiz.scheduledEndTime) : new Date();
+                            existing.setHours(h, m, 0, 0);
+                            setEditingQuiz({ ...editingQuiz, scheduledEndTime: existing.getTime() });
+                          }
+                        }}
+                        placeholder="Select end time"
+                        align="right"
+                        className="bg-white border-indigo-200 hover:border-indigo-400 focus-within:ring-2 focus-within:ring-indigo-500 text-xs font-bold"
+                      />
+                    </div>
+                  </div>
+
+                  {editingQuiz.scheduledStartTime && editingQuiz.scheduledEndTime && (
+                    <div className="flex items-center gap-2 mt-1 bg-indigo-100/80 border border-indigo-200/80 rounded-xl px-3 py-2">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                      <span className="text-[10px] font-bold text-indigo-800">
+                        Quiz window: {new Date(editingQuiz.scheduledStartTime).toLocaleString()} → {new Date(editingQuiz.scheduledEndTime).toLocaleString()}
+                        {" "}({Math.round((editingQuiz.scheduledEndTime - editingQuiz.scheduledStartTime) / 60000)} min)
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
 
-              <div className="pt-3 border-t border-slate-100 flex items-center justify-between">
+              <div className="pt-3 border-t border-slate-100 flex items-center justify-between shrink-0">
                 <span className="text-[11px] font-bold text-slate-400">
                   Total Marks: <strong className="text-slate-800 font-black">{((editingQuiz.questions?.length || 0) * (editingQuiz.pointsPerQuestion || 2))}</strong>
                 </span>
@@ -2139,6 +2981,36 @@ Answer: A`;
                     <p className="text-xs text-slate-500 font-medium line-clamp-2">{q.description || "No description provided."}</p>
                   </div>
 
+                  {/* Schedule: Start & End Date and Time */}
+                  {(q.scheduledStartTime || q.scheduledEndTime) && (
+                    <div className="bg-gradient-to-r from-indigo-50/80 via-purple-50/40 to-blue-50/60 rounded-2xl p-3 border border-indigo-100/90 space-y-1.5 text-xs">
+                      {q.scheduledStartTime && (
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-indigo-700 font-bold flex items-center gap-1.5">
+                            <Calendar className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                            Start:
+                          </span>
+                          <span className="font-extrabold text-slate-800">
+                            {new Date(q.scheduledStartTime).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })},{" "}
+                            {new Date(q.scheduledStartTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })}
+                          </span>
+                        </div>
+                      )}
+                      {q.scheduledEndTime && (
+                        <div className="flex items-center justify-between text-[11px]">
+                          <span className="text-indigo-700 font-bold flex items-center gap-1.5">
+                            <Clock className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                            End:
+                          </span>
+                          <span className="font-extrabold text-slate-800">
+                            {new Date(q.scheduledEndTime).toLocaleDateString("en-US", { day: "numeric", month: "short", year: "numeric" })},{" "}
+                            {new Date(q.scheduledEndTime).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: true })}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-2 gap-3 bg-slate-50 p-3 rounded-2xl text-center text-xs border border-slate-100">
                     <div>
                       <span className="text-[10px] font-bold text-slate-400 block uppercase">Duration</span>
@@ -2286,11 +3158,6 @@ Answer: A`;
                           <td className="py-3.5 px-4 font-bold text-[#0F172A]">
                             <div className="flex items-center gap-2">
                               <span className="text-sm font-extrabold text-[#0F172A]">{sInfo.displayName}</span>
-                              {sInfo.rollNo && (
-                                <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200/60 uppercase">
-                                  {sInfo.rollNo}
-                                </span>
-                              )}
                             </div>
                             <div className="text-[10px] text-slate-400 font-normal">{s.userEmail}</div>
                           </td>
@@ -2364,7 +3231,41 @@ Answer: A`;
                 </select>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap sm:flex-nowrap">
+                <button
+                  onClick={handleRefreshResults}
+                  disabled={isRefreshingResults || !selectedQuizId}
+                  className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 hover:border-slate-300 font-bold text-xs px-3.5 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs disabled:opacity-60 disabled:cursor-not-allowed"
+                  title="Refresh submissions and live scorecard rankings"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 text-slate-600 ${isRefreshingResults ? "animate-spin text-blue-600" : ""}`} />
+                  <span>{isRefreshingResults ? "Refreshing..." : "Refresh"}</span>
+                </button>
+
+                {currentQuizObj && (
+                  <button
+                    onClick={() => handleTogglePublishResults(currentQuizObj)}
+                    className={`font-bold text-xs px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs border ${
+                      currentQuizObj.resultsPublished
+                        ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600"
+                        : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-blue-600"
+                    }`}
+                    title={currentQuizObj.resultsPublished ? "Results are currently visible to participants. Click to hide." : "Publish results so participants can view their scorecards."}
+                  >
+                    {currentQuizObj.resultsPublished ? (
+                      <>
+                        <CheckCircle className="w-4 h-4 text-white" />
+                        <span>Results Published</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="w-4 h-4 text-white" />
+                        <span>Publish Results</span>
+                      </>
+                    )}
+                  </button>
+                )}
+
                 {submissions.length > 0 && (
                   <button
                     onClick={handleResetAllSubmissions}
@@ -2467,7 +3368,7 @@ Answer: A`;
                     <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
                     <input
                       type="text"
-                      placeholder="Search by registered name, email, roll no..."
+                      placeholder="Search by team name, college, place..."
                       value={subSearchQuery}
                       onChange={(e) => setSubSearchQuery(e.target.value)}
                       className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-10 pr-8 py-2 text-xs font-bold text-[#0F172A] placeholder-slate-400 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 transition-all"
@@ -2546,7 +3447,7 @@ Answer: A`;
               ) : filteredSubmissions.length === 0 ? (
                 <div className="py-12 text-center text-slate-400 space-y-2">
                   <Search className="w-8 h-8 mx-auto text-slate-300" />
-                  <p className="text-xs font-semibold">No participants match your search query or filter.</p>
+                  <p className="text-xs font-semibold">No teams match your search query or filter.</p>
                 </div>
               ) : (
                 <div className="overflow-x-auto">
@@ -2554,8 +3455,8 @@ Answer: A`;
                     <thead>
                       <tr className="border-b border-slate-100 text-slate-400 font-bold uppercase tracking-wider text-[10px]">
                         <th className="py-3 px-4 text-center">Rank / Place</th>
-                        <th className="py-3 px-4">Participant</th>
-                        <th className="py-3 px-4">Team</th>
+                        <th className="py-3 px-4">Team Name</th>
+                        <th className="py-3 px-4">College & Place</th>
                         <th className="py-3 px-4">Score & Performance</th>
                         <th className="py-3 px-4">Accuracy</th>
                         <th className="py-3 px-4">Time Spent</th>
@@ -2598,30 +3499,29 @@ Answer: A`;
                               )}
                             </td>
 
-                            {/* Participant Column with Full Registered Name */}
+                            {/* Team Name Column */}
                             <td className="py-3.5 px-4 font-bold text-[#0F172A]">
-                              <div className="flex items-center gap-2 flex-wrap">
-                                <span className="text-sm font-extrabold text-[#0F172A]">{sub.resolvedName}</span>
-                                {sub.rollNo && (
-                                  <span className="text-[10px] font-bold text-blue-700 bg-blue-50 px-1.5 py-0.5 rounded border border-blue-200/60 uppercase">
-                                    {sub.rollNo}
-                                  </span>
-                                )}
-                              </div>
-                              <div className="text-[10px] text-slate-400 font-normal">{sub.userEmail}</div>
+                              <span className="text-sm font-black text-[#0F172A] tracking-tight">{sub.resolvedTeamName}</span>
                             </td>
 
-                            {/* Team / Category */}
+                            {/* College & Place Column */}
                             <td className="py-3.5 px-4">
-                              <span className="bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md font-semibold text-[11px]">
-                                {sub.resolvedTeamName}
-                              </span>
+                              <div className="space-y-1">
+                                <div className="font-extrabold text-xs text-[#0F172A] flex items-center gap-1.5 leading-snug">
+                                  <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                  <span>{sub.resolvedCollegeName}</span>
+                                </div>
+                                <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-600 rounded-md font-bold text-[10px]">
+                                  <MapPin className="w-3 h-3 text-red-500 shrink-0" />
+                                  <span>{sub.resolvedCollegePlace}</span>
+                                </div>
+                              </div>
                             </td>
 
                             {/* Score & Performance */}
                             <td className="py-3.5 px-4">
                               <div className="flex flex-col gap-1">
-                                <div className="flex items-center gap-1.5">
+                                <div className="flex items-center gap-1.5 flex-wrap">
                                   <span className="font-black text-sm text-[#0F172A]">
                                     {scoreDisplay} <span className="text-slate-400 font-bold text-xs">/ {maxDisplay}</span>
                                   </span>
@@ -2630,6 +3530,7 @@ Answer: A`;
                                       {pctDisplay}%
                                     </span>
                                   )}
+
                                 </div>
                                 <div>
                                   {hasScore ? (
@@ -2714,6 +3615,15 @@ Answer: A`;
                                   <RotateCcw className="w-3.5 h-3.5" />
                                   <span>Reset</span>
                                 </button>
+
+                                <button
+                                  onClick={() => handleDeleteParticipant(sub)}
+                                  className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-lg font-bold text-[11px] transition-colors cursor-pointer"
+                                  title="Permanently delete this submission"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                  <span>Delete</span>
+                                </button>
                               </div>
                             </td>
                           </tr>
@@ -2768,26 +3678,32 @@ Answer: A`;
                             {inspectingSubmission.id.substring(0, 12)}
                           </span>
                         </div>
-                        <h2 className="text-lg font-black text-[#0F172A] flex items-center gap-2 flex-wrap">
-                          <span>{inspectingSubmission.resolvedName || inspectingSubmission.userName}</span>
-                          {inspectingSubmission.rollNo && (
-                            <span className="text-xs font-bold text-blue-700 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-200/60 uppercase">
-                              {inspectingSubmission.rollNo}
-                            </span>
-                          )}
-                          <span className="text-xs text-slate-400 font-normal">({inspectingSubmission.userEmail})</span>
+                        <h2 className="text-lg font-black text-[#0F172A]">
+                          {inspectingSubmission.resolvedTeamName || inspectingSubmission.teamName || "Team Alpha"}
                         </h2>
-                        <p className="text-xs text-slate-500 font-medium">
-                          Quiz: <strong>{inspectingSubmission.quizTitle || quizForInspection?.title}</strong> • Team: <strong>{inspectingSubmission.teamName || "Solo"}</strong>
-                        </p>
+                        <div className="text-xs text-slate-500 font-medium flex items-center gap-1.5 flex-wrap">
+                          <span className="flex items-center gap-1 font-bold text-slate-700">
+                            <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                            {inspectingSubmission.resolvedCollegeName || "Vishnu Institute of Technology"}
+                          </span>
+                          <span>•</span>
+                          <span className="flex items-center gap-1 font-semibold text-slate-600">
+                            <MapPin className="w-3 h-3 text-red-500 shrink-0" />
+                            {inspectingSubmission.resolvedCollegePlace || "Bhimavaram"}
+                          </span>
+                          <span>•</span>
+                          <span>Quiz: <strong>{inspectingSubmission.quizTitle || quizForInspection?.title}</strong></span>
+                        </div>
                       </div>
 
-                      <button
-                        onClick={() => setInspectingSubmission(null)}
-                        className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
-                      >
-                        <X className="w-5 h-5" />
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setInspectingSubmission(null)}
+                          className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
                     </div>
 
                     {/* Modal Hero Metric Bar */}
@@ -2834,6 +3750,8 @@ Answer: A`;
                         </div>
                       </div>
                     </div>
+
+
 
                     {/* Filter Tabs */}
                     <div className="px-6 py-3 border-b border-slate-100 flex items-center gap-2 shrink-0 bg-white">
@@ -3024,12 +3942,470 @@ Answer: A`;
                       <span className="text-xs text-slate-500 font-medium">
                         Submission recorded on {new Date(inspectingSubmission.submittedAt).toLocaleString()}
                       </span>
-                      <button
-                        onClick={() => setInspectingSubmission(null)}
-                        className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-5 py-2 rounded-xl transition-all cursor-pointer"
-                      >
-                        Close Scorecard
-                      </button>
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setInspectingSubmission(null)}
+                          className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-5 py-2 rounded-xl transition-all cursor-pointer"
+                        >
+                          Close Scorecard
+                        </button>
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* Excel Sheet Team Scorecard & Moderation Spreadsheet Modal */}
+            {isExcelEditorOpen && (() => {
+              const targetQuiz = quizzes.find((q) => q.id === selectedQuizId) || currentQuizObj;
+              const ptsPerQ = targetQuiz?.pointsPerQuestion || 2;
+              const modifiedCount = excelRows.filter((r) => r.isModified).length;
+              const quizMax = targetQuiz?.totalMarks || (targetQuiz?.questions?.length ? targetQuiz.questions.length * ptsPerQ : 50);
+              const passMarks = targetQuiz?.passingMarks || Math.round(quizMax * 0.4);
+
+              // Live Stats for the spreadsheet
+              const currentAvgScore = excelRows.length > 0 ? (excelRows.reduce((a, b) => a + b.score, 0) / excelRows.length).toFixed(1) : "0";
+              const currentPassedCount = excelRows.filter((r) => r.passed).length;
+              const currentPassRate = excelRows.length > 0 ? Math.round((currentPassedCount / excelRows.length) * 100) : 0;
+
+              return (
+                <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xs z-50 flex items-center justify-center p-2 sm:p-4">
+                  <div className="bg-white rounded-3xl max-w-7xl w-full h-[92vh] flex flex-col shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 overflow-hidden">
+                    
+                    {/* Excel Sheet Header Bar */}
+                    <div className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0">
+                      <div className="space-y-0.5">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[10px] font-black uppercase tracking-wider">
+                            <FileSpreadsheet className="w-3 h-3" />
+                            <span>Excel Scoreboard Grid</span>
+                          </span>
+                          {modifiedCount > 0 && (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-[10px] animate-pulse">
+                              <span className="w-1.5 h-1.5 rounded-full bg-slate-950" />
+                              {modifiedCount} Unsaved {modifiedCount === 1 ? "Change" : "Changes"}
+                            </span>
+                        )}
+                        </div>
+                        <h2 className="text-lg font-black tracking-tight text-white flex items-center gap-2">
+                          <span>Team Scores & Marks Moderation Spreadsheet</span>
+                        </h2>
+                        <p className="text-xs text-slate-300 font-medium flex items-center gap-2 flex-wrap">
+                          <span>Quiz: <strong className="text-white">{targetQuiz?.title || "Quiz"}</strong></span>
+                          <span>•</span>
+                          <span>Points/Question: <strong className="text-purple-300">{ptsPerQ} marks</strong></span>
+                          <span>•</span>
+                          <span>Total Teams: <strong className="text-white">{excelRows.length}</strong></span>
+                          <span>•</span>
+                          <span>Pass Cutoff: <strong className="text-white">{passMarks} marks</strong></span>
+                        </p>
+                      </div>
+
+                      {/* Header Actions */}
+                      <div className="flex items-center gap-2 flex-wrap">
+                        {/* Quick Bonus Tool with dynamic ptsPerQ stepping */}
+                        <div className="hidden lg:flex items-center gap-1 bg-white/10 p-1 rounded-xl border border-white/15 text-xs">
+                          <span className="text-[10px] font-bold text-slate-300 px-1.5">Quick Bonus:</span>
+                          <button
+                            type="button"
+                            onClick={() => handleExcelApplyBonus(ptsPerQ)}
+                            className="px-2 py-0.5 bg-white/15 hover:bg-white/25 rounded-md text-[11px] font-bold cursor-pointer transition-colors"
+                            title={`Add +${ptsPerQ} bonus marks (1 question worth) to all teams`}
+                          >
+                            +{ptsPerQ}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleExcelApplyBonus(ptsPerQ * 2)}
+                            className="px-2 py-0.5 bg-white/15 hover:bg-white/25 rounded-md text-[11px] font-bold cursor-pointer transition-colors"
+                            title={`Add +${ptsPerQ * 2} bonus marks (2 questions worth) to all teams`}
+                          >
+                            +{ptsPerQ * 2}
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleExcelApplyBonus(-ptsPerQ)}
+                            className="px-2 py-0.5 bg-white/15 hover:bg-white/25 rounded-md text-[11px] font-bold cursor-pointer transition-colors"
+                            title={`Deduct -${ptsPerQ} marks (1 question worth) from all teams`}
+                          >
+                            -{ptsPerQ}
+                          </button>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleExportExcelSheetCSV}
+                          className="px-3 py-1.5 bg-white/10 hover:bg-white/20 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 border border-white/15 cursor-pointer"
+                          title="Download current spreadsheet as CSV"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Export CSV</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleCloseExcelEditor}
+                          className="p-1.5 text-slate-300 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
+                          title="Close spreadsheet editor"
+                        >
+                          <X className="w-5 h-5" />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Toolbar / Search & Filter Controls */}
+                    <div className="px-6 py-3 border-b border-slate-200 bg-slate-50 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0">
+                      <div className="relative flex-1 max-w-md">
+                        <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+                        <input
+                          type="text"
+                          placeholder="Search spreadsheet by team name, college, place..."
+                          value={excelSearchQuery}
+                          onChange={(e) => setExcelSearchQuery(e.target.value)}
+                          className="w-full bg-white border border-slate-200 rounded-xl pl-9 pr-7 py-1.5 text-xs font-bold text-[#0F172A] placeholder-slate-400 outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500"
+                        />
+                        {excelSearchQuery && (
+                          <button
+                            onClick={() => setExcelSearchQuery("")}
+                            className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+                        <button
+                          type="button"
+                          onClick={() => setExcelFilter("all")}
+                          className={`px-3 py-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                            excelFilter === "all"
+                              ? "bg-slate-900 text-white shadow-2xs"
+                              : "bg-white text-slate-600 hover:bg-slate-100 border border-slate-200/80"
+                          }`}
+                        >
+                          All ({excelRows.length})
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setExcelFilter("modified")}
+                          className={`px-3 py-1 rounded-xl text-xs font-extrabold transition-all flex items-center gap-1 cursor-pointer ${
+                            excelFilter === "modified"
+                              ? "bg-amber-500 text-white shadow-2xs"
+                              : "bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200/60"
+                          }`}
+                        >
+                          <span>Modified</span>
+                          <span className="px-1.5 py-0.2 bg-amber-200/70 text-amber-900 rounded-full text-[10px] font-black">
+                            {modifiedCount}
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setExcelFilter("passed")}
+                          className={`px-3 py-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                            excelFilter === "passed"
+                              ? "bg-emerald-600 text-white shadow-2xs"
+                              : "bg-emerald-50 text-emerald-700 hover:bg-emerald-100 border border-emerald-200/60"
+                          }`}
+                        >
+                          Passed ({excelRows.filter((r) => r.passed).length})
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => setExcelFilter("failed")}
+                          className={`px-3 py-1 rounded-xl text-xs font-extrabold transition-all cursor-pointer ${
+                            excelFilter === "failed"
+                              ? "bg-red-600 text-white shadow-2xs"
+                              : "bg-red-50 text-red-700 hover:bg-red-100 border border-red-200/60"
+                          }`}
+                        >
+                          Below Cutoff ({excelRows.filter((r) => !r.passed).length})
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Spreadsheet Matrix Grid */}
+                    <div className="flex-1 overflow-auto bg-slate-50/50">
+                      {filteredExcelRows.length === 0 ? (
+                        <div className="py-20 text-center text-slate-400 space-y-2">
+                          <Search className="w-10 h-10 mx-auto text-slate-300" />
+                          <p className="text-xs font-bold text-slate-500">No teams match your search query or filter.</p>
+                        </div>
+                      ) : (
+                        <table className="w-full text-left text-xs border-collapse">
+                          <thead className="sticky top-0 z-10 bg-slate-100 text-slate-700 font-extrabold uppercase text-[10px] tracking-wider border-b border-slate-200 select-none shadow-2xs">
+                            <tr>
+                              <th className="py-3 px-3 text-center w-14 bg-slate-100 border-r border-slate-200"># Rank</th>
+                              <th className="py-3 px-4 min-w-[200px] border-r border-slate-200">Team Name</th>
+                              <th className="py-3 px-4 min-w-[220px] border-r border-slate-200">College Name</th>
+                              <th className="py-3 px-3 min-w-[130px] border-r border-slate-200">Place</th>
+                              <th className="py-3 px-3 min-w-[140px] bg-purple-50 text-purple-900 border-r border-purple-200">
+                                <div className="flex items-center gap-1 font-black">
+                                  <Edit3 className="w-3 h-3 text-purple-600" />
+                                  <span>Marks Awarded *</span>
+                                </div>
+                              </th>
+                              <th className="py-3 px-3 min-w-[100px] border-r border-slate-200">Max Marks</th>
+                              <th className="py-3 px-3 min-w-[90px] text-center border-r border-slate-200">Percentage</th>
+                              <th className="py-3 px-3 min-w-[130px] text-center border-r border-slate-200">Result Status</th>
+                              <th className="py-3 px-3 min-w-[85px] border-r border-slate-200">Correct</th>
+                              <th className="py-3 px-3 min-w-[85px] border-r border-slate-200">Wrong</th>
+                              <th className="py-3 px-3 min-w-[90px] text-center border-r border-slate-200">Time</th>
+                              <th className="py-3 px-4 min-w-[220px] border-r border-slate-200">Evaluator Remarks</th>
+                              <th className="py-3 px-3 text-center w-24">State</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-200/90 font-medium bg-white">
+                            {filteredExcelRows.map((row) => {
+                              const isTargetFocused = focusedRowId === row.id;
+
+                              return (
+                                <tr
+                                  key={row.id}
+                                  className={`transition-colors ${
+                                    row.isModified
+                                      ? "bg-amber-50/60 hover:bg-amber-50"
+                                      : isTargetFocused
+                                        ? "bg-purple-50/40 hover:bg-purple-50/60"
+                                        : "hover:bg-slate-50/70"
+                                  }`}
+                                >
+                                  {/* Rank */}
+                                  <td className="py-2.5 px-3 text-center font-black text-slate-700 border-r border-slate-100 bg-slate-50/40">
+                                    <span className="text-xs">{row.rankLabel}</span>
+                                  </td>
+
+                                  {/* Team Name */}
+                                  <td className="py-2.5 px-4 font-black text-slate-900 border-r border-slate-100">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="text-xs font-black tracking-tight">{row.teamName}</span>
+                                    </div>
+                                  </td>
+
+                                  {/* College Name */}
+                                  <td className="py-2.5 px-4 text-slate-700 border-r border-slate-100">
+                                    <div className="flex items-center gap-1.5 font-bold text-xs text-slate-800">
+                                      <Building2 className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                                      <span className="truncate max-w-[200px]" title={row.collegeName}>{row.collegeName}</span>
+                                    </div>
+                                  </td>
+
+                                  {/* Place */}
+                                  <td className="py-2.5 px-3 text-slate-600 border-r border-slate-100">
+                                    <div className="inline-flex items-center gap-1 px-2 py-0.5 bg-slate-100 text-slate-700 rounded-md font-bold text-[10px]">
+                                      <MapPin className="w-3 h-3 text-red-500 shrink-0" />
+                                      <span>{row.collegePlace}</span>
+                                    </div>
+                                  </td>
+
+                                  {/* Marks Awarded (Directly Editable Cell with ptsPerQ step and max limit) */}
+                                  <td className="py-2 px-3 border-r border-purple-100 bg-purple-50/30">
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step={ptsPerQ}
+                                      max={row.maxScore}
+                                      value={row.score}
+                                      onChange={(e) => handleExcelCellScoreChange(row.id, e.target.value)}
+                                      className="w-full bg-white border border-purple-300 rounded-lg px-2.5 py-1 text-xs font-black text-purple-900 outline-none focus:ring-2 focus:ring-purple-500/30 focus:border-purple-600 shadow-2xs"
+                                      title={`Marks change in increments of ${ptsPerQ} (max: ${row.maxScore})`}
+                                    />
+                                  </td>
+
+                                  {/* Max Marks (Directly Editable Cell) */}
+                                  <td className="py-2 px-3 border-r border-slate-100">
+                                    <input
+                                      type="number"
+                                      step={ptsPerQ}
+                                      min="1"
+                                      value={row.maxScore}
+                                      onChange={(e) => handleExcelCellMaxScoreChange(row.id, e.target.value)}
+                                      className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                    />
+                                  </td>
+
+                                  {/* Percentage (Auto-computed Live) */}
+                                  <td className="py-2.5 px-3 text-center border-r border-slate-100">
+                                    <span className={`inline-block px-2 py-0.5 rounded-md font-black text-[11px] border ${
+                                      row.percentage >= 60
+                                        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                        : row.percentage >= 40
+                                          ? "bg-blue-50 text-blue-700 border-blue-200"
+                                          : "bg-red-50 text-red-700 border-red-200"
+                                    }`}>
+                                      {row.percentage}%
+                                    </span>
+                                  </td>
+
+                                  {/* Result Status (Interactive Toggle) */}
+                                  <td className="py-2 px-3 text-center border-r border-slate-100">
+                                    <button
+                                      type="button"
+                                      onClick={() => handleExcelCellPassedToggle(row.id)}
+                                      className={`px-2.5 py-1 rounded-full text-[10px] font-extrabold uppercase flex items-center justify-center gap-1 mx-auto cursor-pointer border transition-all ${
+                                        row.passed
+                                          ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                                          : "bg-red-50 text-red-700 border-red-200 hover:bg-red-100"
+                                      }`}
+                                      title="Click to toggle qualification status"
+                                    >
+                                      {row.passed ? (
+                                        <>
+                                          <CheckCircle className="w-3 h-3 text-emerald-600" />
+                                          <span>Passed</span>
+                                        </>
+                                      ) : (
+                                        <>
+                                          <XCircle className="w-3 h-3 text-red-600" />
+                                          <span>Below Cutoff</span>
+                                        </>
+                                      )}
+                                    </button>
+                                  </td>
+
+                                  {/* Correct Count (Bounded to totalQuestions) */}
+                                  <td className="py-2 px-3 border-r border-slate-100">
+                                    <input
+                                      type="number"
+                                      step="1"
+                                      min="0"
+                                      max={row.totalQuestions}
+                                      value={row.correctCount}
+                                      onChange={(e) => handleExcelCellCorrectChange(row.id, e.target.value)}
+                                      className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-emerald-700 outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500"
+                                      title={`Correct answers (0 to ${row.totalQuestions})`}
+                                    />
+                                  </td>
+
+                                  {/* Incorrect Count (Bounded to totalQuestions) */}
+                                  <td className="py-2 px-3 border-r border-slate-100">
+                                    <input
+                                      type="number"
+                                      step="1"
+                                      min="0"
+                                      max={row.totalQuestions}
+                                      value={row.incorrectCount}
+                                      onChange={(e) => handleExcelCellIncorrectChange(row.id, e.target.value)}
+                                      className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-bold text-red-600 outline-none focus:ring-2 focus:ring-red-500/20 focus:border-red-500"
+                                      title={`Incorrect answers (0 to ${row.totalQuestions})`}
+                                    />
+                                  </td>
+
+                                  {/* Time Spent */}
+                                  <td className="py-2.5 px-3 text-center font-mono text-[11px] text-slate-500 border-r border-slate-100">
+                                    {Math.floor(row.timeSpentSeconds / 60)}m {row.timeSpentSeconds % 60}s
+                                  </td>
+
+                                  {/* Remarks / Notes (Editable Text) */}
+                                  <td className="py-2 px-3 border-r border-slate-100">
+                                    <input
+                                      type="text"
+                                      value={row.remarks}
+                                      onChange={(e) => handleExcelCellRemarksChange(row.id, e.target.value)}
+                                      placeholder="Remarks / bonus note..."
+                                      className="w-full bg-white border border-slate-200 rounded-lg px-2 py-1 text-xs font-medium text-slate-800 placeholder-slate-400 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                                    />
+                                  </td>
+
+                                  {/* Row State / Revert */}
+                                  <td className="py-2 px-3 text-center">
+                                    {row.isModified ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => handleExcelRevertRow(row.id)}
+                                        className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded-lg text-[10px] font-black flex items-center gap-1 mx-auto cursor-pointer transition-colors"
+                                        title="Revert this row to original saved score"
+                                      >
+                                        <RotateCcw className="w-2.5 h-2.5" />
+                                        <span>Revert</span>
+                                      </button>
+                                    ) : (
+                                      <span className="text-[10px] font-bold text-slate-300 uppercase">
+                                        Saved
+                                      </span>
+                                    )}
+                                  </td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      )}
+                    </div>
+
+                    {/* Excel Sheet Footer Summary Bar */}
+                    <div className="px-6 py-4 border-t border-slate-200 bg-white flex flex-col sm:flex-row sm:items-center justify-between gap-3 shrink-0 shadow-xs">
+                      <div className="flex items-center gap-4 text-xs font-bold text-slate-600 flex-wrap">
+                        <div>
+                          <span>Showing: </span>
+                          <strong className="text-slate-900">{filteredExcelRows.length} of {excelRows.length} Teams</strong>
+                        </div>
+                        <span>•</span>
+                        <div>
+                          <span>Avg Score: </span>
+                          <strong className="text-indigo-600">{currentAvgScore} / {quizMax}</strong>
+                        </div>
+                        <span>•</span>
+                        <div>
+                          <span>Pass Rate: </span>
+                          <strong className="text-emerald-600">{currentPassRate}% ({currentPassedCount}/{excelRows.length})</strong>
+                        </div>
+                        {modifiedCount > 0 && (
+                          <>
+                            <span>•</span>
+                            <span className="text-amber-700 font-extrabold bg-amber-50 border border-amber-200 px-2 py-0.5 rounded-md">
+                              {modifiedCount} pending change{modifiedCount === 1 ? "" : "s"}
+                            </span>
+                          </>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {modifiedCount > 0 && (
+                          <button
+                            type="button"
+                            onClick={handleExcelDiscardChanges}
+                            disabled={isSavingExcel}
+                            className="px-4 py-2 text-xs font-bold text-red-600 hover:bg-red-50 border border-red-200 rounded-xl transition-colors cursor-pointer"
+                          >
+                            Discard Changes
+                          </button>
+                        )}
+
+                        <button
+                          type="button"
+                          onClick={handleCloseExcelEditor}
+                          disabled={isSavingExcel}
+                          className="px-4 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                        >
+                          Close
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={handleSaveAllExcelChanges}
+                          disabled={isSavingExcel || modifiedCount === 0}
+                          className="bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 text-white font-bold text-xs px-5 py-2 rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          {isSavingExcel ? (
+                            <>
+                              <Loader2 className="w-4 h-4 animate-spin text-white" />
+                              <span>Saving Spreadsheet...</span>
+                            </>
+                          ) : (
+                            <>
+                              <Save className="w-4 h-4 text-white" />
+                              <span>Save All Scores {modifiedCount > 0 ? `(${modifiedCount})` : ""}</span>
+                            </>
+                          )}
+                        </button>
+                      </div>
                     </div>
 
                   </div>
@@ -3042,6 +4418,99 @@ Answer: A`;
       })()}
 
       </main>
+
+      {startingQuiz && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-xl w-full max-w-md overflow-hidden animate-in fade-in zoom-in duration-200">
+            <div className="p-6">
+              <h3 className="text-xl font-extrabold text-slate-900 mb-2">Start "{startingQuiz.title}"?</h3>
+              <p className="text-sm text-slate-600 mb-4">
+                This will open testing access to all registered participants.
+              </p>
+              
+              <div className="mb-6 space-y-1">
+                <label className="text-[11px] font-bold text-indigo-700 flex items-center gap-1.5">
+                  <Clock className="w-3.5 h-3.5" />
+                  <span>Quiz Duration (Minutes)</span>
+                </label>
+                <p className="text-[10px] text-slate-500 mb-1">Participants must complete the quiz within this time limit once they begin.</p>
+                <input
+                  type="number"
+                  min={1}
+                  value={startDuration}
+                  onChange={(e) => setStartDuration(Math.max(1, parseInt(e.target.value) || 1))}
+                  className="w-full px-3 py-2 border border-slate-200 rounded-xl text-sm font-bold text-slate-800 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <button
+                  onClick={() => setStartingQuiz(null)}
+                  disabled={isStarting}
+                  className="px-4 py-2 text-sm font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={async () => {
+                    setIsStarting(true);
+                    try {
+                      const now = Date.now();
+                      const startTime = (startingQuiz.scheduledStartTime && startingQuiz.scheduledStartTime > now) ? startingQuiz.scheduledStartTime : now;
+                      // Clear scheduledEndTime if it's less than duration to prevent bug
+                      let endTime = (startingQuiz.scheduledEndTime && startingQuiz.scheduledEndTime > startTime) ? startingQuiz.scheduledEndTime : null;
+                      
+                      // If they specify a time limit but the scheduled end time restricts it too much, remove the restriction.
+                      if (endTime && endTime < startTime + startDuration * 60000) {
+                          endTime = null; 
+                      }
+
+                      await api.updateQuiz(startingQuiz.id, {
+                        status: "active",
+                        durationMinutes: startDuration,
+                        scheduledStartTime: startTime,
+                        scheduledEndTime: endTime,
+                        updatedAt: now
+                      });
+
+                      if (typeof window !== "undefined") {
+                        sessionStorage.removeItem(`quiz_cache_${startingQuiz.id}`);
+                      }
+
+                      setQuizzes(prev => prev.map(q => 
+                        q.id === startingQuiz.id ? { 
+                          ...q, 
+                          status: "active", 
+                          durationMinutes: startDuration,
+                          scheduledStartTime: startTime, 
+                          scheduledEndTime: endTime, 
+                          updatedAt: now 
+                        } : q
+                      ));
+                      
+                      setStartingQuiz(null);
+                    } catch (err: any) {
+                      console.error("Failed to start quiz:", err);
+                      showAlert({
+                        title: "Error",
+                        message: "Failed to start quiz: " + err.message,
+                        type: "danger"
+                      });
+                    } finally {
+                      setIsStarting(false);
+                    }
+                  }}
+                  disabled={isStarting}
+                  className="px-5 py-2 text-sm font-bold text-white bg-emerald-500 hover:bg-emerald-600 rounded-xl transition-colors flex items-center gap-2 shadow-sm disabled:opacity-50"
+                >
+                  {isStarting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />}
+                  Start Exam Now
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

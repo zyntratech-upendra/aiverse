@@ -6,7 +6,7 @@
  */
 
 interface QuizError {
-  type: "load_failure" | "save_failure" | "submission_failure" | "auth_failure" | "firestore_error" | "network_error";
+  type: "load_failure" | "save_failure" | "submission_failure" | "auth_failure" | "firestore_error" | "network_error" | "api_error";
   message: string;
   timestamp: number;
   context?: Record<string, unknown>;

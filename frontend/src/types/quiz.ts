@@ -32,6 +32,7 @@ export interface Quiz {
   status: "draft" | "scheduled" | "active" | "completed" | "archived";
   scheduledStartTime?: number; // timestamp in ms
   scheduledEndTime?: number; // timestamp in ms
+  resultsPublished?: boolean; // Controls participant scorecard & leaderboard visibility
   questionsCount: number;
   shuffleQuestions?: boolean;
   shuffleOptions?: boolean;
@@ -39,6 +40,7 @@ export interface Quiz {
   createdAt: number;
   updatedAt: number;
   createdBy?: string;
+  overriddenScores?: Record<string, Partial<QuizSubmission>>;
 }
 
 export interface QuizViolationLog {
@@ -110,6 +112,10 @@ export interface QuizSubmission {
   correctCount?: number;
   incorrectCount?: number;
   passed?: boolean;
+  remarks?: string;
+  isScoreOverridden?: boolean;
+  originalScore?: number;
+  scoreOverriddenAt?: number;
   evaluatedAt?: number;
 }
 

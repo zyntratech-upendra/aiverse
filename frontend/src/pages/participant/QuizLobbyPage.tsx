@@ -1,10 +1,9 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
-import { getOrCreateQuizSession, getDeterministicSessionId } from "../../services/quizService";
+import { getOrCreateQuizSession, getDeterministicSessionId, getQuizById } from "../../services/quizService";
+import { fetchSubmission } from "../../services/apiClient";
 import type { Quiz } from "../../types/quiz";
-import { doc, getDoc } from "firebase/firestore";
-import { db } from "../../config/firebase";
 import { quizLoadBalancer } from "../../utils/quizLoadBalancer";
 import SEO from "../../components/layout/SEO";
 import { 
@@ -42,7 +41,7 @@ export const QuizLobbyPage: React.FC = () => {
   }, []);
 
   // Polling quiz status (replaces real-time onSnapshot to prevent 1,500 listener hotspot)
-  // Polls every 5 seconds for quiz start status, and on tab focus
+  // Polls every 30 seconds for quiz start status, and on tab focus
   const hasLoadedRef = useRef(false);
   useEffect(() => {
     if (!quizId) return;
@@ -53,56 +52,26 @@ export const QuizLobbyPage: React.FC = () => {
     }
 
     let isMounted = true;
-    const quizRef = doc(db, "quizzes", quizId);
 
     const fetchQuizStatus = async () => {
       try {
-        const snap = await getDoc(quizRef);
+        const loadedQuiz = await getQuizById(quizId, !hasLoadedRef.current);
         if (!isMounted) return;
         
-        if (!snap.exists()) {
+        if (!loadedQuiz) {
           setError("The requested quiz could not be found or has not been published.");
           setLoading(false);
           return;
         }
 
-        const data = snap.data();
-        const loadedQuiz: Quiz = {
-          id: snap.id,
-          title: data.title || "AI Verse Quiz",
-          description: data.description || "",
-          eventId: data.eventId || "",
-          eventTitle: data.eventTitle || "",
-          track: data.track || "General",
-          durationMinutes: Number(data.durationMinutes) || 30,
-          totalMarks: Number(data.totalMarks) || 50,
-          passingMarks: Number(data.passingMarks) || 20,
-          instructions: Array.isArray(data.instructions) && data.instructions.length > 0 ? data.instructions : [
-            "Each question has 4 options with single correct answer.",
-            "Your answers are automatically saved periodically in the background.",
-            "You can navigate freely between questions using the Question Palette.",
-            "Once submitted or when the timer expires, no further modifications are allowed.",
-            "Do not close or switch browser tabs to ensure an uninterrupted session."
-          ],
-          status: data.status || "active",
-          scheduledStartTime: data.scheduledStartTime || 0,
-          scheduledEndTime: data.scheduledEndTime || 0,
-          questionsCount: Number(data.questionsCount) || (data.questions?.length || 0),
-          questions: data.questions || [],
-          createdAt: data.createdAt || Date.now(),
-          updatedAt: data.updatedAt || Date.now()
-        };
-
-        if (!isMounted) return;
         setQuiz(loadedQuiz);
 
         // Check if user already submitted in this current round
         if (user?.uid) {
           try {
             const sessionId = getDeterministicSessionId(quizId, user.uid);
-            const subSnap = await getDoc(doc(db, "quizSubmissions", sessionId));
-            if (subSnap.exists()) {
-              const subData = subSnap.data();
+            const subData = await fetchSubmission(sessionId).catch(() => null);
+            if (subData && (subData.id || subData._id)) {
               const wasSubmittedBeforeRestart = loadedQuiz.scheduledStartTime && subData.submittedAt && (subData.submittedAt < loadedQuiz.scheduledStartTime);
               if (!wasSubmittedBeforeRestart) {
                 navigate(`/participant/quiz/${quizId}/completed`, { replace: true });

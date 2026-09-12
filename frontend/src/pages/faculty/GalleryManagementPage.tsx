@@ -2,6 +2,7 @@ import React, { useState, useMemo, useEffect } from "react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
 import Badge from "../../components/ui/Badge";
+import DatePicker from "../../components/ui/DatePicker";
 import { fetchAlbums, createAlbum, updateAlbum, deleteAlbum } from "../../services/apiClient";
 import { 
   Folder, 
@@ -130,6 +131,16 @@ const GalleryManagementPage: React.FC = () => {
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isViewAllModalOpen, setIsViewAllModalOpen] = useState(false);
   const [isTagModalOpen, setIsTagModalOpen] = useState(false);
+
+  // Recently uploaded media state
+  const [recentImages, setRecentImages] = useState<Array<{ id: string; name: string; size: string; url: string }>>([
+    { id: "img-1", name: "AI_Symposium_Keynote.jpg", size: "2.4 MB", url: gallerySymposium },
+    { id: "img-2", name: "Hackathon_Opening_Ceremony.jpg", size: "1.8 MB", url: hackathonImg },
+    { id: "img-3", name: "Robotics_Workshop_Team.jpg", size: "3.1 MB", url: galleryLab },
+    { id: "img-4", name: "VR_Experience_Zone.jpg", size: "2.9 MB", url: galleryVr },
+    { id: "img-5", name: "Faculty_Networking_Meet.jpg", size: "1.5 MB", url: seminarImg },
+    { id: "img-6", name: "Project_Showcase_Awards.jpg", size: "4.2 MB", url: sparkImg }
+  ]);
 
   // New Album Form state
   const [formTitle, setFormTitle] = useState("");
@@ -1343,11 +1354,11 @@ const GalleryManagementPage: React.FC = () => {
 
               <div>
                 <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Album Date</label>
-                <input
-                  type="date"
+                <DatePicker
                   value={formDate}
-                  onChange={(e) => setFormDate(e.target.value)}
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold text-slate-700"
+                  onChange={(val) => setFormDate(val)}
+                  placeholder="Select album date"
+                  className="bg-white border-slate-200"
                 />
               </div>
 

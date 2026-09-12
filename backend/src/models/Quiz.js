@@ -23,6 +23,7 @@ const QuizSchema = new Schema(
     isLive: { type: Boolean, default: true },
     scheduledStartTime: { type: Number },
     scheduledEndTime: { type: Number },
+    resultsPublished: { type: Boolean, default: false },
     questionsCount: { type: Number, default: 0 },
     shuffleQuestions: { type: Boolean, default: false },
     shuffleOptions: { type: Boolean, default: false },

@@ -29,6 +29,10 @@ const QuizSubmissionSchema = new Schema(
     correctCount: { type: Number, default: 0 },
     incorrectCount: { type: Number, default: 0 },
     passed: { type: Boolean, default: false },
+    remarks: { type: String, default: '' },
+    isScoreOverridden: { type: Boolean, default: false },
+    originalScore: { type: Number },
+    scoreOverriddenAt: { type: Number },
     evaluatedAt: { type: Number, default: () => Date.now() },
   },
   {

@@ -47,6 +47,82 @@ router.get(
   })
 );
 
+// PUT /api/quizzes/:quizId/submissions-batch - Batch update/override multiple participant scores
+router.put(
+  '/:quizId/submissions-batch',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const { quizId } = req.params;
+    const { updates } = req.body || {};
+
+    if (!Array.isArray(updates) || updates.length === 0) {
+      return res.json({ success: true, updatedCount: 0 });
+    }
+
+    const bulkOps = updates.map((u) => {
+      const updateDoc = {
+        evaluatedAt: Date.now(),
+        isScoreOverridden: true,
+        scoreOverriddenAt: Date.now(),
+      };
+      if (u.score !== undefined) updateDoc.score = Number(u.score);
+      if (u.maxScore !== undefined) updateDoc.maxScore = Number(u.maxScore);
+      if (u.percentage !== undefined) updateDoc.percentage = Number(u.percentage);
+      if (u.correctCount !== undefined) updateDoc.correctCount = Number(u.correctCount);
+      if (u.incorrectCount !== undefined) updateDoc.incorrectCount = Number(u.incorrectCount);
+      if (u.passed !== undefined) updateDoc.passed = Boolean(u.passed);
+      if (u.remarks !== undefined) updateDoc.remarks = u.remarks;
+      if (u.originalScore !== undefined) updateDoc.originalScore = Number(u.originalScore);
+
+      return {
+        updateOne: {
+          filter: { $or: [{ _id: u.id }, { sessionId: u.id }, { id: u.id }] },
+          update: { $set: updateDoc },
+        },
+      };
+    });
+
+    await QuizSubmission.bulkWrite(bulkOps);
+    res.json({ success: true, updatedCount: updates.length });
+  })
+);
+
+// PUT /api/quizzes/:quizId/submissions/:submissionId - Update/override a participant's score
+router.put(
+  '/:quizId/submissions/:submissionId',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const { quizId, submissionId } = req.params;
+    const { score, percentage, correctCount, incorrectCount, passed, maxScore, remarks, originalScore } = req.body || {};
+
+    const updateDoc = {
+      evaluatedAt: Date.now(),
+      isScoreOverridden: true,
+      scoreOverriddenAt: Date.now(),
+    };
+    if (score !== undefined) updateDoc.score = Number(score);
+    if (maxScore !== undefined) updateDoc.maxScore = Number(maxScore);
+    if (percentage !== undefined) updateDoc.percentage = Number(percentage);
+    if (correctCount !== undefined) updateDoc.correctCount = Number(correctCount);
+    if (incorrectCount !== undefined) updateDoc.incorrectCount = Number(incorrectCount);
+    if (passed !== undefined) updateDoc.passed = Boolean(passed);
+    if (remarks !== undefined) updateDoc.remarks = remarks;
+    if (originalScore !== undefined) updateDoc.originalScore = Number(originalScore);
+
+    const updated = await QuizSubmission.findOneAndUpdate(
+      { $or: [{ _id: submissionId }, { sessionId: submissionId }, { id: submissionId }] },
+      { $set: updateDoc },
+      { new: true }
+    ).lean();
+
+    if (!updated) {
+      return res.status(404).json({ success: false, error: 'Submission not found' });
+    }
+
+    res.json({ success: true, submission: { ...updated, id: updated._id } });
+  })
+);
+
 // GET /api/quizzes/:quizId/sessions - List all sessions for a quiz
 router.get(
   '/:quizId/sessions',

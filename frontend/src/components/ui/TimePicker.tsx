@@ -7,6 +7,8 @@ interface TimePickerProps {
   placeholder?: string;
   className?: string;
   id?: string;
+  align?: "left" | "right";
+  disabled?: boolean;
 }
 
 export const TimePicker: React.FC<TimePickerProps> = ({
@@ -14,7 +16,9 @@ export const TimePicker: React.FC<TimePickerProps> = ({
   onChange,
   placeholder = "Select time...",
   className = "",
-  id
+  id,
+  align = "left",
+  disabled = false
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const [mode, setMode] = useState<"hours" | "minutes">("hours");
@@ -143,35 +147,39 @@ export const TimePicker: React.FC<TimePickerProps> = ({
       {/* Time Input Trigger Button */}
       <div
         id={id}
-        onClick={() => setIsOpen(!isOpen)}
-        className={`w-full px-4 py-2.5 border border-slate-200 rounded-2xl flex items-center justify-between bg-slate-50/30 hover:bg-white focus-within:bg-white transition-all cursor-pointer select-none group ${
-          isOpen ? "border-[#2563EB] ring-2 ring-[#2563EB]/15 bg-white shadow-md shadow-blue-500/5" : ""
+        onClick={() => {
+          if (!disabled) setIsOpen(!isOpen);
+        }}
+        className={`w-full px-3 py-2 border border-slate-200 rounded-xl flex items-center justify-between bg-white hover:border-blue-400 focus-within:border-blue-500 transition-all cursor-pointer select-none group text-xs ${
+          disabled ? "opacity-60 cursor-not-allowed bg-slate-50" : ""
+        } ${
+          isOpen ? "border-[#2563EB] ring-2 ring-[#2563EB]/20 bg-white shadow-sm shadow-blue-500/10" : ""
         } ${className}`}
       >
-        <span className={`font-medium text-sm ${value ? "text-slate-800 font-semibold" : "text-slate-400"}`}>
+        <span className={`font-bold ${value ? "text-slate-800" : "text-slate-400"}`}>
           {value || placeholder}
         </span>
 
         <div className="flex items-center gap-1 text-slate-400 group-hover:text-[#2563EB] transition-colors">
-          {value && (
+          {value && !disabled && (
             <button
               type="button"
               onClick={handleClear}
-              className="p-1 hover:bg-slate-100 rounded-lg text-slate-400 hover:text-red-500 transition-colors mr-0.5"
+              className="p-0.5 hover:bg-slate-100 rounded-md text-slate-400 hover:text-red-500 transition-colors mr-0.5"
               title="Clear time"
             >
-              <X className="h-3.5 w-3.5" />
+              <X className="h-3 w-3" />
             </button>
           )}
-          <div className="w-7 h-7 rounded-xl bg-blue-50/60 flex items-center justify-center text-[#2563EB] group-hover:bg-[#2563EB] group-hover:text-white transition-all">
-            <Clock className="h-4 w-4" />
+          <div className="w-5 h-5 rounded-lg bg-blue-50 flex items-center justify-center text-[#2563EB] group-hover:bg-[#2563EB] group-hover:text-white transition-all">
+            <Clock className="h-3.5 w-3.5" />
           </div>
         </div>
       </div>
 
       {/* Popover Clock Selector Modal */}
       {isOpen && (
-        <div className="absolute left-0 top-full mt-2 z-50 w-72 bg-white rounded-3xl border border-slate-100 shadow-[0_15px_40px_rgba(37,99,235,0.14)] p-4 space-y-4 animate-in fade-in zoom-in-95 duration-150 text-center select-none">
+        <div className={`absolute ${align === "right" ? "right-0" : "left-0"} top-full mt-2 z-[100] w-72 bg-white rounded-2xl border border-slate-200/90 shadow-[0_15px_35px_rgba(37,99,235,0.18)] p-3.5 space-y-3 animate-in fade-in zoom-in-95 duration-150 text-center select-none`}>
           {/* Header Time Display & AM/PM Toggle */}
           <div className="flex items-center justify-between border-b border-slate-100 pb-3">
             <div className="flex items-center gap-1">

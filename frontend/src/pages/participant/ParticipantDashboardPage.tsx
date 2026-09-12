@@ -17,15 +17,21 @@ import {
   Video,
   Check,
   Layers,
-  ChevronRight
+  ChevronRight,
+  Calendar,
+  BarChart3,
+  ChevronDown,
+  ChevronUp,
+  X,
+  Award,
+  ShieldCheck
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
 import TeamReviewPage from "./TeamReviewPage";
 import ProjectSubmissionPage from "./ProjectSubmissionPage";
-import { db } from "../../config/firebase";
-import { collection, getDocs, doc, getDoc, query, where, limit } from "firebase/firestore";
-import { fetchRegistrations, fetchEvents } from "../../services/apiClient";
-import { getAllQuizzes } from "../../services/quizService";
+import { db, collection, getDocs, doc, getDoc, query, where } from "../../config/firebase";
+import { fetchRegistrations, fetchEvents, fetchSubmission } from "../../services/apiClient";
+import { getAllQuizzes, getQuizById } from "../../services/quizService";
 import { dataCache } from "../../utils/dataCache";
 import type { Quiz, QuizSubmission } from "../../types/quiz";
 
@@ -48,6 +54,11 @@ export const ParticipantDashboardPage: React.FC = () => {
   const [availableQuizzes, setAvailableQuizzes] = useState<Quiz[]>([]);
   const [userSubmissions, setUserSubmissions] = useState<Record<string, QuizSubmission>>({});
 
+  // Quiz inline review state
+  const [expandedQuizReviewId, setExpandedQuizReviewId] = useState<string | null>(null);
+  const [quizDetailsCache, setQuizDetailsCache] = useState<Record<string, Quiz>>({});
+  const [loadingReviewId, setLoadingReviewId] = useState<string | null>(null);
+
   // Submission Form State
   const [projectTitle, setProjectTitle] = useState<string>("");
   const [githubUrl, setGithubUrl] = useState<string>("");
@@ -59,6 +70,7 @@ export const ParticipantDashboardPage: React.FC = () => {
   const [currentRound, setCurrentRound] = useState<number>(1);
   const [totalRounds, setTotalRounds] = useState<number>(2);
   const [activeRoundName, setActiveRoundName] = useState<string>("Stage Evaluation");
+  const [activeRoundType, setActiveRoundType] = useState<string>("Screening");
   const [roundStatus, setRoundStatus] = useState<string>("Active");
   const [promotionScore, setPromotionScore] = useState<number | null>(null);
   const [promotionMethod, setPromotionMethod] = useState<string | null>(null);
@@ -106,13 +118,6 @@ export const ParticipantDashboardPage: React.FC = () => {
     const regMembers = Array.isArray(targetReg.members) ? targetReg.members : [];
     setMembers(regMembers);
 
-    // Submission data
-    setProjectTitle(targetReg.projectTitle || targetReg.title || "");
-    setGithubUrl(targetReg.githubUrl || targetReg.githubLink || "");
-    setDemoVideoUrl(targetReg.demoVideoUrl || targetReg.videoLink || "");
-    setSubmissionStatus(targetReg.submissionStatus || targetReg.status || "Registered");
-    if (targetReg.submittedAt) setSubmittedAt(targetReg.submittedAt);
-
     // Round & Promotion Data
     const cRound = targetReg.currentRound || targetReg.promotedToRound || 1;
     setCurrentRound(cRound);
@@ -120,6 +125,40 @@ export const ParticipantDashboardPage: React.FC = () => {
     if (targetReg.promotionScore !== undefined) setPromotionScore(targetReg.promotionScore);
     if (targetReg.promotionMethod) setPromotionMethod(targetReg.promotionMethod);
     if (targetReg.eliminatedInRound !== undefined) setEliminatedInRound(targetReg.eliminatedInRound);
+
+    // Round-aware Submission data
+    const rP = `r${cRound}_`;
+    const isSubForCurrentRound = (targetReg as any)[`${rP}submissionStatus`] === "Submitted" || 
+      !!(targetReg as any)[`${rP}submittedAt`] || 
+      (Number(targetReg.submissionRound) === cRound && (targetReg.submissionStatus === "Submitted" || !!targetReg.submittedAt));
+    
+    const isDraftForCurrentRound = !isSubForCurrentRound && !!((targetReg as any)[`${rP}problemStatement`] || (Number(targetReg.submissionRound) === cRound && targetReg.problemStatement));
+
+    if (isSubForCurrentRound) {
+      setSubmissionStatus("Submitted");
+      setSubmittedAt((targetReg as any)[`${rP}submittedAt`] || targetReg.submittedAt || Date.now());
+      setProjectTitle((targetReg as any)[`${rP}problemStatement`] || (targetReg as any)[`${rP}selectedProblemStatement`]?.title || (Number(targetReg.submissionRound) === cRound ? (targetReg.projectTitle || targetReg.title || targetReg.problemStatement) : "") || `Round ${cRound} Project Submission`);
+      setGithubUrl((targetReg as any)[`${rP}githubUrl`] || (targetReg as any)[`${rP}githubLink`] || (Number(targetReg.submissionRound) === cRound ? (targetReg.githubUrl || targetReg.githubLink) : "") || "");
+      setDemoVideoUrl((targetReg as any)[`${rP}demoVideoUrl`] || (targetReg as any)[`${rP}videoLink`] || (Number(targetReg.submissionRound) === cRound ? (targetReg.demoVideoUrl || targetReg.videoLink) : "") || "");
+    } else if (isDraftForCurrentRound) {
+      setSubmissionStatus("Draft");
+      setSubmittedAt(null);
+      setProjectTitle((targetReg as any)[`${rP}problemStatement`] || (targetReg as any)[`${rP}selectedProblemStatement`]?.title || (Number(targetReg.submissionRound) === cRound ? (targetReg.projectTitle || targetReg.title || targetReg.problemStatement) : "") || "");
+      setGithubUrl((targetReg as any)[`${rP}githubUrl`] || (targetReg as any)[`${rP}githubLink`] || (Number(targetReg.submissionRound) === cRound ? (targetReg.githubUrl || targetReg.githubLink) : "") || "");
+      setDemoVideoUrl((targetReg as any)[`${rP}demoVideoUrl`] || (targetReg as any)[`${rP}videoLink`] || (Number(targetReg.submissionRound) === cRound ? (targetReg.demoVideoUrl || targetReg.videoLink) : "") || "");
+    } else if (cRound === 1) {
+      setSubmissionStatus(targetReg.submissionStatus || targetReg.status || "Registered");
+      if (targetReg.submittedAt) setSubmittedAt(targetReg.submittedAt);
+      setProjectTitle(targetReg.projectTitle || targetReg.title || targetReg.problemStatement || "");
+      setGithubUrl(targetReg.githubUrl || targetReg.githubLink || "");
+      setDemoVideoUrl(targetReg.demoVideoUrl || targetReg.videoLink || "");
+    } else {
+      setSubmissionStatus("Registered");
+      setSubmittedAt(null);
+      setProjectTitle("");
+      setGithubUrl("");
+      setDemoVideoUrl("");
+    }
 
     // Quiz Performance Data from Registration
     if (targetReg.quizScore !== undefined && targetReg.quizScore !== null) {
@@ -143,7 +182,9 @@ export const ParticipantDashboardPage: React.FC = () => {
       const cached = dataCache.get<any>(cacheKey);
       if (cached) {
         applyRegistrationData(cached);
-        setIsAccessGranted(Boolean(cached.accessGranted !== false && cached.loginAccessGranted !== false));
+        const rawCachedStatus = String(cached.status || "").toLowerCase().trim();
+        const cachedConfirmed = rawCachedStatus === "confirmed";
+        setIsAccessGranted(Boolean(cachedConfirmed && cached.accessGranted !== false && cached.loginAccessGranted !== false));
         setAccessChecked(true);
       }
 
@@ -206,50 +247,84 @@ export const ParticipantDashboardPage: React.FC = () => {
 
         targetReg = foundReg;
 
-        // Fetch participant's existing quiz submissions in parallel
-        if (user?.uid) {
-          getDocs(query(collection(db, "quizSubmissions"), where("userId", "==", user.uid)))
-            .then((subSnap) => {
-              const subMap: Record<string, QuizSubmission> = {};
-              subSnap.forEach((d) => {
-                const s = { id: d.id, ...d.data() } as QuizSubmission;
-                if (s.quizId) subMap[s.quizId] = s;
-              });
-              setUserSubmissions(subMap);
-            })
-            .catch((e) => console.warn("Error fetching user quiz submissions:", e));
-        }
+        // Fetch participant's existing quiz submissions across all identifiers in parallel
+        const subMap: Record<string, QuizSubmission> = {};
+        const fetchSubmissionsFromAllSources = async () => {
+          try {
+            const queries = [];
+            if (user?.uid) {
+              queries.push(getDocs(query(collection(db, "quizSubmissions"), where("userId", "==", user.uid))));
+            }
+            if (cleanEmail) {
+              queries.push(getDocs(query(collection(db, "quizSubmissions"), where("userEmail", "==", cleanEmail))));
+            }
+            if (targetReg?.id) {
+              queries.push(getDocs(query(collection(db, "quizSubmissions"), where("teamId", "==", targetReg.id))));
+            }
 
-        // Active quizzes filter
+            const results = await Promise.allSettled(queries);
+            results.forEach((res) => {
+              if (res.status === "fulfilled" && res.value) {
+                res.value.forEach((d: any) => {
+                  const s = { id: d.id, ...d.data() } as QuizSubmission;
+                  if (s.quizId) subMap[s.quizId] = s;
+                });
+              }
+            });
+
+            // If API has quizzes, also try to fetch submission for each quiz via API
+            if (Array.isArray(quizzesList)) {
+              await Promise.allSettled(
+                quizzesList.map(async (q) => {
+                  if (user?.uid && !subMap[q.id]) {
+                    const sessionId = `${q.id.trim()}_${user.uid.trim()}`;
+                    const subData = await fetchSubmission(sessionId).catch(() => null);
+                    if (subData && (subData.id || subData._id)) {
+                      subMap[q.id] = { id: subData.id || subData._id, ...subData } as QuizSubmission;
+                    }
+                  }
+                })
+              );
+            }
+
+            // Sync fallback scores from registration
+            if (targetReg?.quizScore !== undefined && targetReg?.quizScore !== null) {
+              setQuizScore(targetReg.quizScore);
+              if (targetReg.quizPercentage !== undefined) setQuizPercentage(targetReg.quizPercentage);
+              if (targetReg.quizMaxScore) setQuizMaxScore(targetReg.quizMaxScore);
+            }
+
+            setUserSubmissions((prev) => ({ ...prev, ...subMap }));
+          } catch (e) {
+            console.warn("Error fetching user quiz submissions:", e);
+          }
+        };
+
+        fetchSubmissionsFromAllSources();
+
+        // Include all quizzes for this event (active, scheduled, or completed)
         if (Array.isArray(quizzesList)) {
-          const activeQz = quizzesList.filter(q => {
-            if (q.status !== "active") return false;
+          const matchedQuizzes = quizzesList.filter(q => {
             if (targetReg?.eventId && q.eventId) {
               return q.eventId === targetReg.eventId;
             }
             if (targetReg?.eventTitle && q.eventTitle) {
               return q.eventTitle.toLowerCase().trim() === targetReg.eventTitle.toLowerCase().trim();
             }
+            if (subMap[q.id] || userSubmissions[q.id]) {
+              return true;
+            }
             return !q.eventId;
           });
-          setAvailableQuizzes(activeQz);
+          setAvailableQuizzes(matchedQuizzes.length > 0 ? matchedQuizzes : quizzesList);
         }
 
         if (targetReg) {
-          // If access was revoked, immediately logout and redirect to /login
-          if (targetReg.accessGranted === false || targetReg.loginAccessGranted === false) {
-            console.warn("[ParticipantDashboard] Access was revoked. Redirecting to login...");
-            dataCache.invalidate(`participant_reg_${cleanEmail || user?.uid}`);
-            await logout();
-            window.location.href = "/login";
-            return;
-          }
+          const rawStatus = String(targetReg.status || "").toLowerCase().trim();
+          const isConfirmed = rawStatus === "confirmed";
+          const isAccessAllowed = isConfirmed && targetReg.accessGranted !== false && targetReg.loginAccessGranted !== false;
 
-          const hasAccess = Boolean(
-            targetReg.accessGranted === true ||
-            targetReg.loginAccessGranted === true
-          );
-          setIsAccessGranted(hasAccess);
+          setIsAccessGranted(isAccessAllowed);
           setAccessChecked(true);
 
           applyRegistrationData(targetReg);
@@ -269,11 +344,15 @@ export const ParticipantDashboardPage: React.FC = () => {
                   setIsQuizParticipant(true);
                   setActiveTab("quizzes");
                 }
-                const cRound = targetReg.currentRound || targetReg.promotedToRound || 1;
+                // Update cRound to track the global event's currentRound to pair with Submission Monitoring
+                const globalRound = ev.currentRound || targetReg.currentRound || targetReg.promotedToRound || 1;
+                setCurrentRound(globalRound);
+                const cRoundForType = globalRound;
                 if (Array.isArray(ev.rounds) && ev.rounds.length > 0) {
                   setTotalRounds(ev.rounds.length);
-                  const currentRDef = ev.rounds.find((r: any) => r.roundNumber === cRound);
+                  const currentRDef = ev.rounds.find((r: any) => r.roundNumber === cRoundForType);
                   if (currentRDef?.name) setActiveRoundName(currentRDef.name);
+                  if (currentRDef?.type) setActiveRoundType(currentRDef.type);
                 } else if (ev.totalRounds) {
                   setTotalRounds(ev.totalRounds);
                 }
@@ -283,13 +362,14 @@ export const ParticipantDashboardPage: React.FC = () => {
             }
           }
         } else {
-          let hasAccess = true;
+          let hasAccess = false;
           if (user?.registrationId) {
             try {
               const regDoc = await getDoc(doc(db, "registrations", user.registrationId));
               if (regDoc.exists()) {
                 const rData = regDoc.data();
-                hasAccess = Boolean(rData.accessGranted === true || rData.loginAccessGranted === true);
+                const isConfirmed = String(rData.status || "").toLowerCase().trim() === "confirmed";
+                hasAccess = Boolean(isConfirmed && rData.accessGranted !== false && rData.loginAccessGranted !== false);
               }
             } catch (e) {}
           }
@@ -370,8 +450,47 @@ export const ParticipantDashboardPage: React.FC = () => {
     setActiveTab("dashboard");
   };
 
-  // Sidebar items
-  const sidebarItems = isQuizParticipant
+  // Toggle Quiz Question-by-Question Review with instant questions fetch
+  const toggleQuizReview = async (quizId: string) => {
+    if (expandedQuizReviewId === quizId) {
+      setExpandedQuizReviewId(null);
+      return;
+    }
+    setExpandedQuizReviewId(quizId);
+
+    // Fetch full quiz definition if not cached or questions empty
+    const existing = quizDetailsCache[quizId] || availableQuizzes.find((q) => q.id === quizId);
+    if (!existing || !existing.questions || existing.questions.length === 0) {
+      setLoadingReviewId(quizId);
+      try {
+        const fullQuiz = await getQuizById(quizId, true);
+        if (fullQuiz) {
+          setQuizDetailsCache((prev) => ({ ...prev, [quizId]: fullQuiz }));
+        }
+      } catch (err) {
+        console.warn("Error fetching full quiz details for review:", err);
+      } finally {
+        setLoadingReviewId(null);
+      }
+    }
+
+    // Also fetch submission answers if not present in memory
+    if (!userSubmissions[quizId]?.answers && user?.uid) {
+      try {
+        const sessionId = `${quizId.trim()}_${user.uid.trim()}`;
+        const subData = await fetchSubmission(sessionId).catch(() => null);
+        if (subData && (subData.id || subData._id)) {
+          setUserSubmissions((prev) => ({
+            ...prev,
+            [quizId]: { id: subData.id || subData._id, ...subData } as QuizSubmission
+          }));
+        }
+      } catch (e) {}
+    }
+  };
+
+  // Sidebar items: Always include Online Quiz so Round 2 & Round 1 participants can view answers & scores at any time
+  const sidebarItems: Array<{ id: "dashboard" | "quizzes" | "review-team" | "submission"; label: string; icon: any }> = isQuizParticipant
     ? [
         { id: "quizzes" as const, label: "Online Quiz", icon: HelpCircle },
       ]
@@ -556,15 +675,18 @@ export const ParticipantDashboardPage: React.FC = () => {
                     className="px-4 py-2.5 bg-purple-50 hover:bg-purple-100 text-purple-700 font-bold text-xs rounded-xl border border-purple-200/80 transition-all flex items-center gap-2 cursor-pointer shadow-2xs active:scale-95"
                   >
                     <HelpCircle className="w-4 h-4 text-purple-600" />
-                    <span>Online Quizzes</span>
+                    <span>Online Quizzes {quizScore !== null ? `(${quizScore}/${quizMaxScore || 50})` : ""}</span>
                   </button>
-                  <button
-                    onClick={() => setActiveTab("submission")}
-                    className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold text-xs rounded-xl shadow-md shadow-blue-600/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
-                  >
-                    <Upload className="w-4 h-4 text-white" />
-                    <span>Project Submission</span>
-                  </button>
+                  
+                  {!isQuizParticipant && (
+                    <button
+                      onClick={() => setActiveTab("submission")}
+                      className="px-5 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold text-xs rounded-xl shadow-md shadow-blue-600/20 transition-all flex items-center gap-2 cursor-pointer active:scale-95"
+                    >
+                      <Upload className="w-4 h-4 text-white" />
+                      <span>Project Submission</span>
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -584,23 +706,37 @@ export const ParticipantDashboardPage: React.FC = () => {
                           <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
                             <Sparkles className="w-3 h-3 text-emerald-300" /> STAGE {currentRound} ACTIVE
                           </span>
+                          {quizScore !== null && (
+                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-blue-500/20 text-blue-300 border border-blue-400/30">
+                              Quiz Score: {quizScore} / {quizMaxScore || 50} ({quizPercentage}%)
+                            </span>
+                          )}
                         </div>
                         <h3 className="text-lg sm:text-xl font-black text-white tracking-tight">
                           🎉 Congratulations! Team "{teamName}" has advanced to Round {currentRound}
                         </h3>
                         <p className="text-xs text-slate-300 font-medium">
-                          Shortlisted via {promotionMethod || "Performance Assessment"} {promotionScore !== null ? `• Qualifying Score: ${promotionScore} Marks` : ""} • Your team is eligible to submit Round {currentRound} requirements.
+                          Shortlisted via {promotionMethod === "quiz" ? "Online Quiz Assessment" : promotionMethod || "Performance Assessment"} {quizScore !== null ? `• Qualifying Quiz Score: ${quizScore}/${quizMaxScore || 50} (${quizPercentage}%)` : promotionScore !== null ? `• Qualifying Score: ${promotionScore} Marks` : ""} • You can review your quiz answers and submit Round {currentRound} deliverables below.
                         </p>
                       </div>
                     </div>
 
-                    <button
-                      onClick={() => setActiveTab("submission")}
-                      className="px-5 py-2.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black rounded-xl text-xs transition-all shadow-md shadow-amber-500/20 shrink-0 active:scale-95 flex items-center gap-1.5 cursor-pointer"
-                    >
-                      <span>Stage {currentRound} Deliverables</span>
-                      <ArrowRight className="w-4 h-4" />
-                    </button>
+                    <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+                      <button
+                        onClick={() => setActiveTab("quizzes")}
+                        className="px-4 py-2.5 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-xs transition-all border border-white/20 active:scale-95 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <HelpCircle className="w-4 h-4 text-amber-400" />
+                        <span>View Quiz Score & Answers</span>
+                      </button>
+                      <button
+                        onClick={() => setActiveTab(activeRoundType === "Quiz" ? "quizzes" : "submission")}
+                        className="px-5 py-2.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black rounded-xl text-xs transition-all shadow-md shadow-amber-500/20 active:scale-95 flex items-center gap-1.5 cursor-pointer"
+                      >
+                        <span>{activeRoundType === "Quiz" ? `Stage ${currentRound} Quiz` : `Stage ${currentRound} Deliverables`}</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </button>
+                    </div>
                   </div>
                 </div>
               )}
@@ -643,7 +779,7 @@ export const ParticipantDashboardPage: React.FC = () => {
                   </div>
                 </div>
 
-                {/* Tile 2: Online Quiz Score */}
+                {/* Tile 2: Online Quiz Score - ALWAYS VISIBLE */}
                 <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-2xs space-y-3 hover:border-purple-300 transition-colors">
                   <div className="flex items-center justify-between">
                     <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Online Quiz</span>
@@ -654,22 +790,30 @@ export const ParticipantDashboardPage: React.FC = () => {
                   <div>
                     <h3 className="text-xl font-black text-[#0F172A]">
                       {quizScore !== null 
-                        ? `${quizScore} / ${quizMaxScore || 100}` 
-                        : Object.keys(userSubmissions).length > 0 
-                          ? "Submitted ✓" 
-                          : "Assessment Pending"}
+                        ? `${quizScore} / ${quizMaxScore || 50}` 
+                        : Object.keys(userSubmissions).length > 0 && Object.values(userSubmissions)[0]?.score !== undefined
+                          ? `${Object.values(userSubmissions)[0].score} / ${Object.values(userSubmissions)[0].maxScore || 50}`
+                          : Object.keys(userSubmissions).length > 0 
+                            ? "Submitted ✓" 
+                            : "Assessment Pending"}
                     </h3>
                     <p className="text-xs font-bold text-purple-600 mt-0.5">
-                      {quizPercentage !== null ? `${quizPercentage}% Score Achieved` : "Preliminary Round"}
+                      {quizPercentage !== null 
+                        ? `${quizPercentage}% Score Achieved` 
+                        : Object.keys(userSubmissions).length > 0 && Object.values(userSubmissions)[0]?.percentage !== undefined
+                          ? `${Object.values(userSubmissions)[0].percentage}% Score Achieved`
+                          : currentRound > 1
+                            ? "Round 1 Quiz Completed"
+                            : "Preliminary Assessment"}
                     </p>
                   </div>
                   <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] font-semibold text-slate-500">
-                    <span>Cutoff Result</span>
+                    <span>Performance</span>
                     <button 
                       onClick={() => setActiveTab("quizzes")}
                       className="font-extrabold text-purple-600 hover:text-purple-700 flex items-center gap-1 cursor-pointer"
                     >
-                      <span>{quizScore !== null ? "View Details" : "Take Exam"}</span>
+                      <span>{quizScore !== null || Object.keys(userSubmissions).length > 0 ? "View Answers & Score" : "Take Exam"}</span>
                       <ChevronRight className="w-3 h-3" />
                     </button>
                   </div>
@@ -700,32 +844,34 @@ export const ParticipantDashboardPage: React.FC = () => {
                 </div>
 
                 {/* Tile 4: Project Submission */}
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-2xs space-y-3 hover:border-amber-300 transition-colors">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Submission</span>
-                    <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200/60">
-                      <Upload className="w-4 h-4" />
+                {(!isQuizParticipant && activeRoundType !== "Quiz") && (
+                  <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-2xs space-y-3 hover:border-amber-300 transition-colors">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Submission</span>
+                      <div className="w-8 h-8 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200/60">
+                        <Upload className="w-4 h-4" />
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="text-xl font-black text-[#0F172A]">
+                        {submissionStatus === "Submitted" ? "Submitted ✓" : `${submissionProgress}% Complete`}
+                      </h3>
+                      <p className="text-xs font-bold text-amber-700 mt-0.5 truncate">
+                        {projectTitle ? projectTitle : "Draft in Progress"}
+                      </p>
+                    </div>
+                    <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] font-semibold text-slate-500">
+                      <span>{submissionStatus === "Submitted" ? "In Queue" : "Editable"}</span>
+                      <button 
+                        onClick={() => setActiveTab("submission")}
+                        className="font-extrabold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
+                      >
+                        <span>{submissionStatus === "Submitted" ? "Review" : "Upload"}</span>
+                        <ChevronRight className="w-3 h-3" />
+                      </button>
                     </div>
                   </div>
-                  <div>
-                    <h3 className="text-xl font-black text-[#0F172A]">
-                      {submissionStatus === "Submitted" ? "Submitted ✓" : `${submissionProgress}% Complete`}
-                    </h3>
-                    <p className="text-xs font-bold text-amber-700 mt-0.5 truncate">
-                      {projectTitle ? projectTitle : "Draft in Progress"}
-                    </p>
-                  </div>
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] font-semibold text-slate-500">
-                    <span>{submissionStatus === "Submitted" ? "In Queue" : "Editable"}</span>
-                    <button 
-                      onClick={() => setActiveTab("submission")}
-                      className="font-extrabold text-blue-600 hover:text-blue-700 flex items-center gap-1 cursor-pointer"
-                    >
-                      <span>{submissionStatus === "Submitted" ? "Review" : "Upload"}</span>
-                      <ChevronRight className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
+                )}
 
               </div>
 
@@ -817,28 +963,36 @@ export const ParticipantDashboardPage: React.FC = () => {
                       </div>
 
                       {/* Step 2 */}
-                      <div className={`p-4 rounded-2xl border flex items-start gap-3 ${
+                      <div className={`p-4 rounded-2xl border flex items-start justify-between gap-3 ${
                         quizScore !== null || Object.keys(userSubmissions).length > 0
                           ? "bg-emerald-50/50 border-emerald-200/80"
                           : "bg-slate-50 border-slate-200"
                       }`}>
-                        <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 shadow-2xs ${
-                          quizScore !== null || Object.keys(userSubmissions).length > 0
-                            ? "bg-emerald-500 text-white"
-                            : "bg-slate-200 text-slate-500"
-                        }`}>
-                          {quizScore !== null || Object.keys(userSubmissions).length > 0 ? (
-                            <Check className="w-3.5 h-3.5" />
-                          ) : (
-                            <span className="text-[10px] font-bold">2</span>
-                          )}
+                        <div className="flex items-start gap-3 min-w-0">
+                          <div className={`w-6 h-6 rounded-full flex items-center justify-center shrink-0 mt-0.5 shadow-2xs ${
+                            quizScore !== null || Object.keys(userSubmissions).length > 0
+                              ? "bg-emerald-500 text-white"
+                              : "bg-slate-200 text-slate-500"
+                          }`}>
+                            {quizScore !== null || Object.keys(userSubmissions).length > 0 ? (
+                              <Check className="w-3.5 h-3.5" />
+                            ) : (
+                              <span className="text-[10px] font-bold">2</span>
+                            )}
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-extrabold text-[#0F172A]">2. Online Assessment</p>
+                            <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                              {quizScore !== null ? `Score: ${quizScore}/${quizMaxScore || 50} (${quizPercentage}%)` : Object.keys(userSubmissions).length > 0 ? "Quiz Assessment Submitted" : "Complete Track Quiz"}
+                            </p>
+                          </div>
                         </div>
-                        <div className="min-w-0">
-                          <p className="text-xs font-extrabold text-[#0F172A]">2. Online Assessment</p>
-                          <p className="text-[11px] text-slate-500 font-medium mt-0.5">
-                            {quizScore !== null ? `Score: ${quizScore}/${quizMaxScore || 100} (${quizPercentage}%)` : "Complete Track Quiz"}
-                          </p>
-                        </div>
+                        <button
+                          onClick={() => setActiveTab("quizzes")}
+                          className="text-[11px] font-bold text-blue-600 hover:text-blue-700 shrink-0 self-center hover:underline cursor-pointer"
+                        >
+                          View Answers →
+                        </button>
                       </div>
 
                       {/* Step 3 */}
@@ -954,15 +1108,17 @@ export const ParticipantDashboardPage: React.FC = () => {
             </div>
           )}
 
-          {/* Project Submission Tab (Only for Hackathons) */}
+          {/* Project Submission Tab */}
           {activeTab === "submission" && !isQuizParticipant && (
             <ProjectSubmissionPage
               targetRegId={targetRegId}
+              activeRoundType={activeRoundType}
               initialData={{
                 githubUrl,
                 demoVideoUrl,
                 submissionStatus,
-                submittedAt
+                submittedAt,
+                currentRound
               }}
               onSuccess={() => {
                 setSubmissionStatus("Submitted");
@@ -1022,13 +1178,15 @@ export const ParticipantDashboardPage: React.FC = () => {
                     <p className="text-xs text-slate-400 font-medium">Check back when the event organizers publish the assessment.</p>
                   </div>
                 ) : (
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-6">
                     {availableQuizzes.map((quiz) => {
                       const now = Date.now();
                       const userSub = userSubmissions[quiz.id];
-                      const isSubmitted = !!userSub;
-                      const hasScore = userSub && userSub.score !== undefined && userSub.score !== null;
-                      const maxQScore = userSub?.maxScore || quiz.totalMarks || (quiz.questions?.length ? quiz.questions.length * 2 : 50);
+                      const isSubmitted = Boolean(userSub || (quizScore !== null && availableQuizzes.length === 1));
+                      const effectiveScore = userSub?.score ?? (quizScore !== null ? quizScore : 0);
+                      const maxQScore = userSub?.maxScore || quiz.totalMarks || (quiz.questions?.length ? quiz.questions.length * 2 : (quizMaxScore || 50));
+                      const effectivePercentage = userSub?.percentage !== undefined ? userSub.percentage : (maxQScore > 0 ? Math.round((effectiveScore / maxQScore) * 100) : (quizPercentage || 0));
+                      const isPassed = userSub?.passed ?? (effectivePercentage >= 40 || currentRound > 1);
 
                       const isLive = Boolean(
                         !isSubmitted &&
@@ -1043,73 +1201,147 @@ export const ParticipantDashboardPage: React.FC = () => {
                       );
                       const isUpcoming = Boolean(!isSubmitted && quiz.scheduledStartTime && quiz.scheduledStartTime > now);
 
+                      const isExpanded = expandedQuizReviewId === quiz.id;
+                      const activeQuizObj = quizDetailsCache[quiz.id] || quiz;
+                      const reviewQuestions = activeQuizObj.questions || [];
+                      const subAnswers = userSub?.answers || {};
+                      const isLoadingReview = loadingReviewId === quiz.id;
+
+                      const correctCount = userSub?.correctCount ?? Math.round((effectiveScore / Math.max(1, (activeQuizObj.pointsPerQuestion || 2))));
+                      const incorrectCount = userSub?.incorrectCount ?? Math.max(0, (reviewQuestions.length || Math.round(maxQScore / 2)) - correctCount);
+
                       return (
                         <div
                           key={quiz.id}
-                          className={`border rounded-2xl p-5 flex flex-col justify-between space-y-4 transition-all ${
+                          className={`border rounded-3xl p-6 transition-all space-y-5 ${
                             isSubmitted 
-                              ? "bg-white border-blue-200/80 shadow-xs" 
+                              ? "bg-white border-blue-200/90 shadow-xs" 
                               : "bg-slate-50 border-slate-200 hover:border-blue-300"
                           }`}
                         >
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between flex-wrap gap-2">
-                              <span className="text-[10px] font-extrabold text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200/60">
-                                {quiz.track || "General"}
-                              </span>
-                              
-                              {isSubmitted ? (
-                                <div className="flex items-center gap-1.5">
-                                  <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                          {/* Header & Status Bar */}
+                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+                            <div className="space-y-1">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <span className="text-[10px] font-black text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200/60 uppercase tracking-wider">
+                                  {quiz.track || "General Track"}
+                                </span>
+                                {isSubmitted && (
+                                  <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
                                     <CircleCheckBig className="w-3 h-3 text-emerald-600" />
-                                    <span>Submitted</span>
+                                    <span>Submitted & Evaluated</span>
                                   </span>
-                                  {hasScore && (
-                                    <span className="text-[10px] font-black text-blue-700 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
-                                      Score: {userSub.score} / {maxQScore} ({userSub.percentage}%)
-                                    </span>
-                                  )}
+                                )}
+                                {currentRound > 1 && isSubmitted && (
+                                  <span className="text-[10px] font-black text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200 flex items-center gap-1">
+                                    <Trophy className="w-3 h-3 text-purple-600" />
+                                    <span>Qualified for Round {currentRound}</span>
+                                  </span>
+                                )}
+                              </div>
+                              <h3 className="text-lg font-black text-[#0F172A] tracking-tight">{quiz.title}</h3>
+                              <p className="text-xs text-slate-500 font-medium line-clamp-2">{quiz.description}</p>
+                            </div>
+
+                            <div className="flex items-center gap-2 self-start md:self-auto flex-wrap">
+                              {isSubmitted ? (
+                                <div className="text-right">
+                                  <div className="text-xs font-bold text-slate-400">Final Score</div>
+                                  <div className="text-xl font-black text-blue-600">
+                                    {effectiveScore} <span className="text-sm font-semibold text-slate-400">/ {maxQScore}</span>
+                                  </div>
                                 </div>
                               ) : isLive ? (
-                                <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
+                                <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 flex items-center gap-1">
                                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live Now
                                 </span>
                               ) : isCompleted ? (
-                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-2.5 py-0.5 rounded-full border border-slate-200">
+                                <span className="text-[10px] font-bold text-slate-500 bg-slate-100 px-3 py-1 rounded-full border border-slate-200">
                                   Concluded
                                 </span>
-                              ) : isUpcoming ? (
-                                <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-2.5 py-0.5 rounded-full border border-indigo-200 flex items-center gap-1">
-                                  <Clock className="w-3 h-3 text-indigo-500" /> Scheduled
-                                </span>
                               ) : (
-                                <span className="text-[10px] font-bold text-amber-700 bg-amber-50 px-2.5 py-0.5 rounded-full border border-amber-200 flex items-center gap-1">
-                                  <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-ping" /> Waiting for Admin
+                                <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-200 flex items-center gap-1">
+                                  <Clock className="w-3 h-3 text-indigo-500" /> Scheduled
                                 </span>
                               )}
                             </div>
-
-                            <h3 className="text-base font-extrabold text-[#0F172A] leading-tight">{quiz.title}</h3>
-                            <p className="text-xs text-slate-500 font-medium line-clamp-2">{quiz.description}</p>
                           </div>
 
-                          <div className="pt-2 flex items-center justify-between border-t border-slate-200/60">
+                          {/* Submitted Quiz Scorecard Hero Summary */}
+                          {isSubmitted && (
+                            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-5 text-white shadow-md relative overflow-hidden">
+                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+                                <div className="space-y-1">
+                                  <span className="text-blue-300 text-[10px] font-black uppercase tracking-widest block">
+                                    Quiz Performance & Scorecard
+                                  </span>
+                                  <div className="flex items-baseline gap-2">
+                                    <span className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+                                      {effectiveScore}
+                                    </span>
+                                    <span className="text-lg font-bold text-slate-400">
+                                      / {maxQScore} Marks
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center gap-2 flex-wrap">
+                                  <div className="bg-white/10 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/15 text-center">
+                                    <span className="text-[10px] font-bold text-slate-300 block uppercase">Accuracy</span>
+                                    <span className="text-sm font-black text-emerald-400">{effectivePercentage}%</span>
+                                  </div>
+
+                                  <div className="bg-white/10 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/15 text-center">
+                                    <span className="text-[10px] font-bold text-slate-300 block uppercase">Correct</span>
+                                    <span className="text-sm font-black text-emerald-400">{correctCount}</span>
+                                  </div>
+
+                                  <div className="bg-white/10 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/15 text-center">
+                                    <span className="text-[10px] font-bold text-slate-300 block uppercase">Incorrect</span>
+                                    <span className="text-sm font-black text-rose-400">{incorrectCount}</span>
+                                  </div>
+
+                                  <div className="bg-white/10 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/15 text-center">
+                                    <span className="text-[10px] font-bold text-slate-300 block uppercase">Status</span>
+                                    <span className="text-xs font-black text-amber-300">
+                                      {isPassed ? "✓ Qualified" : "Completed"}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Action Button Row */}
+                          <div className="flex items-center justify-between flex-wrap gap-3 pt-1">
                             <span className="text-xs font-bold text-slate-500">
-                              {quiz.questions?.length || quiz.questionsCount || 0} Questions • {quiz.durationMinutes}m
+                              {quiz.questions?.length || quiz.questionsCount || 0} Questions • {quiz.durationMinutes}m Allotted
                             </span>
 
                             {isSubmitted ? (
-                              <Link
-                                to={`/participant/quiz/${quiz.id}/completed`}
-                                className="bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-                              >
-                                <Trophy className="w-3.5 h-3.5 text-blue-600" />
-                                <span>View Scorecard</span>
-                              </Link>
+                              <div className="flex items-center gap-2.5 flex-wrap">
+                                <button
+                                  onClick={() => toggleQuizReview(quiz.id)}
+                                  className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-xl border border-blue-200/80 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95"
+                                >
+                                  <BarChart3 className="w-4 h-4 text-blue-600" />
+                                  <span>{isExpanded ? "Hide Answer Sheet" : "Review Questions & Answers"}</span>
+                                  {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                </button>
+
+                                <Link
+                                  to={`/participant/quiz/${quiz.id}/completed`}
+                                  className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                                >
+                                  <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                                  <span>Full Scorecard & Receipt</span>
+                                  <ArrowRight className="w-3.5 h-3.5" />
+                                </Link>
+                              </div>
                             ) : (
                               <Link
                                 to={`/participant/quiz/${quiz.id}/lobby`}
-                                className={`text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer ${
+                                className={`text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer ${
                                   isLive 
                                     ? "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700" 
                                     : "bg-[#0F172A] hover:bg-slate-800"
@@ -1120,6 +1352,146 @@ export const ParticipantDashboardPage: React.FC = () => {
                               </Link>
                             )}
                           </div>
+
+                          {/* ================= INLINE QUESTION & ANSWER SHEET REVIEW ================= */}
+                          {isExpanded && (
+                            <div className="pt-5 border-t border-slate-200/80 space-y-4 animate-in fade-in duration-200">
+                              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                                <div>
+                                  <h4 className="text-sm font-black text-[#0F172A] flex items-center gap-2">
+                                    <BarChart3 className="w-4 h-4 text-blue-600" />
+                                    <span>Verified Solutions & Answer Key</span>
+                                  </h4>
+                                  <p className="text-xs text-slate-500 font-medium">
+                                    Compare your submitted responses against the verified answer key.
+                                  </p>
+                                </div>
+                                <span className="text-xs font-black text-blue-700 bg-blue-50 px-3 py-1 rounded-full border border-blue-200">
+                                  {reviewQuestions.length} Questions
+                                </span>
+                              </div>
+
+                              {isLoadingReview ? (
+                                <div className="p-8 text-center bg-slate-50 rounded-2xl border border-slate-200 space-y-2">
+                                  <div className="w-6 h-6 border-2 border-blue-600 border-t-transparent rounded-full animate-spin mx-auto" />
+                                  <p className="text-xs font-bold text-slate-500">Loading verified solutions & answer keys...</p>
+                                </div>
+                              ) : reviewQuestions.length === 0 ? (
+                                <div className="p-6 text-center bg-slate-50 rounded-2xl border border-slate-200">
+                                  <p className="text-xs text-slate-500 font-medium">Question list loading. Please click Full Scorecard button above to view.</p>
+                                </div>
+                              ) : (
+                                <div className="space-y-4">
+                                  {reviewQuestions.map((q: any, qIdx: number) => {
+                                    const userSelectedOptId = subAnswers[q.id];
+                                    const isCorrect = userSelectedOptId && q.correctOptionId && userSelectedOptId.trim().toLowerCase() === q.correctOptionId.trim().toLowerCase();
+                                    const isUnanswered = !userSelectedOptId;
+
+                                    return (
+                                      <div
+                                        key={q.id || qIdx}
+                                        className={`p-4 sm:p-5 rounded-2xl border text-xs space-y-3 transition-all ${
+                                          isCorrect
+                                            ? "bg-emerald-50/40 border-emerald-200 shadow-2xs"
+                                            : isUnanswered
+                                              ? "bg-slate-50 border-slate-200"
+                                              : "bg-red-50/40 border-red-200 shadow-2xs"
+                                        }`}
+                                      >
+                                        <div className="flex items-center justify-between flex-wrap gap-2">
+                                          <div className="flex items-center gap-2">
+                                            <span className="font-black text-slate-800 bg-white px-2.5 py-1 rounded-lg border border-slate-200 shadow-2xs">
+                                              Q{q.questionNumber || qIdx + 1}
+                                            </span>
+                                            <span className="text-[10px] font-extrabold text-blue-700 bg-blue-50 px-2.5 py-1 rounded-full border border-blue-200/70">
+                                              {q.points || activeQuizObj?.pointsPerQuestion || 2} pts
+                                            </span>
+                                          </div>
+
+                                          <div>
+                                            {isCorrect ? (
+                                              <span className="text-[10px] font-black text-emerald-800 bg-emerald-100 px-3 py-1 rounded-full flex items-center gap-1 border border-emerald-300">
+                                                <Check className="w-3 h-3 text-emerald-700" />
+                                                <span>Correct (+{q.points || 2} pts)</span>
+                                              </span>
+                                            ) : isUnanswered ? (
+                                              <span className="text-[10px] font-bold text-slate-600 bg-slate-200 px-3 py-1 rounded-full">
+                                                Unanswered (0 pts)
+                                              </span>
+                                            ) : (
+                                              <span className="text-[10px] font-black text-red-800 bg-red-100 px-3 py-1 rounded-full flex items-center gap-1 border border-red-300">
+                                                <X className="w-3 h-3 text-red-700" />
+                                                <span>Incorrect (0 pts)</span>
+                                              </span>
+                                            )}
+                                          </div>
+                                        </div>
+
+                                        <p className="font-extrabold text-sm text-[#0F172A] leading-relaxed">
+                                          {q.text}
+                                        </p>
+
+                                        {q.codeSnippet && (
+                                          <pre className="p-3 bg-slate-900 text-emerald-400 font-mono text-[11px] rounded-xl overflow-x-auto border border-slate-800">
+                                            <code>{q.codeSnippet}</code>
+                                          </pre>
+                                        )}
+
+                                        {/* Options List */}
+                                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                                          {(q.options || []).map((opt: any) => {
+                                            const isUserChoice = userSelectedOptId === opt.id;
+                                            const isOfficialCorrect = q.correctOptionId === opt.id;
+
+                                            let optStyle = "bg-white border-slate-200 text-slate-700";
+                                            if (isUserChoice && isOfficialCorrect) {
+                                              optStyle = "bg-emerald-50 border-emerald-500 text-emerald-950 font-bold ring-2 ring-emerald-500/20";
+                                            } else if (isUserChoice && !isOfficialCorrect) {
+                                              optStyle = "bg-red-50 border-red-500 text-red-950 font-bold ring-2 ring-red-500/20";
+                                            } else if (isOfficialCorrect) {
+                                              optStyle = "bg-emerald-50/70 border-emerald-400 border-dashed text-emerald-950 font-bold";
+                                            }
+
+                                            return (
+                                              <div key={opt.id} className={`p-3 rounded-xl border text-[11px] flex items-center justify-between gap-2 ${optStyle}`}>
+                                                <span className="flex-1">
+                                                  <strong className="mr-1.5 uppercase font-mono">{opt.id.replace("opt_", "")})</strong>
+                                                  {opt.text}
+                                                </span>
+                                                {isUserChoice && isOfficialCorrect && (
+                                                  <span className="text-[9px] font-black uppercase text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300 shrink-0">
+                                                    ✓ Your Choice
+                                                  </span>
+                                                )}
+                                                {isUserChoice && !isOfficialCorrect && (
+                                                  <span className="text-[9px] font-black uppercase text-red-800 bg-red-100 px-2 py-0.5 rounded border border-red-300 shrink-0">
+                                                    ✗ Your Choice
+                                                  </span>
+                                                )}
+                                                {!isUserChoice && isOfficialCorrect && (
+                                                  <span className="text-[9px] font-black uppercase text-emerald-800 bg-emerald-100 px-2 py-0.5 rounded border border-emerald-300 shrink-0">
+                                                    ✓ Correct Answer
+                                                  </span>
+                                                )}
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+
+                                        {q.explanation && (
+                                          <div className="p-3 bg-blue-50/80 border border-blue-200/80 rounded-xl text-[11px] text-blue-950 flex items-start gap-2">
+                                            <span className="font-extrabold text-blue-700 shrink-0">💡 Explanation:</span>
+                                            <span className="font-medium leading-relaxed">{q.explanation}</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                    );
+                                  })}
+                                </div>
+                              )}
+                            </div>
+                          )}
+
                         </div>
                       );
                     })}

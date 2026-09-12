@@ -97,7 +97,9 @@ async function fetchQuizFromApi(cleanId: string): Promise<Quiz | null> {
       questions: raw.questions || [],
       createdAt: raw.createdAt || Date.now(),
       updatedAt: raw.updatedAt || Date.now(),
-      createdBy: raw.createdBy || ""
+      createdBy: raw.createdBy || "",
+      resultsPublished: Boolean(raw.resultsPublished),
+      overriddenScores: raw.overriddenScores
     };
 
     // Cache locally
@@ -155,7 +157,7 @@ export function getDeterministicSessionId(quizId: string, userId: string): strin
  */
 export async function getOrCreateQuizSession(
   quiz: Quiz, 
-  user: { uid: string; email?: string | null; displayName?: string | null; name?: string | null },
+  _user: { uid: string; email?: string | null; displayName?: string | null; name?: string | null },
   team?: { id?: string; name?: string }
 ): Promise<QuizSession> {
   // Use backend API to create or restore authoritative session

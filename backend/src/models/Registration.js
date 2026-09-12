@@ -8,10 +8,12 @@ const RegistrationMemberSchema = new Schema(
     phone: { type: String, default: '' },
     college: { type: String, default: '' },
     registrationNumber: { type: String, default: '' },
+    studentId: { type: String, default: '' },
+    rollNo: { type: String, default: '' },
     role: { type: String, default: 'Member' },
     isLeader: { type: Boolean, default: false },
   },
-  { _id: false }
+  { _id: false, strict: false }
 );
 
 const RegistrationSchema = new Schema(
@@ -40,9 +42,9 @@ const RegistrationSchema = new Schema(
     transactionId: { type: String, default: '' },
     paymentProof: { type: String, default: '' },
     paymentStatus: { type: String, default: 'Free' },
-    status: { type: String, default: 'Confirmed' },
-    accessGranted: { type: Boolean, default: true },
-    loginAccessGranted: { type: Boolean, default: true },
+    status: { type: String, default: 'Not Confirmed' },
+    accessGranted: { type: Boolean, default: false },
+    loginAccessGranted: { type: Boolean, default: false },
     attendanceMarked: { type: Boolean, default: false },
     attendanceStatus: { type: String, default: 'Pending' },
     certificateIssued: { type: Boolean, default: false },

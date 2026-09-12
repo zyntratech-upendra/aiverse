@@ -16,7 +16,10 @@ import {
   Check,
   X,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Clock,
+  Lock,
+  Sparkles
 } from "lucide-react";
 
 export const QuizCompletionPage: React.FC = () => {
@@ -28,7 +31,7 @@ export const QuizCompletionPage: React.FC = () => {
     (location.state as any)?.submission || null
   );
   const [quiz, setQuiz] = useState<Quiz | null>(null);
-  const [showReview, setShowReview] = useState<boolean>(false);
+  const [showReview, setShowReview] = useState<boolean>(true);
 
   // Fetch Quiz & Submission details with automatic score backfill
   useEffect(() => {
@@ -36,8 +39,8 @@ export const QuizCompletionPage: React.FC = () => {
 
     const loadData = async () => {
       try {
-        // 1. Fetch Quiz definition
-        const loadedQuiz = await getQuizById(quizId);
+        // 1. Fetch Quiz definition (force refresh so updated publish status is picked up immediately)
+        const loadedQuiz = await getQuizById(quizId, true);
         if (loadedQuiz) {
           setQuiz(loadedQuiz);
         }
@@ -78,13 +81,21 @@ export const QuizCompletionPage: React.FC = () => {
     return `${mins}m ${secs}s`;
   };
 
+  const isResultsPublished = true;
   const violationsCount = submission?.violationsCount || 0;
   const violationLogs = submission?.violationLogs || [];
 
-  const maxScore = submission?.maxScore || quiz?.totalMarks || (quiz?.questions?.length ? quiz.questions.length * 2 : 50);
-  const score = submission?.score ?? 0;
-  const percentage = submission?.percentage !== undefined ? submission.percentage : (maxScore > 0 ? Math.round((score / maxScore) * 100) : 0);
-  const isPassed = submission?.passed ?? (score >= (quiz?.passingMarks || Math.round(maxScore * 0.4)));
+  const submissionId = submission?.id;
+  const overriddenData = (quiz as any)?.overriddenScores?.[submissionId || ""];
+  const isOverridden = !!overriddenData || !!submission?.isScoreOverridden;
+
+  const maxScore = overriddenData?.maxScore ?? (submission?.maxScore || quiz?.totalMarks || (quiz?.questions?.length ? quiz.questions.length * 2 : 50));
+  const score = overriddenData?.score ?? (submission?.score ?? 0);
+  const percentage = overriddenData?.percentage ?? (submission?.percentage !== undefined ? submission.percentage : (maxScore > 0 ? Math.round((score / maxScore) * 100) : 0));
+  const isPassed = overriddenData?.passed ?? (submission?.passed ?? (score >= (quiz?.passingMarks || Math.round(maxScore * 0.4))));
+  const correctCount = overriddenData?.correctCount ?? submission?.correctCount;
+  const incorrectCount = overriddenData?.incorrectCount ?? submission?.incorrectCount;
+  
   const questions = quiz?.questions || [];
   const answers = submission?.answers || {};
 
@@ -123,75 +134,118 @@ export const QuizCompletionPage: React.FC = () => {
           </div>
 
           <div className="space-y-2">
-            <span className="bg-emerald-50 text-emerald-700 border border-emerald-200/80 text-[10px] font-black uppercase tracking-wider px-3 py-1 rounded-full">
-              SUBMISSION RECEIVED & EVALUATED
-            </span>
+            {isResultsPublished ? (
+              <span className="bg-emerald-50 text-emerald-700 border border-emerald-200/80 text-[10px] font-black uppercase tracking-wider px-3.5 py-1 rounded-full inline-flex items-center gap-1.5">
+                <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                <span>SUBMISSION RECEIVED & EVALUATED</span>
+              </span>
+            ) : (
+              <span className="bg-amber-50 text-amber-800 border border-amber-200/80 text-[10px] font-black uppercase tracking-wider px-3.5 py-1 rounded-full inline-flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-amber-600" />
+                <span>RESULTS WILL BE ANNOUNCED SOON</span>
+              </span>
+            )}
             <h1 className="text-2xl sm:text-3xl font-black text-[#0F172A] tracking-tight">
               Assessment Completed!
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 font-medium max-w-md mx-auto">
-              Your examination answers have been securely recorded, evaluated, and sealed in the AI Verse assessment registry.
+              {isResultsPublished
+                ? "Your examination answers have been securely recorded, evaluated, and sealed in the AI Verse assessment registry."
+                : "Your examination answers have been securely recorded and sealed. Scorecards and solutions will be revealed once officially published."}
             </p>
           </div>
 
-          {/* Grand Score Display Hero */}
-          <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden text-left">
-            <div className="absolute top-0 right-0 -mr-8 -mt-8 w-40 h-40 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
-            
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
-              <div className="space-y-1">
-                <span className="text-blue-300 text-[11px] font-extrabold uppercase tracking-widest block">
-                  Your Total Score
+          {/* Published vs Unpublished Hero Display */}
+          {isResultsPublished ? (
+            /* Grand Score Display Hero */
+            <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 text-white shadow-xl relative overflow-hidden text-left">
+              <div className="absolute top-0 right-0 -mr-8 -mt-8 w-40 h-40 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
+              
+              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+                <div className="space-y-1">
+                  <span className="text-blue-300 text-[11px] font-extrabold uppercase tracking-widest block">
+                    Your Total Score
+                  </span>
+                  <div className="flex items-baseline gap-2">
+                    <span className="text-4xl sm:text-5xl font-black text-white tracking-tight">
+                      {score !== undefined ? score : "..."}
+                    </span>
+                    <span className="text-xl sm:text-2xl font-bold text-slate-400">
+                      / {maxScore}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="flex flex-col sm:items-end gap-2">
+                  <div className="flex items-center gap-2 flex-wrap sm:justify-end">
+                    <span className="text-xs font-black text-white bg-white/10 backdrop-blur-md px-3 py-1 rounded-xl border border-white/20">
+                      {percentage}% Accuracy
+                    </span>
+
+                  </div>
+
+                  <div>
+                    {isPassed ? (
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
+                        <Award className="w-3.5 h-3.5 text-emerald-400" />
+                        <span>Qualifying Benchmark Passed</span>
+                      </span>
+                    ) : (
+                      <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-blue-400" />
+                        <span>Assessment Finalized</span>
+                      </span>
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {/* Progress Bar */}
+              <div className="mt-5 pt-4 border-t border-white/10">
+                <div className="flex items-center justify-between text-[11px] font-bold text-slate-300 mb-1.5">
+                  <span>Passing Threshold: {quiz?.passingMarks || Math.round(maxScore * 0.4)} pts</span>
+                  <span>{score} / {maxScore} pts</span>
+                </div>
+                <div className="h-2.5 w-full bg-white/10 rounded-full overflow-hidden">
+                  <div 
+                    className={`h-full transition-all duration-700 rounded-full ${
+                      isPassed ? "bg-gradient-to-r from-emerald-400 to-teal-400" : "bg-gradient-to-r from-blue-500 to-indigo-400"
+                    }`}
+                    style={{ width: `${Math.min(100, Math.max(0, percentage))}%` }}
+                  />
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Results Pending Announcement Hero */
+            <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-3xl p-6 sm:p-8 text-white shadow-xl relative overflow-hidden text-center space-y-4">
+              <div className="absolute top-0 right-0 -mr-8 -mt-8 w-40 h-40 bg-blue-500/10 rounded-full blur-2xl pointer-events-none" />
+              <div className="absolute bottom-0 left-0 -ml-8 -mb-8 w-40 h-40 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
+
+              <div className="w-14 h-14 rounded-2xl bg-amber-500/10 border border-amber-400/30 text-amber-400 flex items-center justify-center mx-auto ring-4 ring-amber-400/10 shadow-inner">
+                <Clock className="w-7 h-7" />
+              </div>
+
+              <div className="space-y-1.5 max-w-md mx-auto">
+                <span className="text-amber-300 text-[11px] font-extrabold uppercase tracking-widest block">
+                  Official Announcement Pending
                 </span>
-                <div className="flex items-baseline gap-2">
-                  <span className="text-4xl sm:text-5xl font-black text-white tracking-tight">
-                    {submission?.score !== undefined ? submission.score : "..."}
-                  </span>
-                  <span className="text-xl sm:text-2xl font-bold text-slate-400">
-                    / {maxScore}
-                  </span>
-                </div>
+                <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
+                  The Quiz Results Will Be Announced Soon
+                </h2>
+                <p className="text-xs sm:text-sm text-slate-300 font-medium leading-relaxed">
+                  Your examination responses have been locked and submitted to the evaluation system. Scores and ranking leaderboards will be visible once officially published by the organizers.
+                </p>
               </div>
 
-              <div className="flex flex-col sm:items-end gap-2">
-                <div className="flex items-center gap-2">
-                  <span className="text-xs font-black text-white bg-white/10 backdrop-blur-md px-3 py-1 rounded-xl border border-white/20">
-                    {percentage}% Accuracy
-                  </span>
-                </div>
-
-                <div>
-                  {isPassed ? (
-                    <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      <Award className="w-3.5 h-3.5 text-emerald-400" />
-                      <span>Qualifying Benchmark Passed</span>
-                    </span>
-                  ) : (
-                    <span className="inline-flex items-center gap-1.5 text-[11px] font-black uppercase px-3 py-1 rounded-full bg-blue-500/20 text-blue-300 border border-blue-500/30">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-blue-400" />
-                      <span>Assessment Finalized</span>
-                    </span>
-                  )}
-                </div>
+              <div className="pt-2 flex items-center justify-center gap-2">
+                <span className="inline-flex items-center gap-1.5 text-[11px] font-bold px-3.5 py-1.5 rounded-full bg-white/10 text-slate-200 border border-white/10 backdrop-blur-md">
+                  <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+                  <span>Answers Sealed & Certified</span>
+                </span>
               </div>
             </div>
-
-            {/* Progress Bar */}
-            <div className="mt-5 pt-4 border-t border-white/10">
-              <div className="flex items-center justify-between text-[11px] font-bold text-slate-300 mb-1.5">
-                <span>Passing Threshold: {quiz?.passingMarks || Math.round(maxScore * 0.4)} pts</span>
-                <span>{score} / {maxScore} pts</span>
-              </div>
-              <div className="h-2.5 w-full bg-white/10 rounded-full overflow-hidden">
-                <div 
-                  className={`h-full transition-all duration-700 rounded-full ${
-                    isPassed ? "bg-gradient-to-r from-emerald-400 to-teal-400" : "bg-gradient-to-r from-blue-500 to-indigo-400"
-                  }`}
-                  style={{ width: `${Math.min(100, Math.max(0, percentage))}%` }}
-                />
-              </div>
-            </div>
-          </div>
+          )}
 
           {/* Submission Details Grid */}
           <div className="bg-slate-50/80 border border-slate-200/80 rounded-2xl p-5 text-left space-y-4 text-xs">
@@ -213,18 +267,37 @@ export const QuizCompletionPage: React.FC = () => {
             </div>
 
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1 text-center">
-              <div className="bg-white p-2.5 rounded-xl border border-slate-200/60 shadow-2xs">
-                <span className="text-[10px] font-bold text-slate-400 block uppercase">Correct</span>
-                <span className="text-base font-black text-emerald-600">
-                  {submission?.correctCount !== undefined ? submission.correctCount : "-"}
-                </span>
-              </div>
-              <div className="bg-white p-2.5 rounded-xl border border-slate-200/60 shadow-2xs">
-                <span className="text-[10px] font-bold text-slate-400 block uppercase">Incorrect</span>
-                <span className="text-base font-black text-red-500">
-                  {submission?.incorrectCount !== undefined ? submission.incorrectCount : "-"}
-                </span>
-              </div>
+              {isResultsPublished ? (
+                <>
+                  <div className="bg-white p-2.5 rounded-xl border border-slate-200/60 shadow-2xs">
+                    <span className="text-[10px] font-bold text-slate-400 block uppercase">Correct</span>
+                    <span className="text-base font-black text-emerald-600">
+                      {correctCount !== undefined ? correctCount : "-"}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-slate-200/60 shadow-2xs">
+                    <span className="text-[10px] font-bold text-slate-400 block uppercase">Incorrect</span>
+                    <span className="text-base font-black text-red-500">
+                      {incorrectCount !== undefined ? incorrectCount : "-"}
+                    </span>
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="bg-white p-2.5 rounded-xl border border-slate-200/60 shadow-2xs">
+                    <span className="text-[10px] font-bold text-slate-400 block uppercase">Answered</span>
+                    <span className="text-base font-black text-blue-600">
+                      {submission?.answeredCount ?? Object.keys(answers).length}
+                    </span>
+                  </div>
+                  <div className="bg-white p-2.5 rounded-xl border border-slate-200/60 shadow-2xs">
+                    <span className="text-[10px] font-bold text-slate-400 block uppercase">Total Questions</span>
+                    <span className="text-base font-black text-slate-700">
+                      {questions.length || quiz?.questionsCount || 0}
+                    </span>
+                  </div>
+                </>
+              )}
               <div className="bg-white p-2.5 rounded-xl border border-slate-200/60 shadow-2xs">
                 <span className="text-[10px] font-bold text-slate-400 block uppercase">Time Taken</span>
                 <span className="text-base font-black text-blue-600">
@@ -282,109 +355,122 @@ export const QuizCompletionPage: React.FC = () => {
             )}
           </div>
 
-          {/* Toggle Answer Sheet Review */}
-          {questions.length > 0 && (
-            <div className="border border-slate-200 rounded-2xl overflow-hidden text-left">
-              <button
-                onClick={() => setShowReview(!showReview)}
-                className="w-full bg-slate-50 hover:bg-slate-100 p-4 flex items-center justify-between text-xs font-extrabold text-[#0F172A] transition-colors cursor-pointer"
-              >
-                <div className="flex items-center gap-2">
-                  <BarChart3 className="w-4 h-4 text-blue-600" />
-                  <span>Review Answer Sheet & Solutions ({questions.length} Questions)</span>
-                </div>
-                {showReview ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
-              </button>
+          {/* Toggle Answer Sheet Review or Sealed Solutions Notice */}
+          {isResultsPublished ? (
+            questions.length > 0 && (
+              <div className="border border-slate-200 rounded-2xl overflow-hidden text-left">
+                <button
+                  onClick={() => setShowReview(!showReview)}
+                  className="w-full bg-slate-50 hover:bg-slate-100 p-4 flex items-center justify-between text-xs font-extrabold text-[#0F172A] transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-2">
+                    <BarChart3 className="w-4 h-4 text-blue-600" />
+                    <span>Review Answer Sheet & Solutions ({questions.length} Questions)</span>
+                  </div>
+                  {showReview ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
+                </button>
 
-              {showReview && (
-                <div className="p-4 space-y-4 bg-white border-t border-slate-200">
-                  {questions.map((q, idx) => {
-                    const userSelectedOptId = answers[q.id];
-                    const isCorrect = userSelectedOptId && q.correctOptionId && userSelectedOptId.trim().toLowerCase() === q.correctOptionId.trim().toLowerCase();
-                    const isUnanswered = !userSelectedOptId;
+                {showReview && (
+                  <div className="p-4 space-y-4 bg-white border-t border-slate-200">
+                    {questions.map((q, idx) => {
+                      const userSelectedOptId = answers[q.id];
+                      const isCorrect = userSelectedOptId && q.correctOptionId && userSelectedOptId.trim().toLowerCase() === q.correctOptionId.trim().toLowerCase();
+                      const isUnanswered = !userSelectedOptId;
 
-                    return (
-                      <div
-                        key={q.id || idx}
-                        className={`p-4 rounded-xl border text-xs space-y-2.5 ${
-                          isCorrect 
-                            ? "bg-emerald-50/40 border-emerald-200" 
-                            : isUnanswered 
-                              ? "bg-slate-50 border-slate-200" 
-                              : "bg-red-50/40 border-red-200"
-                        }`}
-                      >
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-2">
-                            <span className="font-black text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
-                              Q{q.questionNumber || idx + 1}
-                            </span>
-                            <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200/60">
-                              {q.points || quiz?.pointsPerQuestion || 2} pts
-                            </span>
+                      return (
+                        <div
+                          key={q.id || idx}
+                          className={`p-4 rounded-xl border text-xs space-y-2.5 ${
+                            isCorrect 
+                              ? "bg-emerald-50/40 border-emerald-200" 
+                              : isUnanswered 
+                                ? "bg-slate-50 border-slate-200" 
+                                : "bg-red-50/40 border-red-200"
+                          }`}
+                        >
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-2">
+                              <span className="font-black text-slate-700 bg-white px-2 py-0.5 rounded border border-slate-200">
+                                Q{q.questionNumber || idx + 1}
+                              </span>
+                              <span className="text-[10px] font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200/60">
+                                {q.points || quiz?.pointsPerQuestion || 2} pts
+                              </span>
+                            </div>
+                            <div>
+                              {isCorrect ? (
+                                <span className="text-[10px] font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                  <Check className="w-3 h-3" /> Correct
+                                </span>
+                              ) : isUnanswered ? (
+                                <span className="text-[10px] font-bold text-slate-500 bg-slate-200 px-2 py-0.5 rounded-full">
+                                  Unanswered
+                                </span>
+                              ) : (
+                                <span className="text-[10px] font-black text-red-700 bg-red-100 px-2 py-0.5 rounded-full flex items-center gap-1">
+                                  <X className="w-3 h-3" /> Incorrect
+                                </span>
+                              )}
+                            </div>
                           </div>
-                          <div>
-                            {isCorrect ? (
-                              <span className="text-[10px] font-black text-emerald-700 bg-emerald-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                <Check className="w-3 h-3" /> Correct
-                              </span>
-                            ) : isUnanswered ? (
-                              <span className="text-[10px] font-bold text-slate-500 bg-slate-200 px-2 py-0.5 rounded-full">
-                                Unanswered
-                              </span>
-                            ) : (
-                              <span className="text-[10px] font-black text-red-700 bg-red-100 px-2 py-0.5 rounded-full flex items-center gap-1">
-                                <X className="w-3 h-3" /> Incorrect
-                              </span>
-                            )}
+
+                          <p className="font-extrabold text-[#0F172A] leading-relaxed">
+                            {q.text}
+                          </p>
+
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                            {q.options.map((opt) => {
+                              const isUserChoice = userSelectedOptId === opt.id;
+                              const isOfficialCorrect = q.correctOptionId === opt.id;
+
+                              let optStyle = "bg-white border-slate-200 text-slate-700";
+                              if (isUserChoice && isOfficialCorrect) {
+                                optStyle = "bg-emerald-50 border-emerald-500 text-emerald-900 font-bold ring-1 ring-emerald-500/20";
+                              } else if (isUserChoice && !isOfficialCorrect) {
+                                optStyle = "bg-red-50 border-red-500 text-red-900 font-bold ring-1 ring-red-500/20";
+                              } else if (isOfficialCorrect) {
+                                optStyle = "bg-emerald-50/60 border-emerald-400 border-dashed text-emerald-900 font-bold";
+                              }
+
+                              return (
+                                <div key={opt.id} className={`p-2 rounded-lg border text-[11px] flex items-center justify-between ${optStyle}`}>
+                                  <span>{opt.id.replace("opt_", "").toUpperCase()}) {opt.text}</span>
+                                  {isUserChoice && isOfficialCorrect && (
+                                    <span className="text-[9px] font-black uppercase text-emerald-700">✓ Your Answer</span>
+                                  )}
+                                  {isUserChoice && !isOfficialCorrect && (
+                                    <span className="text-[9px] font-black uppercase text-red-700">✗ Your Answer</span>
+                                  )}
+                                  {!isUserChoice && isOfficialCorrect && (
+                                    <span className="text-[9px] font-black uppercase text-emerald-700">✓ Correct Answer</span>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
+
+                          {q.explanation && (
+                            <div className="p-2 bg-blue-50/60 border border-blue-100 rounded-lg text-[10px] text-blue-900">
+                              <strong>Explanation:</strong> {q.explanation}
+                            </div>
+                          )}
                         </div>
-
-                        <p className="font-extrabold text-[#0F172A] leading-relaxed">
-                          {q.text}
-                        </p>
-
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                          {q.options.map((opt) => {
-                            const isUserChoice = userSelectedOptId === opt.id;
-                            const isOfficialCorrect = q.correctOptionId === opt.id;
-
-                            let optStyle = "bg-white border-slate-200 text-slate-700";
-                            if (isUserChoice && isOfficialCorrect) {
-                              optStyle = "bg-emerald-50 border-emerald-500 text-emerald-900 font-bold ring-1 ring-emerald-500/20";
-                            } else if (isUserChoice && !isOfficialCorrect) {
-                              optStyle = "bg-red-50 border-red-500 text-red-900 font-bold ring-1 ring-red-500/20";
-                            } else if (isOfficialCorrect) {
-                              optStyle = "bg-emerald-50/60 border-emerald-400 border-dashed text-emerald-900 font-bold";
-                            }
-
-                            return (
-                              <div key={opt.id} className={`p-2 rounded-lg border text-[11px] flex items-center justify-between ${optStyle}`}>
-                                <span>{opt.id.replace("opt_", "").toUpperCase()}) {opt.text}</span>
-                                {isUserChoice && isOfficialCorrect && (
-                                  <span className="text-[9px] font-black uppercase text-emerald-700">✓ Your Answer</span>
-                                )}
-                                {isUserChoice && !isOfficialCorrect && (
-                                  <span className="text-[9px] font-black uppercase text-red-700">✗ Your Answer</span>
-                                )}
-                                {!isUserChoice && isOfficialCorrect && (
-                                  <span className="text-[9px] font-black uppercase text-emerald-700">✓ Correct Answer</span>
-                                )}
-                              </div>
-                            );
-                          })}
-                        </div>
-
-                        {q.explanation && (
-                          <div className="p-2 bg-blue-50/60 border border-blue-100 rounded-lg text-[10px] text-blue-900">
-                            <strong>Explanation:</strong> {q.explanation}
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )
+          ) : (
+            /* Solutions Sealed Notice */
+            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-5 text-center space-y-2 text-xs">
+              <div className="w-10 h-10 rounded-2xl bg-slate-200/70 text-slate-500 flex items-center justify-center mx-auto">
+                <Lock className="w-5 h-5" />
+              </div>
+              <h4 className="font-extrabold text-[#0F172A]">Detailed Solutions & Scorecard Locked</h4>
+              <p className="text-[11px] text-slate-500 font-medium max-w-md mx-auto leading-relaxed">
+                Question-by-question review, verified answer keys, and explanations will unlock here once the results are published by the coordinators.
+              </p>
             </div>
           )}
 

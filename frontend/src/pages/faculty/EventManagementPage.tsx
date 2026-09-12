@@ -23,7 +23,11 @@ import {
   createEvent, 
   updateEvent, 
   deleteEvent, 
-  createRegistration 
+  createRegistration,
+  updateRegistration,
+  fetchAllQuizzes,
+  fetchQuizSubmissions,
+  fetchJuryEvaluations
 } from "../../services/apiClient";
 import { useModal } from "../../context/ModalContext";
 import {
@@ -424,7 +428,8 @@ const EventManagementPage: React.FC = () => {
 
           if (isIdMatch || isTitleMatch) {
             list.push({ id: regId, ...data });
-            if (data.accessGranted || data.loginAccessGranted) {
+            const isConfirmed = String(data.status || "").toLowerCase().trim() === "confirmed";
+            if (isConfirmed && (data.accessGranted || data.loginAccessGranted)) {
               grantedIds.push(regId);
             }
           }
@@ -525,10 +530,12 @@ const EventManagementPage: React.FC = () => {
   const [selectedTeamSubmission, setSelectedTeamSubmission] = useState<any | null>(null);
   const [submissionsFilter, setSubmissionsFilter] = useState<"All" | "Submitted" | "Draft" | "Pending">("All");
   const [submissionsSearchQuery, setSubmissionsSearchQuery] = useState("");
+  const [matrixViewRound, setMatrixViewRound] = useState<number>(0); // 0 = current round (live data)
 
   const handleOpenSubmissionsModal = () => {
     setSubmissionsFilter("All");
     setSubmissionsSearchQuery("");
+    setMatrixViewRound(0);
     setIsSubmissionsModalOpen(true);
   };
 
@@ -624,6 +631,8 @@ const EventManagementPage: React.FC = () => {
   const [psCodeInput, setPsCodeInput] = useState("");
   const [psTitleInput, setPsTitleInput] = useState("");
   const [psTrackInput, setPsTrackInput] = useState("");
+  const [psRoundInput, setPsRoundInput] = useState<string>("all");
+  const [problemRoundFilter, setProblemRoundFilter] = useState<string>("all");
   const [psDescInput, setPsDescInput] = useState("");
   const [psDeliverablesInput, setPsDeliverablesInput] = useState("");
   const [savingMultiProblems, setSavingMultiProblems] = useState(false);
@@ -631,6 +640,7 @@ const EventManagementPage: React.FC = () => {
 
   const handleOpenMultiProblemModal = () => {
     const existing = eventAccessEvent?.problemStatements || [];
+    const currR = eventAccessEvent?.currentRound || 1;
     if (existing.length > 0) {
       setProblemList(existing);
     } else if (eventAccessEvent?.problemStatementTitle) {
@@ -639,6 +649,7 @@ const EventManagementPage: React.FC = () => {
         code: "PS-01",
         title: eventAccessEvent.problemStatementTitle,
         track: eventAccessEvent.problemStatementTrack || "General Track",
+        round: currR,
         description: eventAccessEvent.problemStatement || "",
         deliverables: ""
       }]);
@@ -649,6 +660,8 @@ const EventManagementPage: React.FC = () => {
     setPsCodeInput(`PS-0${(existing.length || 0) + 1}`);
     setPsTitleInput("");
     setPsTrackInput("");
+    setPsRoundInput(String(currR));
+    setProblemRoundFilter("all");
     setPsDescInput("");
     setPsDeliverablesInput("");
     setIsMultiProblemModalOpen(true);
@@ -658,12 +671,15 @@ const EventManagementPage: React.FC = () => {
     e.preventDefault();
     if (!psTitleInput.trim()) return;
 
+    const assignedRound = psRoundInput === "all" ? "all" : Number(psRoundInput);
+
     if (editingPsId) {
       setProblemList(prev => prev.map(item => item.id === editingPsId ? {
         ...item,
         code: psCodeInput || item.code,
         title: psTitleInput,
         track: psTrackInput,
+        round: assignedRound,
         description: psDescInput,
         deliverables: psDeliverablesInput
       } : item));
@@ -674,6 +690,7 @@ const EventManagementPage: React.FC = () => {
         code: psCodeInput || `PS-0${problemList.length + 1}`,
         title: psTitleInput,
         track: psTrackInput || "General",
+        round: assignedRound,
         description: psDescInput,
         deliverables: psDeliverablesInput
       };
@@ -692,6 +709,7 @@ const EventManagementPage: React.FC = () => {
     setPsCodeInput(item.code);
     setPsTitleInput(item.title);
     setPsTrackInput(item.track);
+    setPsRoundInput(item.round ? String(item.round) : "all");
     setPsDescInput(item.description);
     setPsDeliverablesInput(item.deliverables || "");
   };
@@ -785,18 +803,24 @@ const EventManagementPage: React.FC = () => {
     setLoadingPromotionMetrics(true);
     try {
       // 1. Fetch Quizzes for this event
-      const quizSnap = await getDocs(collection(db, "quizzes"));
-      const qList: any[] = [];
-      quizSnap.forEach((d) => {
-        const qData = d.data();
-        if (
-          !qData.eventId ||
-          (eventAccessEvent?.id && qData.eventId === eventAccessEvent.id) ||
-          (eventAccessEvent?.title && qData.eventTitle?.toLowerCase().trim() === eventAccessEvent.title.toLowerCase().trim())
-        ) {
-          qList.push({ id: d.id, ...qData });
-        }
-      });
+      let qList: any[] = [];
+      try {
+        const qListRaw = await fetchAllQuizzes({ eventId: eventAccessEvent?.id });
+        qList = Array.isArray(qListRaw) ? qListRaw : (qListRaw?.data || []);
+      } catch (apiErr) {
+        console.warn("Failed to fetch quizzes via API, falling back to Firebase", apiErr);
+        const quizSnap = await getDocs(collection(db, "quizzes"));
+        quizSnap.forEach((d) => {
+          const qData = d.data();
+          if (
+            !qData.eventId ||
+            (eventAccessEvent?.id && qData.eventId === eventAccessEvent.id) ||
+            (eventAccessEvent?.title && qData.eventTitle?.toLowerCase().trim() === eventAccessEvent.title.toLowerCase().trim())
+          ) {
+            qList.push({ id: d.id, ...qData });
+          }
+        });
+      }
       setEventQuizzesList(qList);
       if (qList.length > 0) {
         setSelectedPromotionQuizId(qList[0].id);
@@ -805,28 +829,71 @@ const EventManagementPage: React.FC = () => {
       }
 
       // 2. Fetch Quiz Submissions & auto-evaluate scores if missing
-      const subSnap = await getDocs(collection(db, "quizSubmissions"));
       const subs: any[] = [];
-      subSnap.forEach((d) => {
-        const sData = { id: d.id, ...d.data() } as any;
-        if ((sData.score === undefined || sData.score === null) && sData.answers && qList.length > 0) {
+      for (const qDef of qList) {
+        try {
+          const qSubsRaw = await fetchQuizSubmissions(qDef.id);
+          const qSubs = Array.isArray(qSubsRaw) ? qSubsRaw : (qSubsRaw?.data || []);
+          const overridden = qDef.overriddenScores || {};
+          
+          for (const sDataRaw of qSubs) {
+             let sData = { ...sDataRaw };
+             // Apply overriding logic if exists
+             if (overridden[sData.id]) {
+                sData = { ...sData, ...overridden[sData.id] };
+             }
+
+             if ((sData.score === undefined || sData.score === null) && sData.answers) {
+                const evaluated = evaluateQuizAnswers(qDef, sData.answers);
+                sData.score = evaluated.score;
+                sData.maxScore = evaluated.maxScore;
+                sData.percentage = evaluated.percentage;
+                sData.passed = evaluated.passed;
+             }
+             subs.push(sData);
+          }
+        } catch (err) {
+          console.error(`Error fetching submissions for quiz ${qDef.id}:`, err);
+        }
+      }
+      
+      if (subs.length === 0) {
+        const subSnap = await getDocs(collection(db, "quizSubmissions"));
+        subSnap.forEach((d) => {
+          const sData = { id: d.id, ...d.data() } as any;
+          
+          // Apply overridden logic here too just in case
           const qDef = qList.find((q) => q.id === sData.quizId) || qList[0];
           if (qDef) {
-            const evaluated = evaluateQuizAnswers(qDef, sData.answers);
-            sData.score = evaluated.score;
-            sData.maxScore = evaluated.maxScore;
-            sData.percentage = evaluated.percentage;
-            sData.passed = evaluated.passed;
+             const overridden = qDef.overriddenScores || {};
+             if (overridden[sData.id]) {
+                Object.assign(sData, overridden[sData.id]);
+             }
+             if ((sData.score === undefined || sData.score === null) && sData.answers) {
+               const evaluated = evaluateQuizAnswers(qDef, sData.answers);
+               sData.score = evaluated.score;
+               sData.maxScore = evaluated.maxScore;
+               sData.percentage = evaluated.percentage;
+               sData.passed = evaluated.passed;
+             }
           }
-        }
-        subs.push(sData);
-      });
+          subs.push(sData);
+        });
+      }
       setAllQuizSubmissions(subs);
 
       // 3. Fetch Jury Evaluations
-      const jurySnap = await getDocs(collection(db, "jury_evaluations"));
-      const jList: any[] = [];
-      jurySnap.forEach((d) => jList.push({ id: d.id, ...d.data() }));
+      let jList: any[] = [];
+      try {
+        const juryRaw = await fetchJuryEvaluations({ eventId: eventAccessEvent?.id });
+        jList = Array.isArray(juryRaw) ? juryRaw : (juryRaw?.data || []);
+      } catch (apiErr) {
+        console.warn("Failed to fetch jury evaluations via API, falling back to Firebase", apiErr);
+      }
+      if (jList.length === 0) {
+        const jurySnap = await getDocs(collection(db, "jury_evaluations"));
+        jurySnap.forEach((d) => jList.push({ id: d.id, ...d.data() }));
+      }
       setAllJuryEvaluations(jList);
     } catch (err) {
       console.error("Error fetching promotion metrics:", err);
@@ -1141,7 +1208,35 @@ const EventManagementPage: React.FC = () => {
           promotionMethod: promotionMode,
           promotionScore: scoreUsed,
           promotedAt: now,
-          updatedAt: now
+          updatedAt: now,
+          // Archive previous submission data to prevent data loss while clearing UI for new round
+          [`r${promoteFromRound}_problemStatement`]: teamInfo?.problemStatement || "",
+          [`r${promoteFromRound}_selectedProblemStatementId`]: teamInfo?.selectedProblemStatementId || "",
+          [`r${promoteFromRound}_srsFileName`]: teamInfo?.srsFileName || "",
+          [`r${promoteFromRound}_srsFileUrl`]: teamInfo?.srsFileUrl || "",
+          [`r${promoteFromRound}_presentationFileName`]: teamInfo?.presentationFileName || "",
+          [`r${promoteFromRound}_presentationUrl`]: teamInfo?.presentationUrl || "",
+          [`r${promoteFromRound}_keyFeatures`]: teamInfo?.keyFeatures || "",
+          [`r${promoteFromRound}_githubUrl`]: teamInfo?.githubUrl || teamInfo?.repoUrl || "",
+          [`r${promoteFromRound}_repoUrl`]: teamInfo?.repoUrl || teamInfo?.githubUrl || "",
+          [`r${promoteFromRound}_prototypeUrl`]: teamInfo?.prototypeUrl || "",
+          [`r${promoteFromRound}_demoVideoUrl`]: teamInfo?.demoVideoUrl || "",
+          // Clear active submission fields so they can start fresh in the new round
+          problemStatement: "",
+          selectedProblemStatementId: "",
+          srsFileName: "",
+          srsFileUrl: "",
+          presentationFileName: "",
+          presentationUrl: "",
+          keyFeatures: "",
+          githubUrl: "",
+          repoUrl: "",
+          prototypeUrl: "",
+          demoVideoUrl: "",
+          submissionStatus: "Pending",
+          submittedAt: null,
+          isPsSaved: false,
+          isPsLocked: false
         });
       });
 
@@ -1379,9 +1474,28 @@ const EventManagementPage: React.FC = () => {
       return;
     }
 
+    const confirmedTeams = eventAccessRegistrations.filter(
+      (r) => String(r.status || "").toLowerCase().trim() === "confirmed"
+    );
+
+    if (confirmedTeams.length === 0) {
+      await showAlert({
+        title: "No Confirmed Teams",
+        message: "There are no confirmed team registrations for this event yet. Please confirm the team(s) in the Registration Directory before granting portal login access.",
+        type: "warning",
+        icon: "alert"
+      });
+      return;
+    }
+
+    const unconfirmedCount = eventAccessRegistrations.length - confirmedTeams.length;
+    const confirmMsg = unconfirmedCount > 0
+      ? `Allow login access for ${confirmedTeams.length} confirmed team(s)? Note: ${unconfirmedCount} unconfirmed team(s) will not be granted access until they are confirmed in the Registration Directory.`
+      : `Are you sure you want to allow login access for all ${confirmedTeams.length} confirmed registered team(s)?`;
+
     const confirmGrant = await showConfirm({
       title: "Allow Login Access?",
-      message: "Are you sure you want to allow login access for all registered teams? Their credentials were created during registration.",
+      message: confirmMsg,
       confirmText: "Allow Access",
       cancelText: "Cancel",
       type: "warning",
@@ -1396,8 +1510,8 @@ const EventManagementPage: React.FC = () => {
       const firestoreRegUpdates: Array<{ id: string; data: any }> = [];
       const now = Date.now();
 
-      // 1. Prepare all records synchronously in memory (0ms)
-      for (const reg of eventAccessRegistrations) {
+      // 1. Prepare all confirmed records synchronously in memory
+      for (const reg of confirmedTeams) {
         allIds.push(reg.id);
 
         // Registration doc update in Firestore
@@ -1430,7 +1544,12 @@ const EventManagementPage: React.FC = () => {
 
       // Execute all Firestore batch writes concurrently
       await Promise.allSettled([
-        commitBatches("registrations", firestoreRegUpdates)
+        commitBatches("registrations", firestoreRegUpdates),
+        ...confirmedTeams.map(reg => updateRegistration(reg.id, {
+          accessGranted: true,
+          loginAccessGranted: true,
+          accessProvisionedAt: now
+        }).catch(() => null))
       ]);
 
       if (eventAccessEvent?.id) {
@@ -1443,7 +1562,7 @@ const EventManagementPage: React.FC = () => {
 
       setProvisionedTeamIds((prev) => Array.from(new Set([...prev, ...allIds])));
 
-      setLoginAccessSuccessMsg(`✅ Successfully granted login access for ${allIds.length} participant(s)!`);
+      setLoginAccessSuccessMsg(`✅ Successfully granted login access for ${allIds.length} confirmed team(s)!`);
       setTimeout(() => {
         setLoginAccessSuccessMsg(null);
       }, 5000);
@@ -1520,7 +1639,12 @@ const EventManagementPage: React.FC = () => {
       };
 
       await Promise.allSettled([
-        commitBatches("registrations", firestoreRegUpdates)
+        commitBatches("registrations", firestoreRegUpdates),
+        ...eventAccessRegistrations.map(reg => updateRegistration(reg.id, {
+          accessGranted: false,
+          loginAccessGranted: false,
+          accessRevokedAt: now
+        }).catch(() => null))
       ]);
 
       // Concurrent delete in Supabase
@@ -1561,6 +1685,42 @@ const EventManagementPage: React.FC = () => {
     }
   };
 
+  const handleGrantSingleTeamAccess = async (regId: string, teamNameStr: string) => {
+    setIsProvisioningLoginAccess(true);
+    try {
+      const now = Date.now();
+      const regRef = doc(db, "registrations", regId);
+      await updateDoc(regRef, {
+        accessGranted: true,
+        loginAccessGranted: true,
+        accessProvisionedAt: now,
+        updatedAt: now
+      });
+
+      try {
+        await updateRegistration(regId, {
+          accessGranted: true,
+          loginAccessGranted: true,
+          accessProvisionedAt: now
+        });
+      } catch (apiErr) {
+        console.warn("Notice updating registration via API:", apiErr);
+      }
+
+      setProvisionedTeamIds((prev) => Array.from(new Set([...prev, regId])));
+      setEventAccessRegistrations((prev) =>
+        prev.map((r) => (r.id === regId ? { ...r, accessGranted: true, loginAccessGranted: true } : r))
+      );
+      setLoginAccessSuccessMsg(`✅ Login access granted for "${teamNameStr}".`);
+      setTimeout(() => setLoginAccessSuccessMsg(null), 4000);
+    } catch (err) {
+      console.error("Error granting single team access:", err);
+      alert("Failed to grant login access for team.");
+    } finally {
+      setIsProvisioningLoginAccess(false);
+    }
+  };
+
   const handleRevokeSingleTeamAccess = async (regId: string, teamNameStr: string) => {
     const confirmRevoke = await showConfirm({
       title: "Revoke Login Access?",
@@ -1578,6 +1738,17 @@ const EventManagementPage: React.FC = () => {
         loginAccessGranted: false,
         accessRevokedAt: Date.now(),
       });
+
+      try {
+        await updateRegistration(regId, {
+          accessGranted: false,
+          loginAccessGranted: false,
+          accessRevokedAt: Date.now()
+        });
+      } catch (apiErr) {
+        console.warn("Notice updating registration via API:", apiErr);
+      }
+
       // Also revoke in users collection & users_by_phone
       try {
         const reg = eventAccessRegistrations.find((r) => r.id === regId);
@@ -1638,16 +1809,25 @@ const EventManagementPage: React.FC = () => {
       setSearchParams(newParams, { replace: true });
     }
     try {
-      const querySnapshot = await getDocs(collection(db, "registrations"));
+      const rawRegs = await fetchRegistrations().catch(() => []);
+      let snapshot = Array.isArray(rawRegs) ? rawRegs : (rawRegs?.registrations || rawRegs?.data || []);
+      if (snapshot.length === 0) {
+        const querySnapshot = await getDocs(collection(db, "registrations")).catch(() => null);
+        if (querySnapshot && querySnapshot.forEach) {
+          const fbList: any[] = [];
+          querySnapshot.forEach((docSnap: any) => fbList.push({ id: docSnap.id, ...docSnap.data() }));
+          snapshot = fbList;
+        }
+      }
+
       const list: any[] = [];
       const grantedIds: string[] = [];
       const curEid = (eventObj?.id ? String(eventObj.id) : "").trim();
       const curTitle = (eventObj?.title || "").toLowerCase().trim();
       const cleanCurEid = curEid.replace(/[Il]/g, "i").toLowerCase();
 
-      querySnapshot.forEach((docSnap) => {
-        const data = docSnap.data();
-        const regId = docSnap.id;
+      snapshot.forEach((data: any) => {
+        const regId = data.id || data._id;
         const regEid = (data.eventId ? String(data.eventId) : "").trim();
         const regTitle = (data.eventTitle || "").toLowerCase().trim();
 
@@ -1662,7 +1842,8 @@ const EventManagementPage: React.FC = () => {
 
         if (isIdMatch || isTitleMatch) {
           list.push({ id: regId, ...data });
-          if (data.accessGranted || data.loginAccessGranted) {
+          const isConfirmed = String(data.status || "").toLowerCase().trim() === "confirmed";
+          if (isConfirmed && (data.accessGranted || data.loginAccessGranted)) {
             grantedIds.push(regId);
           }
         }
@@ -3442,16 +3623,25 @@ const EventManagementPage: React.FC = () => {
 
                                 <div>
                                   <label className="block text-[9px] font-bold text-slate-400 uppercase tracking-wider mb-1">Stage Type</label>
-                                  <input
-                                    type="text"
-                                    placeholder="e.g. Screening, Quiz, Hackathon, Finals"
-                                    value={round.type}
+                                  <select
+                                    value={round.type || "Screening"}
                                     onChange={(e) => {
                                       const val = e.target.value;
                                       setFormRounds(prev => prev.map((r, i) => i === idx ? { ...r, type: val } : r));
                                     }}
                                     className="w-full px-3 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-indigo-500 font-medium text-xs text-slate-800 bg-white"
-                                  />
+                                  >
+                                    {/* Default or existing custom value if it doesn't match the predefined list */}
+                                    {!["Quiz", "Ideation & Video Submission", "Hackathon", "Screening", "Assessment", "Finals"].includes(round.type) && round.type && (
+                                      <option value={round.type}>{round.type}</option>
+                                    )}
+                                    <option value="Screening">Screening</option>
+                                    <option value="Quiz">Quiz</option>
+                                    <option value="Ideation & Video Submission">Ideation & Video Submission</option>
+                                    <option value="Hackathon">Hackathon</option>
+                                    <option value="Assessment">Assessment</option>
+                                    <option value="Finals">Finals</option>
+                                  </select>
                                 </div>
                               </div>
 
@@ -6379,7 +6569,8 @@ const EventManagementPage: React.FC = () => {
                           <tbody className="divide-y divide-slate-100">
                             {filteredEventAccessRegistrations.map((reg, idx) => {
                               const isGroup = reg.groupName && reg.groupName !== "Individual RSVP";
-                              const isProvisioned = provisionedTeamIds.includes(reg.id);
+                              const isConfirmed = String(reg.status || "").toLowerCase().trim() === "confirmed";
+                              const isProvisioned = isConfirmed && provisionedTeamIds.includes(reg.id);
                               const displayTeamName = isGroup ? reg.groupName : (reg.teamLeadName || reg.name || "Individual Participant");
 
                               return (
@@ -6441,7 +6632,21 @@ const EventManagementPage: React.FC = () => {
 
                                   {/* Login Access Status */}
                                   <td className="py-3.5 px-4 text-right">
-                                    {isProvisioned ? (
+                                    {!isConfirmed ? (
+                                      <div className="inline-flex items-center gap-1.5 justify-end">
+                                        <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200 inline-flex items-center gap-1 shadow-2xs" title="Registration must be confirmed in the Registration Directory before login access can be granted.">
+                                          <Lock className="h-3 w-3 text-amber-600" />
+                                          NOT CONFIRMED
+                                        </span>
+                                        <button
+                                          onClick={() => navigate("/faculty/registrations")}
+                                          className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-blue-50 hover:bg-blue-100 text-[#2563EB] border border-blue-200 transition-all cursor-pointer active:scale-95 shadow-2xs"
+                                          title="Go to Registration Directory to confirm this team"
+                                        >
+                                          Confirm
+                                        </button>
+                                      </div>
+                                    ) : isProvisioned ? (
                                       <div className="inline-flex items-center gap-1.5 justify-end">
                                         <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-200 inline-flex items-center gap-1 shadow-2xs">
                                           <Check className="h-3 w-3 text-emerald-600" />
@@ -6457,10 +6662,20 @@ const EventManagementPage: React.FC = () => {
                                         </button>
                                       </div>
                                     ) : (
-                                      <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200 inline-flex items-center gap-1 shadow-2xs">
-                                        <Lock className="h-3 w-3 text-amber-600" />
-                                        PENDING
-                                      </span>
+                                      <div className="inline-flex items-center gap-1.5 justify-end">
+                                        <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-slate-100 text-slate-700 border border-slate-200 inline-flex items-center gap-1 shadow-2xs">
+                                          <Lock className="h-3 w-3 text-slate-500" />
+                                          PENDING
+                                        </span>
+                                        <button
+                                          onClick={() => handleGrantSingleTeamAccess(reg.id, displayTeamName)}
+                                          disabled={isProvisioningLoginAccess}
+                                          className="px-2.5 py-0.5 rounded-md text-[9px] font-extrabold bg-blue-50 hover:bg-blue-100 text-[#2563EB] border border-blue-200 transition-all cursor-pointer active:scale-95 shadow-2xs"
+                                          title="Allow login access for this confirmed team"
+                                        >
+                                          Allow Access
+                                        </button>
+                                      </div>
                                     )}
                                   </td>
                                 </tr>
@@ -6508,7 +6723,7 @@ const EventManagementPage: React.FC = () => {
                     </div>
 
                     <p className="text-xs text-slate-600 font-medium leading-relaxed">
-                      Grant team portal authentication credentials, generate passkeys, and send instant login access links to all registered team leads and members.
+                      Grant team portal authentication credentials, generate passkeys, and send instant login access links to confirmed team leads and members.
                     </p>
 
                     <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100 space-y-2.5 text-xs">
@@ -6517,33 +6732,48 @@ const EventManagementPage: React.FC = () => {
                         <span className="font-extrabold text-slate-800 truncate max-w-[150px]">{eventAccessEvent?.title || "Active Event"}</span>
                       </div>
                       <div className="flex justify-between items-center">
-                        <span className="text-[10px] font-bold text-slate-400 uppercase">Total Teams / Seats</span>
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">Total Registered</span>
                         <span className="font-extrabold text-blue-600">{eventAccessRegistrations.length} Teams</span>
                       </div>
                       <div className="flex justify-between items-center">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">Confirmed Teams</span>
+                        <span className="font-extrabold text-indigo-600">
+                          {eventAccessRegistrations.filter(r => String(r.status || "").toLowerCase().trim() === "confirmed").length} / {eventAccessRegistrations.length}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
                         <span className="text-[10px] font-bold text-slate-400 uppercase">Access Granted</span>
-                        <span className="font-extrabold text-emerald-600">{provisionedTeamIds.length} / {eventAccessRegistrations.length}</span>
+                        <span className="font-extrabold text-emerald-600">
+                          {provisionedTeamIds.length} / {eventAccessRegistrations.filter(r => String(r.status || "").toLowerCase().trim() === "confirmed").length}
+                        </span>
                       </div>
                     </div>
 
                     <div className="space-y-3">
-                      <button
-                        onClick={handleEnableLoginAccess}
-                        disabled={isProvisioningLoginAccess || eventAccessRegistrations.length === 0}
-                        className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-300 disabled:to-slate-300 text-white font-black rounded-2xl text-xs sm:text-sm transition-all shadow-md shadow-blue-500/25 active:scale-95 flex items-center justify-center gap-2 cursor-pointer text-center leading-snug border border-blue-400/30"
-                      >
-                        {isProvisioningLoginAccess ? (
-                          <>
-                            <Loader2 className="h-4.5 w-4.5 animate-spin" />
-                            Granting Access...
-                          </>
-                        ) : (
-                          <>
-                            <UserCheck className="h-5 w-5" />
-                            {provisionedTeamIds.length > 0 ? "Update / Re-grant Login Access" : "Allow to Login"}
-                          </>
-                        )}
-                      </button>
+                      {(() => {
+                        const confirmedCount = eventAccessRegistrations.filter(r => String(r.status || "").toLowerCase().trim() === "confirmed").length;
+                        const pendingCount = Math.max(0, confirmedCount - provisionedTeamIds.length);
+                        const isAllGranted = provisionedTeamIds.length >= confirmedCount && confirmedCount > 0;
+                        return (
+                          <button
+                            onClick={handleEnableLoginAccess}
+                            disabled={isProvisioningLoginAccess || confirmedCount === 0}
+                            className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-300 disabled:to-slate-300 text-white font-black rounded-2xl text-xs sm:text-sm transition-all shadow-md shadow-blue-500/25 active:scale-95 flex items-center justify-center gap-2 cursor-pointer text-center leading-snug border border-blue-400/30"
+                          >
+                            {isProvisioningLoginAccess ? (
+                              <>
+                                <Loader2 className="h-4.5 w-4.5 animate-spin" />
+                                Granting Access...
+                              </>
+                            ) : (
+                              <>
+                                <UserCheck className="h-5 w-5" />
+                                {isAllGranted ? "Update / Re-grant Login Access" : pendingCount > 0 ? `Allow to Login (${pendingCount} Confirmed)` : "Allow to Login"}
+                              </>
+                            )}
+                          </button>
+                        );
+                      })()}
 
                       {provisionedTeamIds.length > 0 && (
                         <button
@@ -6651,7 +6881,33 @@ const EventManagementPage: React.FC = () => {
                   </div>
 
                   <form onSubmit={handleAddOrUpdateProblemItem} className="space-y-3">
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div className="col-span-1 space-y-1">
+                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Assign to Round</label>
+                        <select
+                          value={psRoundInput}
+                          onChange={(e) => setPsRoundInput(e.target.value)}
+                          className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all cursor-pointer"
+                        >
+                          <option value="all">All Rounds (General)</option>
+                          {(() => {
+                            const rounds = eventAccessEvent?.rounds || liveRoundsList || [];
+                            if (rounds.length > 0) {
+                              return rounds.map((r: any, rIdx: number) => {
+                                const rNum = Number(r.roundNumber) || rIdx + 1;
+                                return (
+                                  <option key={rNum} value={rNum}>
+                                    Round {rNum} — {r.name || `Stage ${rNum}`}
+                                  </option>
+                                );
+                              });
+                            }
+                            return [1, 2, 3].map(n => (
+                              <option key={n} value={n}>Round {n}</option>
+                            ));
+                          })()}
+                        </select>
+                      </div>
                       <div className="col-span-1 space-y-1">
                         <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">PS Code</label>
                         <input
@@ -6663,7 +6919,7 @@ const EventManagementPage: React.FC = () => {
                           required
                         />
                       </div>
-                      <div className="col-span-2 space-y-1">
+                      <div className="col-span-1 space-y-1">
                         <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Track / Category</label>
                         <input
                           type="text"
@@ -6723,7 +6979,7 @@ const EventManagementPage: React.FC = () => {
 
                 {/* Right Column: List of Problem Statements (Span 7) */}
                 <div className="lg:col-span-7 space-y-4 text-left">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
                     <div className="flex items-center gap-2.5">
                       <h4 className="text-base font-black text-slate-900 tracking-tight">
                         Listed Problem Statements ({problemList.length})
@@ -6732,81 +6988,130 @@ const EventManagementPage: React.FC = () => {
                         Live Roster
                       </span>
                     </div>
-                    <span className="text-xs text-slate-500 font-medium">
-                      Teams will select from these options
-                    </span>
+                    
+                    {/* Round Filter Tabs */}
+                    <div className="flex items-center gap-1.5 overflow-x-auto pb-1">
+                      <button
+                        type="button"
+                        onClick={() => setProblemRoundFilter("all")}
+                        className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                          problemRoundFilter === "all" ? "bg-blue-600 text-white shadow-xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        All ({problemList.length})
+                      </button>
+                      {(() => {
+                        const rounds = eventAccessEvent?.rounds || liveRoundsList || [];
+                        const rList = rounds.length > 0 ? rounds.map((r: any, i: number) => Number(r.roundNumber) || i + 1) : [1, 2, 3];
+                        return rList.map((rNum: number) => {
+                          const count = problemList.filter(p => String(p.round) === String(rNum)).length;
+                          return (
+                            <button
+                              key={rNum}
+                              type="button"
+                              onClick={() => setProblemRoundFilter(String(rNum))}
+                              className={`px-2.5 py-1 rounded-xl text-xs font-bold transition-all whitespace-nowrap cursor-pointer ${
+                                problemRoundFilter === String(rNum) ? "bg-blue-600 text-white shadow-xs" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                              }`}
+                            >
+                              Round {rNum} ({count})
+                            </button>
+                          );
+                        });
+                      })()}
+                    </div>
                   </div>
 
-                  {problemList.length === 0 ? (
-                    <div className="bg-white border-2 border-dashed border-slate-200 rounded-3xl p-12 text-center flex flex-col items-center justify-center space-y-3 shadow-xs">
-                      <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#2563EB] flex items-center justify-center shadow-inner">
-                        <Sparkles className="w-7 h-7" />
-                      </div>
-                      <div className="space-y-1">
-                        <p className="text-base font-black text-slate-900">No Problem Statements Added Yet</p>
-                        <p className="text-xs text-slate-500 max-w-sm font-medium">Use the form on the left to create and add problem statements for participating teams.</p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      {problemList.map((item, idx) => (
-                        <div
-                          key={item.id || idx}
-                          className="bg-white p-6 sm:p-7 rounded-3xl border border-slate-200/90 shadow-sm hover:shadow-md hover:border-blue-400/80 transition-all space-y-4 relative group overflow-hidden border-l-4 border-l-[#2563EB]"
-                        >
-                          {/* Top Meta Bar */}
-                          <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
-                            <div className="flex items-center gap-2.5 flex-wrap">
-                              <span className="px-3.5 py-1 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black text-xs shadow-xs tracking-wider">
-                                {item.code || `PS-0${idx + 1}`}
-                              </span>
-                              <span className="px-3.5 py-1 rounded-xl bg-slate-100 text-slate-700 font-extrabold text-xs border border-slate-200/80">
-                                {item.track || "General Track"}
-                              </span>
-                            </div>
+                  {(() => {
+                    const filteredPsList = problemList.filter(p => {
+                      if (problemRoundFilter === "all") return true;
+                      return String(p.round) === String(problemRoundFilter);
+                    });
 
-                            <div className="flex items-center gap-1.5">
-                              <button
-                                type="button"
-                                onClick={() => handleEditProblemItem(item)}
-                                className="p-2 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 border border-transparent hover:border-blue-100 transition-all cursor-pointer"
-                                title="Edit Problem Statement"
-                              >
-                                <Pencil className="w-4 h-4" />
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => handleDeleteProblemItem(item.id)}
-                                className="p-2 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-100 transition-all cursor-pointer"
-                                title="Delete Problem Statement"
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </button>
-                            </div>
+                    if (filteredPsList.length === 0) {
+                      return (
+                        <div className="bg-white border-2 border-dashed border-slate-200 rounded-3xl p-12 text-center flex flex-col items-center justify-center space-y-3 shadow-xs">
+                          <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#2563EB] flex items-center justify-center shadow-inner">
+                            <Sparkles className="w-7 h-7" />
                           </div>
-
-                          {/* Title & Description */}
-                          <div className="space-y-2">
-                            <div className="flex items-center justify-between">
-                              <h5 className="text-lg font-black text-slate-900 tracking-tight">{item.title}</h5>
-                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">DETAILED DESCRIPTION</span>
-                            </div>
-                            <div className="text-xs text-slate-700 font-medium leading-relaxed bg-slate-50/80 p-4 sm:p-5 rounded-2xl border border-slate-200/80 whitespace-pre-wrap break-words select-text shadow-2xs">
-                              {item.description}
-                            </div>
+                          <div className="space-y-1">
+                            <p className="text-base font-black text-slate-900">
+                              {problemRoundFilter === "all" ? "No Problem Statements Added Yet" : `No Statements Added for Round ${problemRoundFilter}`}
+                            </p>
+                            <p className="text-xs text-slate-500 max-w-sm font-medium">Use the form on the left to create and assign new problem statements for Round {problemRoundFilter === "all" ? (eventAccessEvent?.currentRound || 1) : problemRoundFilter}.</p>
                           </div>
-
-                          {/* Deliverables Section */}
-                          {item.deliverables && (
-                            <div className="px-4.5 py-3 rounded-2xl bg-blue-50/80 border border-blue-100/80 text-xs font-extrabold text-blue-950 flex items-center gap-2.5 shadow-2xs">
-                              <span className="text-[#2563EB]">🎯 Deliverables:</span>
-                              <span className="text-slate-800 font-semibold">{item.deliverables}</span>
-                            </div>
-                          )}
                         </div>
-                      ))}
-                    </div>
-                  )}
+                      );
+                    }
+
+                    return (
+                      <div className="space-y-4">
+                        {filteredPsList.map((item, idx) => (
+                          <div
+                            key={item.id || idx}
+                            className="bg-white p-6 sm:p-7 rounded-3xl border border-slate-200/90 shadow-sm hover:shadow-md hover:border-blue-400/80 transition-all space-y-4 relative group overflow-hidden border-l-4 border-l-[#2563EB]"
+                          >
+                            {/* Top Meta Bar */}
+                            <div className="flex items-center justify-between gap-3 border-b border-slate-100 pb-3.5">
+                              <div className="flex items-center gap-2.5 flex-wrap">
+                                <span className="px-3.5 py-1 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-black text-xs shadow-xs tracking-wider">
+                                  {item.code || `PS-0${idx + 1}`}
+                                </span>
+                                <span className="px-3.5 py-1 rounded-xl bg-slate-100 text-slate-700 font-extrabold text-xs border border-slate-200/80">
+                                  {item.track || "General Track"}
+                                </span>
+                                <span className={`px-2.5 py-1 rounded-xl text-xs font-black border ${
+                                  item.round && item.round !== "all" 
+                                    ? "bg-indigo-50 text-indigo-700 border-indigo-200" 
+                                    : "bg-slate-100 text-slate-600 border-slate-200"
+                                }`}>
+                                  {item.round && item.round !== "all" ? `Round ${item.round}` : "All Rounds"}
+                                </span>
+                              </div>
+
+                              <div className="flex items-center gap-1.5">
+                                <button
+                                  type="button"
+                                  onClick={() => handleEditProblemItem(item)}
+                                  className="p-2 rounded-xl text-slate-400 hover:text-blue-600 hover:bg-blue-50 border border-transparent hover:border-blue-100 transition-all cursor-pointer"
+                                  title="Edit Problem Statement"
+                                >
+                                  <Pencil className="w-4 h-4" />
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => handleDeleteProblemItem(item.id)}
+                                  className="p-2 rounded-xl text-slate-400 hover:text-red-600 hover:bg-red-50 border border-transparent hover:border-red-100 transition-all cursor-pointer"
+                                  title="Delete Problem Statement"
+                                >
+                                  <Trash2 className="w-4 h-4" />
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Title & Description */}
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-between">
+                                <h5 className="text-lg font-black text-slate-900 tracking-tight">{item.title}</h5>
+                                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">DETAILED DESCRIPTION</span>
+                              </div>
+                              <div className="text-xs text-slate-700 font-medium leading-relaxed bg-slate-50/80 p-4 sm:p-5 rounded-2xl border border-slate-200/80 whitespace-pre-wrap break-words select-text shadow-2xs">
+                                {item.description}
+                              </div>
+                            </div>
+
+                            {/* Deliverables Section */}
+                            {item.deliverables && (
+                              <div className="px-4.5 py-3 rounded-2xl bg-blue-50/80 border border-blue-100/80 text-xs font-extrabold text-blue-950 flex items-center gap-2.5 shadow-2xs">
+                                <span className="text-[#2563EB]">🎯 Deliverables:</span>
+                                <span className="text-slate-800 font-semibold">{item.deliverables}</span>
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             </div>
@@ -8109,19 +8414,31 @@ const EventManagementPage: React.FC = () => {
             </div>
 
             <div className="flex items-center gap-3">
-              <div className="hidden md:flex items-center gap-3 bg-white/10 px-4 py-2 rounded-2xl border border-white/15 text-xs font-black">
-                <span className="text-emerald-400 flex items-center gap-1">
-                  <Check className="w-3.5 h-3.5" />
-                  {eventAccessRegistrations.filter(r => r.submissionStatus === "Submitted" || r.submittedAt).length} Final Submitted
-                </span>
-                <span className="text-white/30">|</span>
-                <span className="text-amber-300 flex items-center gap-1">
-                  <Sparkles className="w-3.5 h-3.5" />
-                  {eventAccessRegistrations.filter(r => r.submissionStatus === "Draft" || (r.problemStatement && r.submissionStatus !== "Submitted")).length} Drafts
-                </span>
-                <span className="text-white/30">|</span>
-                <span className="text-slate-200">Total: {eventAccessRegistrations.length} Teams</span>
-              </div>
+              {(() => {
+                const cR = eventAccessEvent?.currentRound || 1;
+                const viewR = matrixViewRound > 0 ? matrixViewRound : cR;
+                const viewRPrefix = `r${viewR}_`;
+                const isSubForViewRound = (r: any) => (r as any)[`${viewRPrefix}submissionStatus`] === "Submitted" || !!(r as any)[`${viewRPrefix}submittedAt`] || (r.submissionRound === viewR && (r.submissionStatus === "Submitted" || !!r.submittedAt));
+                const isDraftForViewRound = (r: any) => !isSubForViewRound(r) && !!((r as any)[`${viewRPrefix}problemStatement`] || (r.submissionRound === viewR && r.problemStatement));
+                const countSubmitted = eventAccessRegistrations.filter(isSubForViewRound).length;
+                const countDrafts = eventAccessRegistrations.filter(isDraftForViewRound).length;
+
+                return (
+                  <div className="hidden md:flex items-center gap-3 bg-white/10 px-4 py-2 rounded-2xl border border-white/15 text-xs font-black">
+                    <span className="text-emerald-400 flex items-center gap-1">
+                      <Check className="w-3.5 h-3.5" />
+                      {countSubmitted} Final Submitted
+                    </span>
+                    <span className="text-white/30">|</span>
+                    <span className="text-amber-300 flex items-center gap-1">
+                      <Sparkles className="w-3.5 h-3.5" />
+                      {countDrafts} Drafts
+                    </span>
+                    <span className="text-white/30">|</span>
+                    <span className="text-slate-200">Total: {eventAccessRegistrations.length} Teams</span>
+                  </div>
+                );
+              })()}
 
               <button
                 type="button"
@@ -8149,35 +8466,56 @@ const EventManagementPage: React.FC = () => {
 
             {/* Filter Tabs & Search Header Toolbar */}
             <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col lg:flex-row items-center justify-between gap-4 shrink-0">
-              {/* Filter Tabs */}
+              {/* Filter Tabs & Round Info */}
               <div className="flex items-center gap-2 overflow-x-auto w-full lg:w-auto">
-                {(["All", "Submitted", "Draft", "Pending"] as const).map((filter) => {
-                  const count = filter === "All"
-                    ? eventAccessRegistrations.length
-                    : filter === "Submitted"
-                      ? eventAccessRegistrations.filter(r => r.submissionStatus === "Submitted" || r.submittedAt).length
-                      : filter === "Draft"
-                        ? eventAccessRegistrations.filter(r => r.submissionStatus === "Draft" || (r.problemStatement && r.submissionStatus !== "Submitted")).length
-                        : eventAccessRegistrations.filter(r => !r.problemStatement && !r.submittedAt).length;
+                <button
+                  type="button"
+                  onClick={() => setSubmissionsFilter("All")}
+                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${submissionsFilter === "All"
+                      ? "bg-[#2563EB] text-white shadow-md shadow-blue-500/20"
+                      : "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200"
+                    }`}
+                >
+                  <span>All Teams</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] ${submissionsFilter === "All" ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700 font-black"
+                    }`}>
+                    {eventAccessRegistrations.length}
+                  </span>
+                </button>
 
-                  return (
-                    <button
-                      key={filter}
-                      type="button"
-                      onClick={() => setSubmissionsFilter(filter)}
-                      className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${submissionsFilter === filter
-                          ? "bg-[#2563EB] text-white shadow-md shadow-blue-500/20"
-                          : "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200"
-                        }`}
-                    >
-                      <span>{filter} Teams</span>
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] ${submissionsFilter === filter ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700 font-black"
-                        }`}>
-                        {count}
-                      </span>
-                    </button>
-                  );
-                })}
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="w-4 h-4 rounded-full bg-indigo-200/50 flex items-center justify-center text-indigo-600 font-black text-[10px]">i</span>
+                  <span className="opacity-70 font-semibold uppercase tracking-wider text-[10px] mr-1">View Round:</span>
+                  <select
+                    value={matrixViewRound}
+                    onChange={(e) => setMatrixViewRound(Number(e.target.value))}
+                    className="px-3 py-2 rounded-xl bg-white border border-indigo-200 text-xs font-black text-indigo-900 focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer shadow-sm min-w-[160px]"
+                  >
+                    <option value={0}>
+                      {(() => {
+                        const cR = eventAccessEvent?.currentRound || 1;
+                        const activeR = (eventAccessEvent?.rounds || []).find((r: any) => r.roundNumber === cR);
+                        const typeName = activeR?.type || eventAccessEvent?.stageType || "Hackathon";
+                        return `Round ${cR} — ${typeName} (Current)`;
+                      })()}
+                    </option>
+                    {(() => {
+                      const cR = eventAccessEvent?.currentRound || 1;
+                      const rounds = eventAccessEvent?.rounds || [];
+                      const pastOptions: any[] = [];
+                      for (let r = 1; r < cR; r++) {
+                        const roundDef = rounds.find((rd: any) => rd.roundNumber === r);
+                        const roundTypeName = roundDef?.type || `Round ${r}`;
+                        pastOptions.push(
+                          <option key={r} value={r}>
+                            Round {r} — {roundTypeName} (Past)
+                          </option>
+                        );
+                      }
+                      return pastOptions;
+                    })()}
+                  </select>
+                </div>
               </div>
 
               {/* Legend & Search */}
@@ -8210,6 +8548,18 @@ const EventManagementPage: React.FC = () => {
             {/* Submissions Roster Matrix Table Container */}
             <div className="bg-white rounded-3xl border border-slate-200/90 shadow-sm overflow-hidden flex-1 flex flex-col">
               {(() => {
+                const cR = eventAccessEvent?.currentRound || 1;
+                // If viewing a past round, use that round's type. Otherwise use current round's type.
+                const viewRound = matrixViewRound > 0 ? matrixViewRound : cR;
+                const activeR = (eventAccessEvent?.rounds || []).find((r: any) => r.roundNumber === viewRound);
+                const currentMatrixStageType = activeR?.type || eventAccessEvent?.stageType;
+                const isIdeationRound = currentMatrixStageType === "Ideation & Video Submission" || currentMatrixStageType === "Ideation" || currentMatrixStageType === "Video Submission";
+                const viewRPrefix = `r${viewRound}_`;
+
+                const isRegSubmittedForRound = (reg: any) => (reg as any)[`${viewRPrefix}submissionStatus`] === "Submitted" || !!(reg as any)[`${viewRPrefix}submittedAt`] || (reg.submissionRound === viewRound && (reg.submissionStatus === "Submitted" || !!reg.submittedAt));
+                const isRegDraftForRound = (reg: any) => !isRegSubmittedForRound(reg) && !!((reg as any)[`${viewRPrefix}problemStatement`] || (reg.submissionRound === viewRound && reg.problemStatement));
+                const isRegPendingForRound = (reg: any) => !isRegSubmittedForRound(reg) && !isRegDraftForRound(reg);
+
                 const filteredList = eventAccessRegistrations.filter((reg) => {
                   const matchSearch = !submissionsSearchQuery ||
                     (reg.groupName || "").toLowerCase().includes(submissionsSearchQuery.toLowerCase()) ||
@@ -8217,9 +8567,9 @@ const EventManagementPage: React.FC = () => {
                     (reg.problemStatement || "").toLowerCase().includes(submissionsSearchQuery.toLowerCase()) ||
                     (reg.teamLeadStudentId || reg.studentId || "").toLowerCase().includes(submissionsSearchQuery.toLowerCase());
 
-                  const isSubmitted = reg.submissionStatus === "Submitted" || !!reg.submittedAt;
-                  const isDraft = reg.submissionStatus === "Draft" || (!!reg.problemStatement && !isSubmitted);
-                  const isPending = !reg.problemStatement && !isSubmitted;
+                  const isSubmitted = isRegSubmittedForRound(reg);
+                  const isDraft = isRegDraftForRound(reg);
+                  const isPending = isRegPendingForRound(reg);
 
                   if (submissionsFilter === "Submitted") return matchSearch && isSubmitted;
                   if (submissionsFilter === "Draft") return matchSearch && isDraft;
@@ -8254,10 +8604,11 @@ const EventManagementPage: React.FC = () => {
                           <th className="py-4 px-3 border-b border-slate-800 text-center w-[12%]">
                             {(() => {
                               const isLocked = !!eventAccessEvent?.lockedSteps?.[1];
+                              const stepName = isIdeationRound ? "Ideation Description" : "Problem Statement";
                               return (
                                 <button
                                   type="button"
-                                  onClick={() => setStepLockTarget({ stepId: 1, name: "Problem Statement" })}
+                                  onClick={() => setStepLockTarget({ stepId: 1, name: stepName })}
                                   className={`p-3 rounded-2xl border space-y-1 shadow-inner inline-block w-full text-center transition-all cursor-pointer hover:scale-105 active:scale-95 ${
                                     isLocked 
                                       ? "bg-amber-950/90 border-amber-500/90 ring-2 ring-amber-500/30" 
@@ -8269,7 +8620,7 @@ const EventManagementPage: React.FC = () => {
                                     <span className="text-[10px] font-black uppercase text-blue-400 tracking-wider">STEP 1</span>
                                     <Lock className={`w-3 h-3 ${isLocked ? "text-amber-400" : "text-slate-500 opacity-50"}`} />
                                   </div>
-                                  <span className="text-xs font-black text-white block truncate">Problem Statement</span>
+                                  <span className="text-xs font-black text-white block truncate">{stepName}</span>
                                   <span className={`text-[9px] font-extrabold uppercase tracking-widest block ${isLocked ? "text-amber-400" : "text-slate-400"}`}>
                                     {isLocked ? "🔒 LOCKED" : "🔓 UNLOCKED"}
                                   </span>
@@ -8282,10 +8633,11 @@ const EventManagementPage: React.FC = () => {
                           <th className="py-4 px-3 border-b border-slate-800 text-center w-[12%]">
                             {(() => {
                               const isLocked = !!eventAccessEvent?.lockedSteps?.[2];
+                              const stepName = isIdeationRound ? "Video Submission" : "SRS Submission";
                               return (
                                 <button
                                   type="button"
-                                  onClick={() => setStepLockTarget({ stepId: 2, name: "SRS Submission" })}
+                                  onClick={() => setStepLockTarget({ stepId: 2, name: stepName })}
                                   className={`p-3 rounded-2xl border space-y-1 shadow-inner inline-block w-full text-center transition-all cursor-pointer hover:scale-105 active:scale-95 ${
                                     isLocked 
                                       ? "bg-amber-950/90 border-amber-500/90 ring-2 ring-amber-500/30" 
@@ -8297,7 +8649,7 @@ const EventManagementPage: React.FC = () => {
                                     <span className="text-[10px] font-black uppercase text-purple-400 tracking-wider">STEP 2</span>
                                     <Lock className={`w-3 h-3 ${isLocked ? "text-amber-400" : "text-slate-500 opacity-50"}`} />
                                   </div>
-                                  <span className="text-xs font-black text-white block truncate">SRS Submission</span>
+                                  <span className="text-xs font-black text-white block truncate">{stepName}</span>
                                   <span className={`text-[9px] font-extrabold uppercase tracking-widest block ${isLocked ? "text-amber-400" : "text-slate-400"}`}>
                                     {isLocked ? "🔒 LOCKED" : "🔓 UNLOCKED"}
                                   </span>
@@ -8306,117 +8658,121 @@ const EventManagementPage: React.FC = () => {
                             })()}
                           </th>
 
-                          {/* Column 3 Square */}
-                          <th className="py-4 px-3 border-b border-slate-800 text-center w-[12%]">
-                            {(() => {
-                              const isLocked = !!eventAccessEvent?.lockedSteps?.[3];
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => setStepLockTarget({ stepId: 3, name: "PPT Submission" })}
-                                  className={`p-3 rounded-2xl border space-y-1 shadow-inner inline-block w-full text-center transition-all cursor-pointer hover:scale-105 active:scale-95 ${
-                                    isLocked 
-                                      ? "bg-amber-950/90 border-amber-500/90 ring-2 ring-amber-500/30" 
-                                      : "bg-slate-800/90 border-slate-700/80 hover:border-slate-500"
-                                  }`}
-                                  title={isLocked ? "Step 3 is LOCKED. Click to Unlock for participants." : "Click to LOCK Step 3 for participants."}
-                                >
-                                  <div className="flex items-center justify-center gap-1">
-                                    <span className="text-[10px] font-black uppercase text-pink-400 tracking-wider">STEP 3</span>
-                                    <Lock className={`w-3 h-3 ${isLocked ? "text-amber-400" : "text-slate-500 opacity-50"}`} />
-                                  </div>
-                                  <span className="text-xs font-black text-white block truncate">PPT Submission</span>
-                                  <span className={`text-[9px] font-extrabold uppercase tracking-widest block ${isLocked ? "text-amber-400" : "text-slate-400"}`}>
-                                    {isLocked ? "🔒 LOCKED" : "🔓 UNLOCKED"}
-                                  </span>
-                                </button>
-                              );
-                            })()}
-                          </th>
+                          {!isIdeationRound && (
+                            <>
+                              {/* Column 3 Square */}
+                              <th className="py-4 px-3 border-b border-slate-800 text-center w-[12%]">
+                                {(() => {
+                                  const isLocked = !!eventAccessEvent?.lockedSteps?.[3];
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => setStepLockTarget({ stepId: 3, name: "PPT Submission" })}
+                                      className={`p-3 rounded-2xl border space-y-1 shadow-inner inline-block w-full text-center transition-all cursor-pointer hover:scale-105 active:scale-95 ${
+                                        isLocked 
+                                          ? "bg-amber-950/90 border-amber-500/90 ring-2 ring-amber-500/30" 
+                                          : "bg-slate-800/90 border-slate-700/80 hover:border-slate-500"
+                                      }`}
+                                      title={isLocked ? "Step 3 is LOCKED. Click to Unlock for participants." : "Click to LOCK Step 3 for participants."}
+                                    >
+                                      <div className="flex items-center justify-center gap-1">
+                                        <span className="text-[10px] font-black uppercase text-pink-400 tracking-wider">STEP 3</span>
+                                        <Lock className={`w-3 h-3 ${isLocked ? "text-amber-400" : "text-slate-500 opacity-50"}`} />
+                                      </div>
+                                      <span className="text-xs font-black text-white block truncate">PPT Submission</span>
+                                      <span className={`text-[9px] font-extrabold uppercase tracking-widest block ${isLocked ? "text-amber-400" : "text-slate-400"}`}>
+                                        {isLocked ? "🔒 LOCKED" : "🔓 UNLOCKED"}
+                                      </span>
+                                    </button>
+                                  );
+                                })()}
+                              </th>
 
-                          {/* Column 4 Square */}
-                          <th className="py-4 px-3 border-b border-slate-800 text-center w-[12%]">
-                            {(() => {
-                              const isLocked = !!eventAccessEvent?.lockedSteps?.[4];
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => setStepLockTarget({ stepId: 4, name: "Key Features" })}
-                                  className={`p-3 rounded-2xl border space-y-1 shadow-inner inline-block w-full text-center transition-all cursor-pointer hover:scale-105 active:scale-95 ${
-                                    isLocked 
-                                      ? "bg-amber-950/90 border-amber-500/90 ring-2 ring-amber-500/30" 
-                                      : "bg-slate-800/90 border-slate-700/80 hover:border-slate-500"
-                                  }`}
-                                  title={isLocked ? "Step 4 is LOCKED. Click to Unlock for participants." : "Click to LOCK Step 4 for participants."}
-                                >
-                                  <div className="flex items-center justify-center gap-1">
-                                    <span className="text-[10px] font-black uppercase text-indigo-400 tracking-wider">STEP 4</span>
-                                    <Lock className={`w-3 h-3 ${isLocked ? "text-amber-400" : "text-slate-500 opacity-50"}`} />
-                                  </div>
-                                  <span className="text-xs font-black text-white block truncate">Key Features</span>
-                                  <span className={`text-[9px] font-extrabold uppercase tracking-widest block ${isLocked ? "text-amber-400" : "text-slate-400"}`}>
-                                    {isLocked ? "🔒 LOCKED" : "🔓 UNLOCKED"}
-                                  </span>
-                                </button>
-                              );
-                            })()}
-                          </th>
+                              {/* Column 4 Square */}
+                              <th className="py-4 px-3 border-b border-slate-800 text-center w-[12%]">
+                                {(() => {
+                                  const isLocked = !!eventAccessEvent?.lockedSteps?.[4];
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => setStepLockTarget({ stepId: 4, name: "Key Features" })}
+                                      className={`p-3 rounded-2xl border space-y-1 shadow-inner inline-block w-full text-center transition-all cursor-pointer hover:scale-105 active:scale-95 ${
+                                        isLocked 
+                                          ? "bg-amber-950/90 border-amber-500/90 ring-2 ring-amber-500/30" 
+                                          : "bg-slate-800/90 border-slate-700/80 hover:border-slate-500"
+                                      }`}
+                                      title={isLocked ? "Step 4 is LOCKED. Click to Unlock for participants." : "Click to LOCK Step 4 for participants."}
+                                    >
+                                      <div className="flex items-center justify-center gap-1">
+                                        <span className="text-[10px] font-black uppercase text-indigo-400 tracking-wider">STEP 4</span>
+                                        <Lock className={`w-3 h-3 ${isLocked ? "text-amber-400" : "text-slate-500 opacity-50"}`} />
+                                      </div>
+                                      <span className="text-xs font-black text-white block truncate">Key Features</span>
+                                      <span className={`text-[9px] font-extrabold uppercase tracking-widest block ${isLocked ? "text-amber-400" : "text-slate-400"}`}>
+                                        {isLocked ? "🔒 LOCKED" : "🔓 UNLOCKED"}
+                                      </span>
+                                    </button>
+                                  );
+                                })()}
+                              </th>
 
-                          {/* Column 5 Square */}
-                          <th className="py-4 px-3 border-b border-slate-800 text-center w-[12%]">
-                            {(() => {
-                              const isLocked = !!eventAccessEvent?.lockedSteps?.[5];
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => setStepLockTarget({ stepId: 5, name: "Repo URL" })}
-                                  className={`p-3 rounded-2xl border space-y-1 shadow-inner inline-block w-full text-center transition-all cursor-pointer hover:scale-105 active:scale-95 ${
-                                    isLocked 
-                                      ? "bg-amber-950/90 border-amber-500/90 ring-2 ring-amber-500/30" 
-                                      : "bg-slate-800/90 border-slate-700/80 hover:border-slate-500"
-                                  }`}
-                                  title={isLocked ? "Step 5 is LOCKED. Click to Unlock for participants." : "Click to LOCK Step 5 for participants."}
-                                >
-                                  <div className="flex items-center justify-center gap-1">
-                                    <span className="text-[10px] font-black uppercase text-teal-400 tracking-wider">STEP 5</span>
-                                    <Lock className={`w-3 h-3 ${isLocked ? "text-amber-400" : "text-slate-500 opacity-50"}`} />
-                                  </div>
-                                  <span className="text-xs font-black text-white block truncate">Repo URL</span>
-                                  <span className={`text-[9px] font-extrabold uppercase tracking-widest block ${isLocked ? "text-amber-400" : "text-slate-400"}`}>
-                                    {isLocked ? "🔒 LOCKED" : "🔓 UNLOCKED"}
-                                  </span>
-                                </button>
-                              );
-                            })()}
-                          </th>
+                              {/* Column 5 Square */}
+                              <th className="py-4 px-3 border-b border-slate-800 text-center w-[12%]">
+                                {(() => {
+                                  const isLocked = !!eventAccessEvent?.lockedSteps?.[5];
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => setStepLockTarget({ stepId: 5, name: "Repo URL" })}
+                                      className={`p-3 rounded-2xl border space-y-1 shadow-inner inline-block w-full text-center transition-all cursor-pointer hover:scale-105 active:scale-95 ${
+                                        isLocked 
+                                          ? "bg-amber-950/90 border-amber-500/90 ring-2 ring-amber-500/30" 
+                                          : "bg-slate-800/90 border-slate-700/80 hover:border-slate-500"
+                                      }`}
+                                      title={isLocked ? "Step 5 is LOCKED. Click to Unlock for participants." : "Click to LOCK Step 5 for participants."}
+                                    >
+                                      <div className="flex items-center justify-center gap-1">
+                                        <span className="text-[10px] font-black uppercase text-teal-400 tracking-wider">STEP 5</span>
+                                        <Lock className={`w-3 h-3 ${isLocked ? "text-amber-400" : "text-slate-500 opacity-50"}`} />
+                                      </div>
+                                      <span className="text-xs font-black text-white block truncate">Repo URL</span>
+                                      <span className={`text-[9px] font-extrabold uppercase tracking-widest block ${isLocked ? "text-amber-400" : "text-slate-400"}`}>
+                                        {isLocked ? "🔒 LOCKED" : "🔓 UNLOCKED"}
+                                      </span>
+                                    </button>
+                                  );
+                                })()}
+                              </th>
 
-                          {/* Column 6 Square */}
-                          <th className="py-4 px-3 border-b border-slate-800 text-center w-[12%]">
-                            {(() => {
-                              const isLocked = !!eventAccessEvent?.lockedSteps?.[6];
-                              return (
-                                <button
-                                  type="button"
-                                  onClick={() => setStepLockTarget({ stepId: 6, name: "Prototype & Video" })}
-                                  className={`p-3 rounded-2xl border space-y-1 shadow-inner inline-block w-full text-center transition-all cursor-pointer hover:scale-105 active:scale-95 ${
-                                    isLocked 
-                                      ? "bg-amber-950/90 border-amber-500/90 ring-2 ring-amber-500/30" 
-                                      : "bg-slate-800/90 border-slate-700/80 hover:border-slate-500"
-                                  }`}
-                                  title={isLocked ? "Step 6 is LOCKED. Click to Unlock for participants." : "Click to LOCK Step 6 for participants."}
-                                >
-                                  <div className="flex items-center justify-center gap-1">
-                                    <span className="text-[10px] font-black uppercase text-orange-400 tracking-wider">STEP 6</span>
-                                    <Lock className={`w-3 h-3 ${isLocked ? "text-amber-400" : "text-slate-500 opacity-50"}`} />
-                                  </div>
-                                  <span className="text-xs font-black text-white block truncate">Prototype & Video</span>
-                                  <span className={`text-[9px] font-extrabold uppercase tracking-widest block ${isLocked ? "text-amber-400" : "text-slate-400"}`}>
-                                    {isLocked ? "🔒 LOCKED" : "🔓 UNLOCKED"}
-                                  </span>
-                                </button>
-                              );
-                            })()}
-                          </th>
+                              {/* Column 6 Square */}
+                              <th className="py-4 px-3 border-b border-slate-800 text-center w-[12%]">
+                                {(() => {
+                                  const isLocked = !!eventAccessEvent?.lockedSteps?.[6];
+                                  return (
+                                    <button
+                                      type="button"
+                                      onClick={() => setStepLockTarget({ stepId: 6, name: "Prototype & Video" })}
+                                      className={`p-3 rounded-2xl border space-y-1 shadow-inner inline-block w-full text-center transition-all cursor-pointer hover:scale-105 active:scale-95 ${
+                                        isLocked 
+                                          ? "bg-amber-950/90 border-amber-500/90 ring-2 ring-amber-500/30" 
+                                          : "bg-slate-800/90 border-slate-700/80 hover:border-slate-500"
+                                      }`}
+                                      title={isLocked ? "Step 6 is LOCKED. Click to Unlock for participants." : "Click to LOCK Step 6 for participants."}
+                                    >
+                                      <div className="flex items-center justify-center gap-1">
+                                        <span className="text-[10px] font-black uppercase text-orange-400 tracking-wider">STEP 6</span>
+                                        <Lock className={`w-3 h-3 ${isLocked ? "text-amber-400" : "text-slate-500 opacity-50"}`} />
+                                      </div>
+                                      <span className="text-xs font-black text-white block truncate">Prototype & Video</span>
+                                      <span className={`text-[9px] font-extrabold uppercase tracking-widest block ${isLocked ? "text-amber-400" : "text-slate-400"}`}>
+                                        {isLocked ? "🔒 LOCKED" : "🔓 UNLOCKED"}
+                                      </span>
+                                    </button>
+                                  );
+                                })()}
+                              </th>
+                            </>
+                          )}
 
                           {/* Action Column */}
                           <th className="py-4 px-6 border-b border-slate-800 text-right w-[120px]">
@@ -8430,13 +8786,37 @@ const EventManagementPage: React.FC = () => {
                           const isGroup = reg.groupName && reg.groupName !== "Individual RSVP";
                           const displayTeamName = isGroup ? reg.groupName : (reg.teamLeadName || reg.name || "Individual Participant");
 
-                          // Step Completion Conditions
-                          const step1Completed = reg.isPsSaved || reg.isPsLocked || !!reg.problemStatement || !!reg.selectedProblemStatementId;
-                          const step2Completed = !!reg.srsFileName || !!reg.srsFileUrl;
-                          const step3Completed = !!reg.presentationFileName || !!reg.presentationUrl;
-                          const step4Completed = !!reg.keyFeatures;
-                          const step5Completed = !!reg.githubUrl;
-                          const step6Completed = (!!reg.prototypeUrl && !!reg.demoVideoUrl) || reg.submissionStatus === "Submitted" || !!reg.submittedAt;
+                          // Determine which data fields to read based on matrixViewRound
+                          const viewingPastRound = matrixViewRound > 0;
+                          const targetMatrixRound = viewingPastRound ? matrixViewRound : (eventAccessEvent?.currentRound || 1);
+                          const rPrefix = `r${targetMatrixRound}_`;
+
+                          // Helper to get field value: isolated per round
+                          const getField = (fieldName: string) => {
+                            if (viewingPastRound || targetMatrixRound > 1) {
+                              const roundVal = (reg as any)[`${rPrefix}${fieldName}`];
+                              if (roundVal !== undefined && roundVal !== "") return roundVal;
+                              if (reg.submissionRound === targetMatrixRound) {
+                                return (reg as any)[fieldName] || "";
+                              }
+                              return "";
+                            }
+                            return (reg as any)[`${rPrefix}${fieldName}`] || (reg as any)[fieldName] || "";
+                          };
+
+                          const isSubmittedForThisRound = (reg as any)[`${rPrefix}submissionStatus`] === "Submitted" || 
+                            !!(reg as any)[`${rPrefix}submittedAt`] || 
+                            (reg.submissionRound === targetMatrixRound && (reg.submissionStatus === "Submitted" || !!reg.submittedAt));
+
+                          // Step Completion Conditions (round-aware)
+                          const step1Completed = !!getField("problemStatement") || !!getField("selectedProblemStatementId") || (targetMatrixRound === 1 && (reg.isPsSaved || reg.isPsLocked));
+                          const step2Completed = isIdeationRound ? !!getField("demoVideoUrl") : (!!getField("srsFileName") || !!getField("srsFileUrl"));
+                          const step3Completed = !!getField("presentationFileName") || !!getField("presentationUrl");
+                          const step4Completed = !!getField("keyFeatures");
+                          const step5Completed = !!getField("repoUrl") || !!getField("githubUrl");
+                          const step6Completed = (!!getField("demoVideoUrl") && (!!getField("presentationUrl") || !isIdeationRound)) || isSubmittedForThisRound;
+
+                          const psDisplayLabel = getField("selectedProblemStatementId") || (step1Completed ? (isIdeationRound ? "Description Done" : "PS Saved") : "Pending");
 
                           return (
                             <tr key={reg.id || idx} className="hover:bg-blue-50/40 transition-colors group">
@@ -8457,7 +8837,7 @@ const EventManagementPage: React.FC = () => {
                                 </div>
                               </td>
 
-                              {/* Step 1 Node */}
+                          {/* Step 1 Node */}
                               <td className="py-5 px-3 text-center relative overflow-visible">
                                 <div className="flex items-center justify-center relative w-full">
                                   {/* Seamless Connecting Line right */}
@@ -8467,7 +8847,7 @@ const EventManagementPage: React.FC = () => {
                                   <button
                                     type="button"
                                     onClick={() => setSelectedTeamSubmission(reg)}
-                                    title={step1Completed ? `Step 1 Completed: ${reg.selectedProblemStatementId || "PS Saved"}` : "Step 1 In Progress / Pending"}
+                                    title={step1Completed ? (isIdeationRound ? "Step 1 Completed: Description Saved" : `Step 1 Completed: ${psDisplayLabel}`) : "Step 1 In Progress / Pending"}
                                     className={`w-11 h-11 rounded-full relative z-10 flex items-center justify-center font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer border-2 ${step1Completed
                                         ? 'bg-emerald-500 text-white border-emerald-400 shadow-emerald-500/40 ring-4 ring-emerald-100'
                                         : 'bg-blue-500 text-white border-blue-400 shadow-blue-500/40 ring-4 ring-blue-100'
@@ -8477,7 +8857,7 @@ const EventManagementPage: React.FC = () => {
                                   </button>
                                 </div>
                                 <span className="text-[10px] font-extrabold block mt-2 truncate max-w-[140px] mx-auto text-slate-700">
-                                  {step1Completed ? (reg.selectedProblemStatementId || "PS Saved") : "Pending"}
+                                  {psDisplayLabel}
                                 </span>
                               </td>
 
@@ -8485,13 +8865,13 @@ const EventManagementPage: React.FC = () => {
                               <td className="py-5 px-3 text-center relative overflow-visible">
                                 <div className="flex items-center justify-center relative w-full">
                                   {/* Seamless Connecting Line across left & right */}
-                                  <div className={`absolute left-[-50%] right-[-50%] top-1/2 -translate-y-1/2 h-1.5 z-0 ${step2Completed && step3Completed ? 'bg-emerald-500 shadow-xs' : (step1Completed && step2Completed ? 'bg-emerald-500 shadow-xs' : 'bg-blue-300')}`} />
+                                  <div className={`absolute left-[-50%] ${isIdeationRound ? 'right-1/2' : 'right-[-50%]'} top-1/2 -translate-y-1/2 h-1.5 z-0 ${isIdeationRound ? (step2Completed ? 'bg-emerald-500 shadow-xs' : (step1Completed && step2Completed ? 'bg-emerald-500 shadow-xs' : 'bg-blue-300')) : (step2Completed && step3Completed ? 'bg-emerald-500 shadow-xs' : (step1Completed && step2Completed ? 'bg-emerald-500 shadow-xs' : 'bg-blue-300'))}`} />
 
                                   {/* Node Circle 2 */}
                                   <button
                                     type="button"
                                     onClick={() => setSelectedTeamSubmission(reg)}
-                                    title={step2Completed ? "Step 2 Completed: SRS Uploaded" : "Step 2 In Progress / Pending"}
+                                    title={step2Completed ? (isIdeationRound ? "Step 2 Completed: Video URL Saved" : "Step 2 Completed: SRS Uploaded") : "Step 2 In Progress / Pending"}
                                     className={`w-11 h-11 rounded-full relative z-10 flex items-center justify-center font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer border-2 ${step2Completed
                                         ? 'bg-emerald-500 text-white border-emerald-400 shadow-emerald-500/40 ring-4 ring-emerald-100'
                                         : 'bg-blue-500 text-white border-blue-400 shadow-blue-500/40 ring-4 ring-blue-100'
@@ -8501,99 +8881,103 @@ const EventManagementPage: React.FC = () => {
                                   </button>
                                 </div>
                                 <span className="text-[10px] font-extrabold block mt-2 truncate max-w-[140px] mx-auto text-slate-700">
-                                  {step2Completed ? "SRS Done" : "SRS Pending"}
+                                  {isIdeationRound ? (step2Completed ? "Video Done" : "Video Pending") : (step2Completed ? "SRS Done" : "SRS Pending")}
                                 </span>
                               </td>
 
-                              {/* Step 3 Node */}
-                              <td className="py-5 px-3 text-center relative overflow-visible">
-                                <div className="flex items-center justify-center relative w-full">
-                                  <div className={`absolute left-[-50%] right-[-50%] top-1/2 -translate-y-1/2 h-1.5 z-0 ${step3Completed && step4Completed ? 'bg-emerald-500 shadow-xs' : (step2Completed && step3Completed ? 'bg-emerald-500 shadow-xs' : 'bg-blue-300')}`} />
+                              {!isIdeationRound && (
+                                <>
+                                  {/* Step 3 Node */}
+                                  <td className="py-5 px-3 text-center relative overflow-visible">
+                                    <div className="flex items-center justify-center relative w-full">
+                                      <div className={`absolute left-[-50%] right-[-50%] top-1/2 -translate-y-1/2 h-1.5 z-0 ${step3Completed && step4Completed ? 'bg-emerald-500 shadow-xs' : (step2Completed && step3Completed ? 'bg-emerald-500 shadow-xs' : 'bg-blue-300')}`} />
 
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedTeamSubmission(reg)}
-                                    title={step3Completed ? "Step 3 Completed: PPT Uploaded" : "Step 3 In Progress / Pending"}
-                                    className={`w-11 h-11 rounded-full relative z-10 flex items-center justify-center font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer border-2 ${step3Completed
-                                        ? 'bg-emerald-500 text-white border-emerald-400 shadow-emerald-500/40 ring-4 ring-emerald-100'
-                                        : 'bg-blue-500 text-white border-blue-400 shadow-blue-500/40 ring-4 ring-blue-100'
-                                      }`}
-                                  >
-                                    {step3Completed ? <Check className="w-6 h-6 stroke-[3]" /> : "3"}
-                                  </button>
-                                </div>
-                                <span className="text-[10px] font-extrabold block mt-2 truncate max-w-[140px] mx-auto text-slate-700">
-                                  {step3Completed ? "PPT Done" : "PPT Pending"}
-                                </span>
-                              </td>
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedTeamSubmission(reg)}
+                                        title={step3Completed ? "Step 3 Completed: PPT Uploaded" : "Step 3 In Progress / Pending"}
+                                        className={`w-11 h-11 rounded-full relative z-10 flex items-center justify-center font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer border-2 ${step3Completed
+                                            ? 'bg-emerald-500 text-white border-emerald-400 shadow-emerald-500/40 ring-4 ring-emerald-100'
+                                            : 'bg-blue-500 text-white border-blue-400 shadow-blue-500/40 ring-4 ring-blue-100'
+                                          }`}
+                                      >
+                                        {step3Completed ? <Check className="w-6 h-6 stroke-[3]" /> : "3"}
+                                      </button>
+                                    </div>
+                                    <span className="text-[10px] font-extrabold block mt-2 truncate max-w-[140px] mx-auto text-slate-700">
+                                      {step3Completed ? "PPT Done" : "PPT Pending"}
+                                    </span>
+                                  </td>
 
-                              {/* Step 4 Node */}
-                              <td className="py-5 px-3 text-center relative overflow-visible">
-                                <div className="flex items-center justify-center relative w-full">
-                                  <div className={`absolute left-[-50%] right-[-50%] top-1/2 -translate-y-1/2 h-1.5 z-0 ${step4Completed && step5Completed ? 'bg-emerald-500 shadow-xs' : (step3Completed && step4Completed ? 'bg-emerald-500 shadow-xs' : 'bg-blue-300')}`} />
+                                  {/* Step 4 Node */}
+                                  <td className="py-5 px-3 text-center relative overflow-visible">
+                                    <div className="flex items-center justify-center relative w-full">
+                                      <div className={`absolute left-[-50%] right-[-50%] top-1/2 -translate-y-1/2 h-1.5 z-0 ${step4Completed && step5Completed ? 'bg-emerald-500 shadow-xs' : (step3Completed && step4Completed ? 'bg-emerald-500 shadow-xs' : 'bg-blue-300')}`} />
 
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedTeamSubmission(reg)}
-                                    title={step4Completed ? "Step 4 Completed: Key Features Saved" : "Step 4 In Progress / Pending"}
-                                    className={`w-11 h-11 rounded-full relative z-10 flex items-center justify-center font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer border-2 ${step4Completed
-                                        ? 'bg-emerald-500 text-white border-emerald-400 shadow-emerald-500/40 ring-4 ring-emerald-100'
-                                        : 'bg-blue-500 text-white border-blue-400 shadow-blue-500/40 ring-4 ring-blue-100'
-                                      }`}
-                                  >
-                                    {step4Completed ? <Check className="w-6 h-6 stroke-[3]" /> : "4"}
-                                  </button>
-                                </div>
-                                <span className="text-[10px] font-extrabold block mt-2 truncate max-w-[140px] mx-auto text-slate-700">
-                                  {step4Completed ? "Features Saved" : "Features Pending"}
-                                </span>
-                              </td>
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedTeamSubmission(reg)}
+                                        title={step4Completed ? "Step 4 Completed: Key Features Saved" : "Step 4 In Progress / Pending"}
+                                        className={`w-11 h-11 rounded-full relative z-10 flex items-center justify-center font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer border-2 ${step4Completed
+                                            ? 'bg-emerald-500 text-white border-emerald-400 shadow-emerald-500/40 ring-4 ring-emerald-100'
+                                            : 'bg-blue-500 text-white border-blue-400 shadow-blue-500/40 ring-4 ring-blue-100'
+                                          }`}
+                                      >
+                                        {step4Completed ? <Check className="w-6 h-6 stroke-[3]" /> : "4"}
+                                      </button>
+                                    </div>
+                                    <span className="text-[10px] font-extrabold block mt-2 truncate max-w-[140px] mx-auto text-slate-700">
+                                      {step4Completed ? "Features Saved" : "Features Pending"}
+                                    </span>
+                                  </td>
 
-                              {/* Step 5 Node */}
-                              <td className="py-5 px-3 text-center relative overflow-visible">
-                                <div className="flex items-center justify-center relative w-full">
-                                  <div className={`absolute left-[-50%] right-[-50%] top-1/2 -translate-y-1/2 h-1.5 z-0 ${step5Completed && step6Completed ? 'bg-emerald-500 shadow-xs' : (step4Completed && step5Completed ? 'bg-emerald-500 shadow-xs' : 'bg-blue-300')}`} />
+                                  {/* Step 5 Node */}
+                                  <td className="py-5 px-3 text-center relative overflow-visible">
+                                    <div className="flex items-center justify-center relative w-full">
+                                      <div className={`absolute left-[-50%] right-[-50%] top-1/2 -translate-y-1/2 h-1.5 z-0 ${step5Completed && step6Completed ? 'bg-emerald-500 shadow-xs' : (step4Completed && step5Completed ? 'bg-emerald-500 shadow-xs' : 'bg-blue-300')}`} />
 
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedTeamSubmission(reg)}
-                                    title={step5Completed ? "Step 5 Completed: GitHub Repo Link Saved" : "Step 5 In Progress / Pending"}
-                                    className={`w-11 h-11 rounded-full relative z-10 flex items-center justify-center font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer border-2 ${step5Completed
-                                        ? 'bg-emerald-500 text-white border-emerald-400 shadow-emerald-500/40 ring-4 ring-emerald-100'
-                                        : 'bg-blue-500 text-white border-blue-400 shadow-blue-500/40 ring-4 ring-blue-100'
-                                      }`}
-                                  >
-                                    {step5Completed ? <Check className="w-6 h-6 stroke-[3]" /> : "5"}
-                                  </button>
-                                </div>
-                                <span className="text-[10px] font-extrabold block mt-2 truncate max-w-[140px] mx-auto text-slate-700">
-                                  {step5Completed ? "Repo Saved" : "Repo Pending"}
-                                </span>
-                              </td>
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedTeamSubmission(reg)}
+                                        title={step5Completed ? "Step 5 Completed: GitHub Repo Link Saved" : "Step 5 In Progress / Pending"}
+                                        className={`w-11 h-11 rounded-full relative z-10 flex items-center justify-center font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer border-2 ${step5Completed
+                                            ? 'bg-emerald-500 text-white border-emerald-400 shadow-emerald-500/40 ring-4 ring-emerald-100'
+                                            : 'bg-blue-500 text-white border-blue-400 shadow-blue-500/40 ring-4 ring-blue-100'
+                                          }`}
+                                      >
+                                        {step5Completed ? <Check className="w-6 h-6 stroke-[3]" /> : "5"}
+                                      </button>
+                                    </div>
+                                    <span className="text-[10px] font-extrabold block mt-2 truncate max-w-[140px] mx-auto text-slate-700">
+                                      {step5Completed ? "Repo Saved" : "Repo Pending"}
+                                    </span>
+                                  </td>
 
-                              {/* Step 6 Node (Line extends left to center) */}
-                              <td className="py-5 px-3 text-center relative overflow-visible">
-                                <div className="flex items-center justify-center relative w-full">
-                                  {/* Seamless Connecting Line left */}
-                                  <div className={`absolute left-[-50%] right-1/2 top-1/2 -translate-y-1/2 h-1.5 z-0 ${step6Completed ? 'bg-emerald-500 shadow-xs' : (step5Completed && step6Completed ? 'bg-emerald-500 shadow-xs' : 'bg-blue-300')}`} />
+                                  {/* Step 6 Node (Line extends left to center) */}
+                                  <td className="py-5 px-3 text-center relative overflow-visible">
+                                    <div className="flex items-center justify-center relative w-full">
+                                      {/* Seamless Connecting Line left */}
+                                      <div className={`absolute left-[-50%] right-1/2 top-1/2 -translate-y-1/2 h-1.5 z-0 ${step6Completed ? 'bg-emerald-500 shadow-xs' : (step5Completed && step6Completed ? 'bg-emerald-500 shadow-xs' : 'bg-blue-300')}`} />
 
-                                  {/* Node Circle 6 */}
-                                  <button
-                                    type="button"
-                                    onClick={() => setSelectedTeamSubmission(reg)}
-                                    title={step6Completed ? "Step 6 Completed: Prototype & Demo Video Submitted" : "Step 6 In Progress / Pending"}
-                                    className={`w-11 h-11 rounded-full relative z-10 flex items-center justify-center font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer border-2 ${step6Completed
-                                        ? 'bg-emerald-500 text-white border-emerald-400 shadow-emerald-500/40 ring-4 ring-emerald-100'
-                                        : 'bg-blue-500 text-white border-blue-400 shadow-blue-500/40 ring-4 ring-blue-100'
-                                      }`}
-                                  >
-                                    {step6Completed ? <Check className="w-6 h-6 stroke-[3]" /> : "6"}
-                                  </button>
-                                </div>
-                                <span className="text-[10px] font-extrabold block mt-2 truncate max-w-[140px] mx-auto text-slate-700">
-                                  {step6Completed ? "Final Submitted" : "Prototype/Video"}
-                                </span>
-                              </td>
+                                      {/* Node Circle 6 */}
+                                      <button
+                                        type="button"
+                                        onClick={() => setSelectedTeamSubmission(reg)}
+                                        title={step6Completed ? "Step 6 Completed: Prototype & Demo Video Submitted" : "Step 6 In Progress / Pending"}
+                                        className={`w-11 h-11 rounded-full relative z-10 flex items-center justify-center font-black text-xs transition-all shadow-md active:scale-95 cursor-pointer border-2 ${step6Completed
+                                            ? 'bg-emerald-500 text-white border-emerald-400 shadow-emerald-500/40 ring-4 ring-emerald-100'
+                                            : 'bg-blue-500 text-white border-blue-400 shadow-blue-500/40 ring-4 ring-blue-100'
+                                          }`}
+                                      >
+                                        {step6Completed ? <Check className="w-6 h-6 stroke-[3]" /> : "6"}
+                                      </button>
+                                    </div>
+                                    <span className="text-[10px] font-extrabold block mt-2 truncate max-w-[140px] mx-auto text-slate-700">
+                                      {step6Completed ? "Final Submitted" : "Prototype/Video"}
+                                    </span>
+                                  </td>
+                                </>
+                              )}
 
                               {/* Action Column */}
                               <td className="py-5 px-6 text-right">
@@ -8642,106 +9026,170 @@ const EventManagementPage: React.FC = () => {
             className="bg-white max-w-2xl w-full rounded-3xl p-6 sm:p-8 shadow-2xl border border-slate-100 space-y-6 animate-in zoom-in-95 duration-200 text-left relative max-h-[85vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            {/* Header */}
-            <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
-              <div className="flex items-center gap-3">
-                <div className="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-700 font-black text-lg flex items-center justify-center shrink-0 shadow-sm">
-                  {(selectedTeamSubmission.groupName || selectedTeamSubmission.teamLeadName || selectedTeamSubmission.name || "T").charAt(0).toUpperCase()}
-                </div>
-                <div>
-                  <h3 className="text-lg font-black text-slate-900 tracking-tight">
-                    {selectedTeamSubmission.groupName || selectedTeamSubmission.teamLeadName || selectedTeamSubmission.name || "Team Submission"}
-                  </h3>
-                  <p className="text-xs text-slate-500 font-medium">
-                    Lead: {selectedTeamSubmission.teamLeadName || selectedTeamSubmission.name} • Contact: {selectedTeamSubmission.teamLeadEmail || selectedTeamSubmission.email}
-                  </p>
-                </div>
-              </div>
-              <button
-                onClick={() => setSelectedTeamSubmission(null)}
-                className="p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
-              >
-                <X className="h-5 w-5" />
-              </button>
-            </div>
+            {(() => {
+              const cR = eventAccessEvent?.currentRound || 1;
+              const effectiveRound = matrixViewRound > 0 ? matrixViewRound : cR;
+              const rP = `r${effectiveRound}_`;
+              const getDField = (k: string) => {
+                if (effectiveRound > 1) {
+                  return (selectedTeamSubmission as any)[`${rP}${k}`] || (selectedTeamSubmission.submissionRound === effectiveRound ? (selectedTeamSubmission as any)[k] : "") || "";
+                }
+                return (selectedTeamSubmission as any)[`${rP}${k}`] || (selectedTeamSubmission as any)[k] || "";
+              };
 
-            {/* Problem Statement Card */}
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Problem Statement & Requirements</span>
-                {selectedTeamSubmission.selectedProblemStatement?.track && (
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200">
-                    {selectedTeamSubmission.selectedProblemStatement.track}
-                  </span>
-                )}
-              </div>
-              <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200/80 text-xs text-slate-800 font-medium whitespace-pre-wrap leading-relaxed space-y-1.5">
-                {selectedTeamSubmission.selectedProblemStatement?.title ? (
-                  <>
-                    <p className="font-extrabold text-slate-900 text-sm">
-                      {selectedTeamSubmission.selectedProblemStatement.code ? `[${selectedTeamSubmission.selectedProblemStatement.code}] ` : ""}
-                      {selectedTeamSubmission.selectedProblemStatement.title}
-                    </p>
-                    <p className="text-slate-600 text-xs">
-                      {selectedTeamSubmission.selectedProblemStatement.description || selectedTeamSubmission.problemStatement}
-                    </p>
-                  </>
-                ) : (
-                  <p>{selectedTeamSubmission.problemStatement || "No problem statement submitted yet."}</p>
-                )}
-              </div>
-            </div>
+              const dSelectedPsId = getDField("selectedProblemStatementId");
+              const dSelectedPsObj = (selectedTeamSubmission as any)[`${rP}selectedProblemStatement`] || 
+                (selectedTeamSubmission.submissionRound === effectiveRound ? selectedTeamSubmission.selectedProblemStatement : null) || 
+                (effectiveRound === 1 ? selectedTeamSubmission.selectedProblemStatement : null);
 
-            {/* Key Features */}
-            {selectedTeamSubmission.keyFeatures && (
-              <div className="space-y-2">
-                <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Key Features & Functionalities</span>
-                <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 text-xs text-indigo-950 font-medium whitespace-pre-wrap leading-relaxed">
-                  {selectedTeamSubmission.keyFeatures}
-                </div>
-              </div>
-            )}
+              // If obj is not directly present, lookup from event's configured problem statements
+              const eventPsMatch = (eventAccessEvent?.problemStatements || []).find((p: any) => p.id === dSelectedPsId || p.code === dSelectedPsId);
+              const activePs = dSelectedPsObj || eventPsMatch;
 
-            {/* Documents & Links Section */}
-            <div className="space-y-3">
-              <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Submission Artifacts & Links</span>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-semibold">
-                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-                  <span className="text-[9px] font-black text-slate-400 uppercase block">1. SRS Document</span>
-                  <span className="font-bold text-slate-900 truncate block">{selectedTeamSubmission.srsFileName || "Not Uploaded"}</span>
-                </div>
-                <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-                  <span className="text-[9px] font-black text-slate-400 uppercase block">2. Presentation Deck</span>
-                  <span className="font-bold text-slate-900 truncate block">{selectedTeamSubmission.presentationFileName || "Not Uploaded"}</span>
-                </div>
-              </div>
+              const dProblemStatement = getDField("problemStatement");
+              const dKeyFeatures = getDField("keyFeatures");
+              const dSrsFileName = getDField("srsFileName");
+              const dPresentationFileName = getDField("presentationFileName");
+              const dGithubUrl = getDField("repoUrl") || getDField("githubUrl");
+              const dPrototypeUrl = getDField("prototypeUrl");
+              const dDemoVideoUrl = getDField("demoVideoUrl");
 
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-bold pt-1">
-                {selectedTeamSubmission.githubUrl ? (
-                  <a href={selectedTeamSubmission.githubUrl} target="_blank" rel="noreferrer" className="p-3 bg-slate-900 text-white rounded-xl flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors">
-                    <ExternalLink className="w-4 h-4" /> Code Repo
-                  </a>
-                ) : (
-                  <div className="p-3 bg-slate-100 text-slate-400 rounded-xl text-center">No Repo Link</div>
-                )}
+              return (
+                <>
+                  {/* Header */}
+                  <div className="flex items-start justify-between gap-4 border-b border-slate-100 pb-4">
+                    <div className="flex items-center gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-indigo-100 text-indigo-700 font-black text-lg flex items-center justify-center shrink-0 shadow-sm">
+                        {(selectedTeamSubmission.groupName || selectedTeamSubmission.teamLeadName || selectedTeamSubmission.name || "T").charAt(0).toUpperCase()}
+                      </div>
+                      <div>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <h3 className="text-lg font-black text-slate-900 tracking-tight">
+                            {selectedTeamSubmission.groupName || selectedTeamSubmission.teamLeadName || selectedTeamSubmission.name || "Team Submission"}
+                          </h3>
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 border border-blue-200">
+                            Round {effectiveRound} Deliverables
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-500 font-medium">
+                          Lead: {selectedTeamSubmission.teamLeadName || selectedTeamSubmission.name} • Contact: {selectedTeamSubmission.teamLeadEmail || selectedTeamSubmission.email}
+                        </p>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => setSelectedTeamSubmission(null)}
+                      className="p-2 text-slate-400 hover:text-slate-600 rounded-full hover:bg-slate-100 transition-colors cursor-pointer"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
 
-                {selectedTeamSubmission.prototypeUrl ? (
-                  <a href={selectedTeamSubmission.prototypeUrl} target="_blank" rel="noreferrer" className="p-3 bg-blue-600 text-white rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors">
-                    <ExternalLink className="w-4 h-4" /> Prototype Link
-                  </a>
-                ) : (
-                  <div className="p-3 bg-slate-100 text-slate-400 rounded-xl text-center">No Prototype</div>
-                )}
+                  {/* Round Switcher Tabs (for multi-round events) */}
+                  {cR > 1 && (
+                    <div className="flex items-center gap-2 p-1.5 bg-slate-100 rounded-2xl border border-slate-200 overflow-x-auto">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-500 px-2 shrink-0">Inspect Stage:</span>
+                      {Array.from({ length: cR }, (_, i) => i + 1).map((r) => (
+                        <button
+                          key={r}
+                          type="button"
+                          onClick={() => setMatrixViewRound(r === cR ? 0 : r)}
+                          className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer whitespace-nowrap ${
+                            effectiveRound === r
+                              ? "bg-white text-indigo-700 shadow-xs border border-slate-200"
+                              : "text-slate-600 hover:text-slate-900"
+                          }`}
+                        >
+                          Round {r} {r === cR ? "(Current)" : "(Past)"}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
-                {selectedTeamSubmission.demoVideoUrl ? (
-                  <a href={selectedTeamSubmission.demoVideoUrl} target="_blank" rel="noreferrer" className="p-3 bg-red-600 text-white rounded-xl flex items-center justify-center gap-2 hover:bg-red-700 transition-colors">
-                    <ExternalLink className="w-4 h-4" /> Demo Video
-                  </a>
-                ) : (
-                  <div className="p-3 bg-slate-100 text-slate-400 rounded-xl text-center">No Video Link</div>
-                )}
-              </div>
-            </div>
+                  {/* Problem Statement Card */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Problem Statement & Requirements</span>
+                        <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase bg-indigo-50 text-indigo-700 border border-indigo-200">
+                          Round {effectiveRound}
+                        </span>
+                      </div>
+                      {activePs?.track && (
+                        <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold bg-blue-50 text-blue-700 border border-blue-200">
+                          {activePs.track}
+                        </span>
+                      )}
+                    </div>
+                    <div className="p-5 bg-slate-50 rounded-2xl border border-slate-200/80 text-xs text-slate-800 font-medium whitespace-pre-wrap leading-relaxed space-y-1.5">
+                      {activePs?.title ? (
+                        <>
+                          <p className="font-extrabold text-slate-900 text-sm">
+                            {activePs.code ? `[${activePs.code}] ` : ""}
+                            {activePs.title}
+                          </p>
+                          <p className="text-slate-600 text-xs">
+                            {activePs.description || dProblemStatement}
+                          </p>
+                        </>
+                      ) : (
+                        <p>{dProblemStatement || `No problem statement submitted for Round ${effectiveRound} yet.`}</p>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Key Features */}
+                  {dKeyFeatures && (
+                    <div className="space-y-2">
+                      <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Key Features & Functionalities</span>
+                      <div className="p-4 bg-indigo-50/50 rounded-2xl border border-indigo-100 text-xs text-indigo-950 font-medium whitespace-pre-wrap leading-relaxed">
+                        {dKeyFeatures}
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Documents & Links Section */}
+                  <div className="space-y-3">
+                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Submission Artifacts & Links</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-semibold">
+                      <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                        <span className="text-[9px] font-black text-slate-400 uppercase block">1. SRS Document</span>
+                        <span className="font-bold text-slate-900 truncate block">{dSrsFileName || "Not Uploaded"}</span>
+                      </div>
+                      <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
+                        <span className="text-[9px] font-black text-slate-400 uppercase block">2. Presentation Deck</span>
+                        <span className="font-bold text-slate-900 truncate block">{dPresentationFileName || "Not Uploaded"}</span>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs font-bold pt-1">
+                      {dGithubUrl ? (
+                        <a href={dGithubUrl} target="_blank" rel="noreferrer" className="p-3 bg-slate-900 text-white rounded-xl flex items-center justify-center gap-2 hover:bg-slate-800 transition-colors">
+                          <ExternalLink className="w-4 h-4" /> Code Repo
+                        </a>
+                      ) : (
+                        <div className="p-3 bg-slate-100 text-slate-400 rounded-xl text-center">No Repo Link</div>
+                      )}
+
+                      {dPrototypeUrl ? (
+                        <a href={dPrototypeUrl} target="_blank" rel="noreferrer" className="p-3 bg-blue-600 text-white rounded-xl flex items-center justify-center gap-2 hover:bg-blue-700 transition-colors">
+                          <ExternalLink className="w-4 h-4" /> Prototype Link
+                        </a>
+                      ) : (
+                        <div className="p-3 bg-slate-100 text-slate-400 rounded-xl text-center">No Prototype</div>
+                      )}
+
+                      {dDemoVideoUrl ? (
+                        <a href={dDemoVideoUrl} target="_blank" rel="noreferrer" className="p-3 bg-red-600 text-white rounded-xl flex items-center justify-center gap-2 hover:bg-red-700 transition-colors">
+                          <ExternalLink className="w-4 h-4" /> Demo Video
+                        </a>
+                      ) : (
+                        <div className="p-3 bg-slate-100 text-slate-400 rounded-xl text-center">No Video Link</div>
+                      )}
+                    </div>
+                  </div>
+                </>
+              );
+            })()}
 
             {/* Footer */}
             <div className="pt-4 border-t border-slate-100 flex items-center justify-between gap-3">
