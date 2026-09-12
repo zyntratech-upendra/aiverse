@@ -18,13 +18,10 @@ import {
   Check,
   Layers,
   ChevronRight,
-  Calendar,
   BarChart3,
   ChevronDown,
   ChevronUp,
-  X,
-  Award,
-  ShieldCheck
+  X
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
 import TeamReviewPage from "./TeamReviewPage";
@@ -1199,7 +1196,6 @@ export const ParticipantDashboardPage: React.FC = () => {
                         quiz.status === "completed" ||
                         (quiz.scheduledEndTime && quiz.scheduledEndTime <= now && quiz.scheduledStartTime)
                       );
-                      const isUpcoming = Boolean(!isSubmitted && quiz.scheduledStartTime && quiz.scheduledStartTime > now);
 
                       const isExpanded = expandedQuizReviewId === quiz.id;
                       const activeQuizObj = quizDetailsCache[quiz.id] || quiz;
