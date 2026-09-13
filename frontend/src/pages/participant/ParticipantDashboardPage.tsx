@@ -284,6 +284,46 @@ export const ParticipantDashboardPage: React.FC = () => {
               );
             }
 
+            // Merge quiz overriddenScores directly for all quizzes
+            if (Array.isArray(quizzesList)) {
+              quizzesList.forEach((q) => {
+                const existingSub = subMap[q.id];
+                const overridden = (q as any)?.overriddenScores || {};
+                const overrideEntry = 
+                  (existingSub?.id && overridden[existingSub.id]) ||
+                  (existingSub?.sessionId && overridden[existingSub.sessionId]) ||
+                  (user?.uid && overridden[user.uid]) ||
+                  (targetReg?.id && overridden[targetReg.id]) ||
+                  (existingSub?.teamId && overridden[existingSub.teamId]) ||
+                  (existingSub?.userId && overridden[existingSub.userId]) ||
+                  (cleanEmail && overridden[cleanEmail]) ||
+                  Object.values(overridden).find((o: any) => {
+                    if (!o) return false;
+                    if (user?.uid && (o.userId === user.uid || o.id?.includes(user.uid) || o.sessionId?.includes(user.uid))) return true;
+                    if (cleanEmail && (o.userEmail?.toLowerCase().trim() === cleanEmail || o.email?.toLowerCase().trim() === cleanEmail)) return true;
+                    if (targetReg?.id && (o.teamId === targetReg.id || o.registrationId === targetReg.id || o.id?.includes(targetReg.id))) return true;
+                    return false;
+                  }) as any;
+
+                if (overrideEntry) {
+                  subMap[q.id] = {
+                    ...(existingSub || ({} as QuizSubmission)),
+                    id: existingSub?.id || overrideEntry.id || `${q.id}_${user?.uid}`,
+                    quizId: q.id,
+                    userId: user?.uid || "",
+                    score: overrideEntry.score ?? existingSub?.score ?? 0,
+                    maxScore: overrideEntry.maxScore ?? existingSub?.maxScore ?? q.totalMarks ?? 50,
+                    percentage: overrideEntry.percentage ?? existingSub?.percentage ?? 0,
+                    correctCount: overrideEntry.correctCount ?? existingSub?.correctCount,
+                    incorrectCount: overrideEntry.incorrectCount ?? existingSub?.incorrectCount,
+                    passed: overrideEntry.passed ?? existingSub?.passed ?? false,
+                    answers: overrideEntry.answers || existingSub?.answers || {},
+                    isScoreOverridden: true
+                  } as QuizSubmission;
+                }
+              });
+            }
+
             // Sync fallback scores from registration
             if (targetReg?.quizScore !== undefined && targetReg?.quizScore !== null) {
               setQuizScore(targetReg.quizScore);
@@ -447,6 +487,50 @@ export const ParticipantDashboardPage: React.FC = () => {
     setActiveTab("dashboard");
   };
 
+  // Helper to merge faculty score and answer overrides into submission
+  const getMergedSubmission = (quiz: Quiz | undefined, rawSub: QuizSubmission | undefined): QuizSubmission | undefined => {
+    if (!quiz) return rawSub;
+    const overridden = (quiz as any)?.overriddenScores || {};
+    const cleanEmail = user?.email?.toLowerCase().trim() || "";
+    const uid = user?.uid || "";
+    const regId = targetRegId || user?.registrationId || "";
+    const tName = teamName?.toLowerCase().trim() || "";
+
+    const overrideEntry =
+      (rawSub?.id && overridden[rawSub.id]) ||
+      (rawSub?.sessionId && overridden[rawSub.sessionId]) ||
+      (uid && overridden[uid]) ||
+      (regId && overridden[regId]) ||
+      (rawSub?.teamId && overridden[rawSub.teamId]) ||
+      (rawSub?.userId && overridden[rawSub.userId]) ||
+      (cleanEmail && overridden[cleanEmail]) ||
+      Object.values(overridden).find((o: any) => {
+        if (!o) return false;
+        if (uid && (o.userId === uid || o.id?.includes(uid) || o.sessionId?.includes(uid))) return true;
+        if (cleanEmail && (o.userEmail?.toLowerCase().trim() === cleanEmail || o.email?.toLowerCase().trim() === cleanEmail)) return true;
+        if (regId && (o.teamId === regId || o.registrationId === regId || o.id?.includes(regId))) return true;
+        if (tName && o.teamName?.toLowerCase().trim() === tName) return true;
+        return false;
+      }) as Partial<QuizSubmission> | undefined;
+
+    if (!overrideEntry) return rawSub;
+
+    return {
+      ...(rawSub || ({} as QuizSubmission)),
+      id: rawSub?.id || overrideEntry.id || `${quiz.id}_${uid}`,
+      quizId: quiz.id,
+      userId: uid,
+      score: overrideEntry.score ?? rawSub?.score ?? 0,
+      maxScore: overrideEntry.maxScore ?? rawSub?.maxScore ?? quiz.totalMarks ?? 50,
+      percentage: overrideEntry.percentage ?? rawSub?.percentage ?? (overrideEntry.score !== undefined ? Math.round((overrideEntry.score / (overrideEntry.maxScore || 50)) * 100) : 0),
+      correctCount: overrideEntry.correctCount ?? rawSub?.correctCount,
+      incorrectCount: overrideEntry.incorrectCount ?? rawSub?.incorrectCount,
+      passed: overrideEntry.passed ?? rawSub?.passed ?? false,
+      answers: overrideEntry.answers || rawSub?.answers || {},
+      isScoreOverridden: true
+    } as QuizSubmission;
+  };
+
   // Toggle Quiz Question-by-Question Review with instant questions fetch
   const toggleQuizReview = async (quizId: string) => {
     if (expandedQuizReviewId === quizId) {
@@ -455,20 +539,21 @@ export const ParticipantDashboardPage: React.FC = () => {
     }
     setExpandedQuizReviewId(quizId);
 
-    // Fetch full quiz definition if not cached or questions empty
-    const existing = quizDetailsCache[quizId] || availableQuizzes.find((q) => q.id === quizId);
-    if (!existing || !existing.questions || existing.questions.length === 0) {
-      setLoadingReviewId(quizId);
-      try {
-        const fullQuiz = await getQuizById(quizId, true);
-        if (fullQuiz) {
-          setQuizDetailsCache((prev) => ({ ...prev, [quizId]: fullQuiz }));
-        }
-      } catch (err) {
-        console.warn("Error fetching full quiz details for review:", err);
-      } finally {
-        setLoadingReviewId(null);
+    // Fetch full quiz definition with force refresh so overriddenScores and questions are up to date
+    setLoadingReviewId(quizId);
+    try {
+      const fullQuiz = await getQuizById(quizId, true);
+      if (fullQuiz) {
+        setQuizDetailsCache((prev) => ({ ...prev, [quizId]: fullQuiz }));
+        setUserSubmissions((prev) => {
+          const merged = getMergedSubmission(fullQuiz, prev[quizId]);
+          return merged ? { ...prev, [quizId]: merged } : prev;
+        });
       }
+    } catch (err) {
+      console.warn("Error fetching full quiz details for review:", err);
+    } finally {
+      setLoadingReviewId(null);
     }
 
     // Also fetch submission answers if not present in memory
@@ -477,10 +562,15 @@ export const ParticipantDashboardPage: React.FC = () => {
         const sessionId = `${quizId.trim()}_${user.uid.trim()}`;
         const subData = await fetchSubmission(sessionId).catch(() => null);
         if (subData && (subData.id || subData._id)) {
-          setUserSubmissions((prev) => ({
-            ...prev,
-            [quizId]: { id: subData.id || subData._id, ...subData } as QuizSubmission
-          }));
+          const rawSub = { id: subData.id || subData._id, ...subData } as QuizSubmission;
+          setUserSubmissions((prev) => {
+            const currentQ = quizDetailsCache[quizId] || availableQuizzes.find((q) => q.id === quizId);
+            const merged = getMergedSubmission(currentQ, rawSub);
+            return {
+              ...prev,
+              [quizId]: merged || rawSub
+            };
+          });
         }
       } catch (e) {}
     }
@@ -1178,10 +1268,13 @@ export const ParticipantDashboardPage: React.FC = () => {
                   <div className="space-y-6">
                     {availableQuizzes.map((quiz) => {
                       const now = Date.now();
-                      const userSub = userSubmissions[quiz.id];
+                      const activeQuizObj = quizDetailsCache[quiz.id] || quiz;
+                      const rawUserSub = userSubmissions[quiz.id];
+                      const userSub = getMergedSubmission(activeQuizObj, rawUserSub);
+
                       const isSubmitted = Boolean(userSub || (quizScore !== null && availableQuizzes.length === 1));
+                      const maxQScore = userSub?.maxScore || activeQuizObj.totalMarks || (activeQuizObj.questions?.length ? activeQuizObj.questions.length * 2 : (quizMaxScore || 50));
                       const effectiveScore = userSub?.score ?? (quizScore !== null ? quizScore : 0);
-                      const maxQScore = userSub?.maxScore || quiz.totalMarks || (quiz.questions?.length ? quiz.questions.length * 2 : (quizMaxScore || 50));
                       const effectivePercentage = userSub?.percentage !== undefined ? userSub.percentage : (maxQScore > 0 ? Math.round((effectiveScore / maxQScore) * 100) : (quizPercentage || 0));
                       const isPassed = userSub?.passed ?? (effectivePercentage >= 40 || currentRound > 1);
 
@@ -1198,7 +1291,6 @@ export const ParticipantDashboardPage: React.FC = () => {
                       );
 
                       const isExpanded = expandedQuizReviewId === quiz.id;
-                      const activeQuizObj = quizDetailsCache[quiz.id] || quiz;
                       const reviewQuestions = activeQuizObj.questions || [];
                       const subAnswers = userSub?.answers || {};
                       const isLoadingReview = loadingReviewId === quiz.id;

@@ -5,9 +5,10 @@ import { useModal } from "../../context/ModalContext";
 import * as api from "../../services/apiClient";
 import type { Quiz, QuizQuestion, QuizSubmission, QuizSession } from "../../types/quiz";
 import { resetParticipantQuizSession, resetAllQuizSubmissions, deleteQuizCascading, evaluateQuizAnswers } from "../../services/quizService";
+import { userService } from "../../services/userService";
 import { extractTextFromPdf, parseQuestionsFromText } from "../../utils/pdfExtractor";
 import { extractQuizQuestionsWithGemini } from "../../utils/geminiQuizExtractor";
-import { userService } from "../../services/userService";
+import { db, doc, updateDoc } from "../../config/firebase";
 import SEO from "../../components/layout/SEO";
 import DatePicker from "../../components/ui/DatePicker";
 import TimePicker from "../../components/ui/TimePicker";
@@ -1337,7 +1338,8 @@ interface ExcelScoreRow {
       const newOverridden = { ...currentOverridden };
 
       modifiedRows.forEach((r) => {
-        newOverridden[r.id] = {
+        const rowPatch = {
+          id: r.id,
           score: r.score,
           maxScore: r.maxScore,
           percentage: r.percentage,
@@ -1350,10 +1352,55 @@ interface ExcelScoreRow {
           scoreOverriddenAt: Date.now(),
           evaluatedAt: Date.now()
         };
+
+        if (r.id) newOverridden[r.id] = rowPatch;
+        const subMatch = submissions.find(s => s.id === r.id);
+        if (subMatch?.sessionId) newOverridden[subMatch.sessionId] = rowPatch;
+        if (subMatch?.userId) newOverridden[subMatch.userId] = rowPatch;
+        if (subMatch?.teamId) newOverridden[subMatch.teamId] = rowPatch;
+        if (subMatch?.userEmail) newOverridden[subMatch.userEmail.toLowerCase().trim()] = rowPatch;
       });
 
-      // Save overriding scores into the quiz object directly to bypass backend endpoint issues
+      // 1. Save overriding scores into the quiz object directly
       await api.updateQuiz(selectedQuizId, { overriddenScores: newOverridden });
+
+      // 2. Also call batchUpdateQuizSubmissions
+      try {
+        await api.batchUpdateQuizSubmissions(selectedQuizId, modifiedRows);
+      } catch (e) {
+        console.warn("Backend batch update fallback:", e);
+      }
+
+      // 3. Update Firestore documents in parallel
+      await Promise.allSettled(
+        modifiedRows.map(async (r) => {
+          const subMatch = submissions.find(s => s.id === r.id);
+          const patchData = {
+            score: r.score,
+            maxScore: r.maxScore,
+            percentage: r.percentage,
+            correctCount: r.correctCount,
+            incorrectCount: r.incorrectCount,
+            passed: r.passed,
+            remarks: r.remarks,
+            isScoreOverridden: true,
+            scoreOverriddenAt: Date.now(),
+            evaluatedAt: Date.now()
+          };
+
+          if (r.id) {
+            await updateDoc(doc(db, "quizSubmissions", r.id), patchData).catch(() => null);
+          }
+          if (subMatch?.teamId) {
+            await updateDoc(doc(db, "registrations", subMatch.teamId), {
+              quizScore: r.score,
+              quizPercentage: r.percentage,
+              quizPassed: r.passed,
+              quizMaxScore: r.maxScore
+            }).catch(() => null);
+          }
+        })
+      );
 
       // Update local state to reflect changes immediately
       setQuizzes(prev => prev.map(q => q.id === selectedQuizId ? { ...q, overriddenScores: newOverridden } : q));
@@ -3595,7 +3642,7 @@ Answer: A`;
                               <div className="text-[10px] text-slate-400">{new Date(sub.submittedAt).toLocaleDateString()}</div>
                             </td>
 
-                            {/* Actions */}
+                             {/* Actions */}
                             <td className="py-3.5 px-4 text-right">
                               <div className="flex items-center justify-end gap-1.5">
                                 <button
@@ -3651,7 +3698,7 @@ Answer: A`;
               });
 
               return (
-                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4">
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-[60] flex items-center justify-center p-4">
                   <div className="bg-white rounded-3xl max-w-3xl w-full max-h-[90vh] flex flex-col shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150">
                     
                     {/* Modal Header */}
@@ -3792,6 +3839,16 @@ Answer: A`;
                     {/* Questions & Proctoring Audit Body */}
                     <div className="p-6 overflow-y-auto space-y-6">
                       
+                      {/* Evaluator Tip (Only visible in edit page mode) */}
+                      {isExcelEditorOpen && (
+                        <div className="bg-blue-50 border border-blue-200 rounded-xl p-3 flex items-center gap-2">
+                          <AlertCircle className="w-4 h-4 text-blue-600 shrink-0" />
+                          <span className="text-xs font-medium text-blue-900">
+                            <strong>Evaluator Tip:</strong> Click on any option below to manually override the participant's answer. Their score will be automatically recalculated.
+                          </span>
+                        </div>
+                      )}
+
                       {/* Proctoring Incident Audit details if violations present */}
                       {inspectingSubmission.violationsCount && inspectingSubmission.violationsCount > 0 && inspectingSubmission.violationLogs && inspectingSubmission.violationLogs.length > 0 && (
                         <div className="bg-red-50 border border-red-200 rounded-2xl p-4 space-y-2">
@@ -3900,7 +3957,22 @@ Answer: A`;
                                     return (
                                       <div
                                         key={opt.id}
-                                        className={`p-2.5 rounded-xl border text-xs flex flex-col justify-between gap-1 transition-all ${optionStyle}`}
+                                        onClick={() => {
+                                          if (!isExcelEditorOpen) return;
+                                          const targetQuiz = quizzes.find((q) => q.id === inspectingSubmission.quizId);
+                                          if (!targetQuiz) return;
+                                          const newAnswers = { ...inspectingSubmission.answers, [q.id]: opt.id };
+                                          const evalData = evaluateQuizAnswers(targetQuiz, newAnswers);
+                                          setInspectingSubmission({
+                                            ...inspectingSubmission,
+                                            answers: newAnswers,
+                                            ...evalData,
+                                            isScoreOverridden: true
+                                          } as any);
+                                        }}
+                                        className={`p-2.5 rounded-xl border text-xs flex flex-col justify-between gap-1 transition-all ${
+                                          isExcelEditorOpen ? "cursor-pointer hover:brightness-95" : "cursor-default"
+                                        } ${optionStyle}`}
                                       >
                                         <div className="flex items-center gap-2">
                                           <span className="font-black text-[11px] uppercase opacity-70">
@@ -3945,10 +4017,116 @@ Answer: A`;
                       <div className="flex items-center gap-2">
                         <button
                           onClick={() => setInspectingSubmission(null)}
-                          className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-5 py-2 rounded-xl transition-all cursor-pointer"
+                          className="bg-white hover:bg-slate-50 text-slate-700 border border-slate-200 font-bold text-xs px-5 py-2 rounded-xl transition-all cursor-pointer"
                         >
-                          Close Scorecard
+                          Close
                         </button>
+                        {isExcelEditorOpen && (
+                          <button
+                            onClick={async () => {
+                              try {
+                                const targetQuiz = quizzes.find(q => q.id === inspectingSubmission.quizId);
+                                if (!targetQuiz) return;
+                                
+                                const currentOverridden = (targetQuiz as any).overriddenScores || {};
+                                const newOverridden = { ...currentOverridden };
+                                
+                                const patchData = {
+                                  id: inspectingSubmission.id,
+                                  sessionId: inspectingSubmission.sessionId,
+                                  userId: inspectingSubmission.userId,
+                                  teamId: inspectingSubmission.teamId,
+                                  userEmail: inspectingSubmission.userEmail,
+                                  answers: inspectingSubmission.answers,
+                                  score: inspectingSubmission.score,
+                                  maxScore: inspectingSubmission.maxScore,
+                                  percentage: inspectingSubmission.percentage,
+                                  correctCount: inspectingSubmission.correctCount,
+                                  incorrectCount: inspectingSubmission.incorrectCount,
+                                  passed: inspectingSubmission.passed,
+                                  isScoreOverridden: true,
+                                  scoreOverriddenAt: Date.now(),
+                                  evaluatedAt: Date.now()
+                                };
+                                
+                                if (inspectingSubmission.id) newOverridden[inspectingSubmission.id] = patchData;
+                                if (inspectingSubmission.sessionId) newOverridden[inspectingSubmission.sessionId] = patchData;
+                                if (inspectingSubmission.userId) newOverridden[inspectingSubmission.userId] = patchData;
+                                if (inspectingSubmission.teamId) newOverridden[inspectingSubmission.teamId] = patchData;
+                                if (inspectingSubmission.userEmail) newOverridden[inspectingSubmission.userEmail.toLowerCase().trim()] = patchData;
+                                
+                                // 1. Save to Quiz document
+                                await api.updateQuiz(targetQuiz.id, { overriddenScores: newOverridden });
+                                
+                                // 2. Save directly to backend submission endpoint
+                                try {
+                                  await api.updateQuizSubmission(targetQuiz.id, inspectingSubmission.id, patchData);
+                                } catch (e) {
+                                  console.warn("Backend updateQuizSubmission fallback:", e);
+                                }
+                                
+                                // 3. Update Firestore documents in parallel
+                                if (inspectingSubmission.id) {
+                                  await updateDoc(doc(db, "quizSubmissions", inspectingSubmission.id), patchData).catch(() => null);
+                                }
+                                if (inspectingSubmission.teamId) {
+                                  await updateDoc(doc(db, "registrations", inspectingSubmission.teamId), {
+                                    quizScore: inspectingSubmission.score,
+                                    quizPercentage: inspectingSubmission.percentage,
+                                    quizPassed: inspectingSubmission.passed,
+                                    quizMaxScore: inspectingSubmission.maxScore
+                                  }).catch(() => null);
+                                }
+                                
+                                setQuizzes(prev => prev.map(q => q.id === targetQuiz.id ? { ...q, overriddenScores: newOverridden } : q));
+                                
+                                setExcelRows((prev) => prev.map((r) => {
+                                  if (r.id === inspectingSubmission.id) {
+                                    return {
+                                      ...r,
+                                      score: inspectingSubmission.score ?? r.score,
+                                      maxScore: inspectingSubmission.maxScore ?? r.maxScore,
+                                      percentage: inspectingSubmission.percentage ?? r.percentage,
+                                      correctCount: inspectingSubmission.correctCount ?? r.correctCount,
+                                      incorrectCount: inspectingSubmission.incorrectCount ?? r.incorrectCount,
+                                      passed: inspectingSubmission.passed ?? r.passed,
+                                      originalScore: inspectingSubmission.score ?? r.score,
+                                      originalMaxScore: inspectingSubmission.maxScore ?? r.maxScore,
+                                      originalPassed: inspectingSubmission.passed ?? r.passed,
+                                      originalCorrectCount: inspectingSubmission.correctCount ?? r.correctCount,
+                                      originalIncorrectCount: inspectingSubmission.incorrectCount ?? r.incorrectCount,
+                                    };
+                                  }
+                                  return r;
+                                }));
+                                
+                                setSubmissions(prev => prev.map(sub => {
+                                  if (sub.id === inspectingSubmission.id) {
+                                    return { ...sub, ...newOverridden[inspectingSubmission.id] };
+                                  }
+                                  return sub;
+                                }));
+                                
+                                await showAlert({
+                                  title: "Answers Saved",
+                                  message: "The participant's answers and scores have been updated successfully.",
+                                  type: "success"
+                                });
+                                setInspectingSubmission(null);
+                              } catch (err: any) {
+                                await showAlert({
+                                  title: "Save Error",
+                                  message: err.message,
+                                  type: "danger"
+                                });
+                              }
+                            }}
+                            className="bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs px-5 py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5"
+                          >
+                            <Save className="w-3.5 h-3.5" />
+                            <span>Save Changes</span>
+                          </button>
+                        )}
                       </div>
                     </div>
 
@@ -3971,8 +4149,8 @@ Answer: A`;
               const currentPassRate = excelRows.length > 0 ? Math.round((currentPassedCount / excelRows.length) * 100) : 0;
 
               return (
-                <div className="fixed inset-0 bg-slate-900/80 backdrop-blur-xs z-50 flex items-center justify-center p-2 sm:p-4">
-                  <div className="bg-white rounded-3xl max-w-7xl w-full h-[92vh] flex flex-col shadow-2xl border border-slate-200 animate-in fade-in zoom-in-95 duration-150 overflow-hidden">
+                <div className="fixed inset-0 bg-slate-900 z-50 flex flex-col">
+                  <div className="bg-white w-full h-full flex flex-col animate-in fade-in duration-150 overflow-hidden">
                     
                     {/* Excel Sheet Header Bar */}
                     <div className="px-6 py-4 border-b border-slate-200 bg-gradient-to-r from-purple-900 via-indigo-900 to-slate-900 text-white flex flex-col md:flex-row md:items-center justify-between gap-3 shrink-0">
@@ -4158,7 +4336,7 @@ Answer: A`;
                               <th className="py-3 px-3 min-w-[85px] border-r border-slate-200">Wrong</th>
                               <th className="py-3 px-3 min-w-[90px] text-center border-r border-slate-200">Time</th>
                               <th className="py-3 px-4 min-w-[220px] border-r border-slate-200">Evaluator Remarks</th>
-                              <th className="py-3 px-3 text-center w-24">State</th>
+                              <th className="py-3 px-3 text-center min-w-[150px]">State / Actions</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-200/90 font-medium bg-white">
@@ -4315,21 +4493,35 @@ Answer: A`;
 
                                   {/* Row State / Revert */}
                                   <td className="py-2 px-3 text-center">
-                                    {row.isModified ? (
+                                    <div className="flex flex-col gap-1 items-center justify-center">
+                                      {row.isModified ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => handleExcelRevertRow(row.id)}
+                                          className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded-lg text-[10px] font-black flex items-center gap-1 cursor-pointer transition-colors"
+                                          title="Revert this row to original saved score"
+                                        >
+                                          <RotateCcw className="w-2.5 h-2.5" />
+                                          <span>Revert</span>
+                                        </button>
+                                      ) : (
+                                        <span className="text-[10px] font-bold text-slate-300 uppercase">
+                                          Saved
+                                        </span>
+                                      )}
                                       <button
                                         type="button"
-                                        onClick={() => handleExcelRevertRow(row.id)}
-                                        className="px-2 py-1 bg-amber-100 hover:bg-amber-200 text-amber-900 border border-amber-300 rounded-lg text-[10px] font-black flex items-center gap-1 mx-auto cursor-pointer transition-colors"
-                                        title="Revert this row to original saved score"
+                                        onClick={() => {
+                                          const sub = rankedSubmissions.find(s => s.id === row.id);
+                                          if (sub) setInspectingSubmission(sub);
+                                        }}
+                                        className="px-2 py-1 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-lg text-[10px] font-black flex items-center justify-center gap-1 cursor-pointer transition-colors w-[100px]"
+                                        title="View and edit participant's answers"
                                       >
-                                        <RotateCcw className="w-2.5 h-2.5" />
-                                        <span>Revert</span>
+                                        <Eye className="w-3 h-3" />
+                                        <span>View Answers</span>
                                       </button>
-                                    ) : (
-                                      <span className="text-[10px] font-bold text-slate-300 uppercase">
-                                        Saved
-                                      </span>
-                                    )}
+                                    </div>
                                   </td>
                                 </tr>
                               );

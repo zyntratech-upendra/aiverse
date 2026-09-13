@@ -73,10 +73,11 @@ router.put(
       if (u.passed !== undefined) updateDoc.passed = Boolean(u.passed);
       if (u.remarks !== undefined) updateDoc.remarks = u.remarks;
       if (u.originalScore !== undefined) updateDoc.originalScore = Number(u.originalScore);
+      if (u.answers !== undefined) updateDoc.answers = u.answers;
 
       return {
         updateOne: {
-          filter: { $or: [{ _id: u.id }, { sessionId: u.id }, { id: u.id }] },
+          filter: { $or: [{ _id: u.id }, { sessionId: u.id }, { id: u.id }, { userId: u.id }, { teamId: u.id }] },
           update: { $set: updateDoc },
         },
       };
@@ -93,7 +94,7 @@ router.put(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const { quizId, submissionId } = req.params;
-    const { score, percentage, correctCount, incorrectCount, passed, maxScore, remarks, originalScore } = req.body || {};
+    const { score, percentage, correctCount, incorrectCount, passed, maxScore, remarks, originalScore, answers } = req.body || {};
 
     const updateDoc = {
       evaluatedAt: Date.now(),
@@ -108,9 +109,10 @@ router.put(
     if (passed !== undefined) updateDoc.passed = Boolean(passed);
     if (remarks !== undefined) updateDoc.remarks = remarks;
     if (originalScore !== undefined) updateDoc.originalScore = Number(originalScore);
+    if (answers !== undefined) updateDoc.answers = answers;
 
     const updated = await QuizSubmission.findOneAndUpdate(
-      { $or: [{ _id: submissionId }, { sessionId: submissionId }, { id: submissionId }] },
+      { $or: [{ _id: submissionId }, { sessionId: submissionId }, { id: submissionId }, { userId: submissionId }, { teamId: submissionId }] },
       { $set: updateDoc },
       { new: true }
     ).lean();

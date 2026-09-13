@@ -86,7 +86,24 @@ export const QuizCompletionPage: React.FC = () => {
   const violationLogs = submission?.violationLogs || [];
 
   const submissionId = submission?.id;
-  const overriddenData = (quiz as any)?.overriddenScores?.[submissionId || ""];
+  const overridden = (quiz as any)?.overriddenScores || {};
+  const cleanEmail = user?.email?.toLowerCase().trim() || "";
+  const uid = user?.uid || "";
+  
+  const overriddenData = 
+    (submissionId && overridden[submissionId]) ||
+    (submission?.sessionId && overridden[submission.sessionId]) ||
+    (uid && overridden[uid]) ||
+    (submission?.teamId && overridden[submission.teamId]) ||
+    (submission?.userId && overridden[submission.userId]) ||
+    (cleanEmail && overridden[cleanEmail]) ||
+    Object.values(overridden).find((o: any) => {
+      if (!o) return false;
+      if (uid && (o.userId === uid || o.id?.includes(uid) || o.sessionId?.includes(uid))) return true;
+      if (cleanEmail && (o.userEmail?.toLowerCase().trim() === cleanEmail || o.email?.toLowerCase().trim() === cleanEmail)) return true;
+      return false;
+    }) as any;
+
   const isOverridden = !!overriddenData || !!submission?.isScoreOverridden;
 
   const maxScore = overriddenData?.maxScore ?? (submission?.maxScore || quiz?.totalMarks || (quiz?.questions?.length ? quiz.questions.length * 2 : 50));
@@ -97,7 +114,7 @@ export const QuizCompletionPage: React.FC = () => {
   const incorrectCount = overriddenData?.incorrectCount ?? submission?.incorrectCount;
   
   const questions = quiz?.questions || [];
-  const answers = submission?.answers || {};
+  const answers = overriddenData?.answers || submission?.answers || {};
 
   return (
     <div className="min-h-screen bg-[#F4F7FC] flex flex-col font-sans text-slate-800 antialiased selection:bg-blue-500/20 selection:text-blue-600">
