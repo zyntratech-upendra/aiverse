@@ -61,10 +61,10 @@ jobs:
             npm run build
 
             echo " Deploying Frontend"
-            #sudo rm -rf /usr/share/nginx/html/*
-            #sudo cp -r dist/* /usr/share/nginx/html/
-            sudo rm -rf /var/www/aiplacementprep/*
-            sudo cp -r dist/* /var/www/aiplacementprep/
+            sudo rm -rf /usr/share/nginx/html/*
+            sudo cp -r dist/* /usr/share/nginx/html/
+            #sudo rm -rf /var/www/aiplacementprep/*
+            #sudo cp -r dist/* /var/www/aiplacementprep/
             cd ..
           fi
 
@@ -78,7 +78,8 @@ jobs:
             echo "🔧 Backend Setup"
             cd backend
             npm install
-            pm2 restart backend --update-env || pm2 start server.js --name backend
+            #pm2 restart backend --update-env || pm2 start server.js --name backend
+            pm2 restart ai-verse-backend --update-env || pm2 start src/index.js -i 2 --name ai-verse-backend
             cd ..
           fi
 
