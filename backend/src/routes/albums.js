@@ -32,7 +32,39 @@ router.get(
   })
 );
 
-// POST /api/albums - Create album
+// POST /api/albums/bulk - Create multiple single images in batch
+router.post(
+  '/bulk',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const items = req.body?.items || req.body || [];
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ success: false, error: 'No items provided for bulk upload' });
+    }
+
+    const now = Date.now();
+    const docsToInsert = items.map((item, idx) => {
+      const id = item._id || item.id || new mongoose.Types.ObjectId().toString();
+      return {
+        ...item,
+        _id: id,
+        photosCount: 1,
+        order: item.order !== undefined ? item.order : idx,
+        createdAt: item.createdAt || now,
+        updatedAt: now,
+      };
+    });
+
+    const saved = await Album.insertMany(docsToInsert);
+    res.status(201).json({
+      success: true,
+      count: saved.length,
+      items: saved.map((s) => ({ ...s.toObject(), id: s._id })),
+    });
+  })
+);
+
+// POST /api/albums - Create album or single photo
 router.post(
   '/',
   optionalAuth,
@@ -44,6 +76,7 @@ router.post(
     const newAlbum = new Album({
       ...payload,
       _id: id,
+      photosCount: payload.photosCount || 1,
       images: Array.isArray(payload.images) ? payload.images : [],
       createdAt: payload.createdAt || now,
       updatedAt: now,

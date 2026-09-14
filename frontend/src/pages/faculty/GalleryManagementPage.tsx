@@ -1,11 +1,9 @@
-import React, { useState, useMemo, useEffect } from "react";
+import React, { useState, useMemo, useEffect, useRef } from "react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
-import Badge from "../../components/ui/Badge";
-import DatePicker from "../../components/ui/DatePicker";
-import { fetchAlbums, createAlbum, updateAlbum, deleteAlbum } from "../../services/apiClient";
+import { fetchAlbums, createAlbum, bulkCreateAlbums, updateAlbum, deleteAlbum } from "../../services/apiClient";
+import { dataCache } from "../../utils/dataCache";
 import { 
-  Folder, 
   Image as ImageIcon, 
   Clock, 
   Search, 
@@ -14,41 +12,42 @@ import {
   Plus, 
   Upload, 
   X, 
-  Sparkles, 
   Trash2, 
   CheckCircle, 
-  ArrowLeft, 
   Save, 
   Info, 
-  Settings as SettingsIcon, 
-  Bell, 
-  Link as LinkIcon, 
-  ExternalLink, 
   Pencil, 
-  AlertTriangle 
+  AlertTriangle,
+  Eye,
+  Calendar,
+  Layers,
+  RefreshCw
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-// Import local assets
+// Import local fallback assets
 import galleryLab from "../../assets/images/gallery_lab.png";
 import gallerySymposium from "../../assets/images/gallery_symposium.png";
 import galleryVr from "../../assets/images/gallery_vr.png";
 import galleryCoding from "../../assets/images/gallery_coding.png";
 import galleryCoworking from "../../assets/images/gallery_coworking.png";
 import galleryCollab from "../../assets/images/gallery_collab.png";
-import hackathonImg from "../../assets/images/hackathon.png";
-import seminarImg from "../../assets/images/seminar.png";
-import sparkImg from "../../assets/images/spark.png";
 
-interface AlbumItem {
+export interface GalleryPhotoItem {
   id: string;
   title: string;
-  photosCount: number;
+  imageUrl: string;
+  coverImage?: string;
+  category: "Workshops" | "Hackathons" | "Symposiums" | "Socials";
   date: string;
   status: "Published" | "Draft";
-  coverImage: string;
-  category: "Workshops" | "Hackathons" | "Symposiums" | "Socials";
+  caption?: string;
+  description?: string;
+  tags?: string[];
+  eventId?: string;
+  eventTitle?: string;
   createdAt?: number;
+  size?: string;
 }
 
 interface ToastMessage {
@@ -57,132 +56,153 @@ interface ToastMessage {
   type: "success" | "info" | "warning";
 }
 
-const GalleryManagementPage: React.FC = () => {
-  // Page stats states
+const CATEGORY_OPTIONS: Array<GalleryPhotoItem["category"]> = [
+  "Workshops",
+  "Hackathons",
+  "Symposiums",
+  "Socials"
+];
+
+export const GalleryManagementPage: React.FC = () => {
+  const [photos, setPhotos] = useState<GalleryPhotoItem[]>([]);
+  const [loading, setLoading] = useState<boolean>(true);
   const [toastQueue, setToastQueue] = useState<ToastMessage[]>([]);
 
-  const [albums, setAlbums] = useState<AlbumItem[]>([]);
+  // Search, Filter & View Controls
+  const [searchQuery, setSearchQuery] = useState("");
+  const [selectedCategory, setSelectedCategory] = useState<string>("All");
+  const [statusFilter] = useState<"All" | "Published" | "Draft">("All");
+  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
 
-  const totalImages = useMemo(() => {
-    return albums.reduce((sum, a) => sum + (a.photosCount || 0), 0);
-  }, [albums]);
+  // Modals
+  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingPhoto, setEditingPhoto] = useState<GalleryPhotoItem | null>(null);
+  const [lightboxPhoto, setLightboxPhoto] = useState<GalleryPhotoItem | null>(null);
+  const [deleteConfirmPhoto, setDeleteConfirmPhoto] = useState<GalleryPhotoItem | null>(null);
 
-  const recentUploads = useMemo(() => {
-    return albums
-      .filter(a => {
-        const created = a.createdAt || 0;
-        return (Date.now() - created) < 604800000;
-      })
-      .reduce((sum, a) => sum + (a.photosCount || 0), 0);
-  }, [albums]);
+  // Single / Batch Upload State
+  const [pendingUploads, setPendingUploads] = useState<{
+    id: string;
+    file: File;
+    name: string;
+    size: string;
+    preview: string;
+    title: string;
+    category: GalleryPhotoItem["category"];
+    caption: string;
+    date: string;
+    status: "Published" | "Draft";
+    tags: string[];
+  }[]>([]);
+  const [batchName, setBatchName] = useState("");
+  const [batchCaption, setBatchCaption] = useState("");
+  const [batchCategory, setBatchCategory] = useState<GalleryPhotoItem["category"]>("Workshops");
+  const [batchStatus, setBatchStatus] = useState<"Published" | "Draft">("Published");
+  const [batchDate, setBatchDate] = useState<string>(new Date().toISOString().split("T")[0]);
+  const [isUploading, setIsUploading] = useState(false);
+  const [dragActive, setDragActive] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const resolveAlbumCover = (data: any) => {
+  const handleBatchNameChange = (val: string) => {
+    setBatchName(val);
+    setPendingUploads((prev) =>
+      prev.map((p, idx) => ({
+        ...p,
+        title: val.trim()
+          ? prev.length > 1
+            ? `${val.trim()} (${idx + 1})`
+            : val.trim()
+          : p.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
+      }))
+    );
+  };
+
+  // Edit Form State
+  const [editTitle, setEditTitle] = useState("");
+  const [editCategory, setEditCategory] = useState<GalleryPhotoItem["category"]>("Workshops");
+  const [editCaption, setEditCaption] = useState("");
+  const [editDate, setEditDate] = useState("");
+  const [editStatus, setEditStatus] = useState<"Published" | "Draft">("Published");
+  const [editTags, setEditTags] = useState<string[]>([]);
+  const [newTagInput, setNewTagInput] = useState("");
+  const [editImagePreview, setEditImagePreview] = useState<string>("");
+  const editFileInputRef = useRef<HTMLInputElement>(null);
+
+  // Toast trigger helper
+  const addToast = (text: string, type: ToastMessage["type"] = "success") => {
+    const id = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+    setToastQueue((prev) => [...prev, { id, text, type }]);
+    setTimeout(() => {
+      setToastQueue((prev) => prev.filter((t) => t.id !== id));
+    }, 4000);
+  };
+
+  // Helper to resolve cover image
+  const resolvePhotoUrl = (data: any) => {
+    if (data?.imageUrl && typeof data.imageUrl === "string" && data.imageUrl.trim() !== "") {
+      return data.imageUrl;
+    }
+    if (data?.url && typeof data.url === "string" && data.url.trim() !== "") {
+      return data.url;
+    }
     if (data?.bannerImage && typeof data.bannerImage === "string" && data.bannerImage.trim() !== "") {
       return data.bannerImage;
     }
     if (data?.coverImage && typeof data.coverImage === "string" && (data.coverImage.startsWith("data:") || data.coverImage.startsWith("http") || data.coverImage.startsWith("/"))) {
       return data.coverImage;
     }
-    if (data?.coverImage === "galleryCoding") return galleryCoding;
-    if (data?.coverImage === "gallerySymposium") return gallerySymposium;
-    if (data?.coverImage === "galleryCoworking") return galleryCoworking;
+    if (data?.coverImage === "galleryCoding" || data?.category === "Hackathons") return galleryCoding;
+    if (data?.coverImage === "gallerySymposium" || data?.category === "Symposiums") return gallerySymposium;
+    if (data?.coverImage === "galleryCoworking" || data?.category === "Socials") return galleryCoworking;
     if (data?.coverImage === "galleryCollab") return galleryCollab;
     if (data?.coverImage === "galleryVr") return galleryVr;
-    if (data?.category === "Hackathons") return galleryCoding;
-    if (data?.category === "Symposiums") return gallerySymposium;
-    if (data?.category === "Socials") return galleryCoworking;
     return galleryLab;
   };
 
-  // Fetch albums from backend on mount
-  useEffect(() => {
-    const loadAlbums = async () => {
-      try {
-        const querySnapshot = await fetchAlbums();
-        const list: AlbumItem[] = [];
-        (querySnapshot || []).forEach((doc: any) => {
-          const data = doc || {};
+  // Load photos from backend
+  const loadPhotos = async () => {
+    setLoading(true);
+    try {
+      const data = await fetchAlbums();
+      const list: GalleryPhotoItem[] = [];
 
-          list.push({
-            id: doc.id || doc._id || "",
-            title: data.title || "",
-            photosCount: data.photosCount || data.photos_count || 0,
-            date: data.date || "",
-            status: data.status || "Published",
-            coverImage: resolveAlbumCover(data),
-            category: data.category || "Workshops",
-            createdAt: data.createdAt || data.created_at || Date.now()
-          });
+      (data || []).forEach((item: any) => {
+        const raw = item || {};
+        const photoUrl = resolvePhotoUrl(raw);
+
+        list.push({
+          id: raw.id || raw._id || `${Date.now()}`,
+          title: raw.title || "Untitled Photo",
+          imageUrl: photoUrl,
+          coverImage: photoUrl,
+          category: (raw.category as any) || "Workshops",
+          date: raw.date || new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+          status: (raw.status as any) || "Published",
+          caption: raw.caption || raw.description || "",
+          description: raw.description || raw.caption || "",
+          tags: Array.isArray(raw.tags) ? raw.tags : [],
+          eventId: raw.eventId || "",
+          eventTitle: raw.eventTitle || "",
+          createdAt: raw.createdAt || raw.created_at || Date.now()
         });
-        setAlbums(list);
-      } catch (err) {
-        console.error("Error loading albums from backend:", err);
-        addToast("Failed to load albums from backend.", "warning");
-      }
-    };
+      });
 
-    loadAlbums();
-  }, []);
-
-  // Interactive UI states
-  const [searchQuery, setSearchQuery] = useState("");
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
-  const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
-  const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
-  const [isViewAllModalOpen, setIsViewAllModalOpen] = useState(false);
-  const [isTagModalOpen, setIsTagModalOpen] = useState(false);
-
-  // Recently uploaded media state
-  const [recentImages, setRecentImages] = useState<Array<{ id: string; name: string; size: string; url: string }>>([
-    { id: "img-1", name: "AI_Symposium_Keynote.jpg", size: "2.4 MB", url: gallerySymposium },
-    { id: "img-2", name: "Hackathon_Opening_Ceremony.jpg", size: "1.8 MB", url: hackathonImg },
-    { id: "img-3", name: "Robotics_Workshop_Team.jpg", size: "3.1 MB", url: galleryLab },
-    { id: "img-4", name: "VR_Experience_Zone.jpg", size: "2.9 MB", url: galleryVr },
-    { id: "img-5", name: "Faculty_Networking_Meet.jpg", size: "1.5 MB", url: seminarImg },
-    { id: "img-6", name: "Project_Showcase_Awards.jpg", size: "4.2 MB", url: sparkImg }
-  ]);
-
-  // New Album Form state
-  const [formTitle, setFormTitle] = useState("");
-  const [formStatus, setFormStatus] = useState<"Published" | "Draft">("Published");
-  const [formCategory, setFormCategory] = useState<AlbumItem["category"]>("Workshops");
-  const [formDate, setFormDate] = useState("");
-
-  // Upload Form state
-  const [uploadAlbumId, setUploadAlbumId] = useState(albums[0]?.id || "1");
-  const [selectedFileCount, setSelectedFileCount] = useState(0);
-
-  // New Album Full Page View states
-  const [showCreateAlbumView, setShowCreateAlbumView] = useState(false);
-  const [editingAlbumId, setEditingAlbumId] = useState<string | null>(null);
-  const [deleteConfirmAlbum, setDeleteConfirmAlbum] = useState<{ id: string; title: string } | null>(null);
-
-  const [albumTitle, setAlbumTitle] = useState("");
-  const [albumCategory, setAlbumCategory] = useState("Workshops");
-  const [albumDescription, setAlbumDescription] = useState("");
-  const [driveLink, setDriveLink] = useState("");
-  const [bannerImage, setBannerImage] = useState("");
-  const [isPublicVisible, setIsPublicVisible] = useState(true);
-  const [isFeaturedOnHome, setIsFeaturedOnHome] = useState(false);
-  const [isCommentsEnabled, setIsCommentsEnabled] = useState(true);
-  const [searchTags, setSearchTags] = useState<string[]>(["Symposium", "AI Lab"]);
-  const [newTagText, setNewTagText] = useState("");
-  const [selectedPhotos, setSelectedPhotos] = useState<{ name: string; size: string; preview: string }[]>([]);
-
-  const bannerInputRef = React.useRef<HTMLInputElement>(null);
-
-  const handleOpenEditAlbum = (album: AlbumItem) => {
-    setEditingAlbumId(album.id);
-    setAlbumTitle(album.title || "");
-    setAlbumCategory(album.category || "Workshops");
-    setAlbumDescription((album as any).description || "");
-    setDriveLink((album as any).driveLink || "");
-    setBannerImage(album.coverImage || (album as any).bannerImage || "");
-    setFormStatus(album.status);
-    setShowCreateAlbumView(true);
+      setPhotos(list);
+    } catch (err) {
+      console.error("Error loading photos:", err);
+      addToast("Failed to load gallery photos from database.", "warning");
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const compressImage = (base64Str: string, maxWidth = 500, quality = 0.6): Promise<string> => {
+  useEffect(() => {
+    loadPhotos();
+  }, []);
+
+  // Compression helper
+  const compressImage = (base64Str: string, maxWidth = 1280, quality = 0.8): Promise<string> => {
     return new Promise((resolve) => {
       const img = new Image();
       img.src = base64Str;
@@ -214,1423 +234,1350 @@ const GalleryManagementPage: React.FC = () => {
     });
   };
 
-  const handleSaveAlbum = async (status: "Published" | "Draft") => {
-    if (!albumTitle.trim()) {
-      addToast("Album title is required!", "warning");
-      return;
-    }
+  // Convert File to Base64
+  const fileToBase64 = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.readAsDataURL(file);
+      reader.onload = () => resolve(reader.result as string);
+      reader.onerror = (error) => reject(error);
+    });
+  };
 
-    let coverName = "galleryLab";
-    if (albumCategory === "Hackathons") {
-      coverName = "galleryCoding";
-    } else if (albumCategory === "Symposiums" || albumCategory === "Symposium") {
-      coverName = "gallerySymposium";
-    } else if (albumCategory === "Socials") {
-      coverName = "galleryCoworking";
-    }
+  // Format file size
+  const formatBytes = (bytes: number): string => {
+    if (bytes === 0) return "0 Bytes";
+    const k = 1024;
+    const sizes = ["Bytes", "KB", "MB", "GB"];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + " " + sizes[i];
+  };
 
-    const dateStr = new Date().toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  // Handle files selected for upload
+  const handleFilesSelected = async (files: FileList | null) => {
+    if (!files || files.length === 0) return;
 
-    addToast("Compressing gallery images...", "info");
-    const compressedImages = await Promise.all(
-      selectedPhotos.map(photo => compressImage(photo.preview))
-    );
+    const newPending: typeof pendingUploads = [];
+    const dateFormatted = new Date(batchDate || Date.now()).toLocaleDateString("en-US", {
+      month: "short",
+      day: "numeric",
+      year: "numeric"
+    });
 
-    const payload = {
-      title: albumTitle,
-      photosCount: selectedPhotos.length || 12,
-      date: dateStr,
-      status: status,
-      coverImage: bannerImage || coverName,
-      category: albumCategory,
-      description: albumDescription,
-      driveLink: driveLink,
-      bannerImage: bannerImage,
-      isPublic: isPublicVisible,
-      isFeatured: isFeaturedOnHome,
-      allowComments: isCommentsEnabled,
-      tags: searchTags,
-      images: compressedImages,
-      createdAt: Date.now()
-    };
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (!file.type.startsWith("image/")) continue;
 
-    addToast("Saving album to database...", "info");
+      const rawBase64 = await fileToBase64(file);
+      const cleanName = file.name
+        .replace(/\.[^/.]+$/, "")
+        .replace(/[-_]/g, " ")
+        .replace(/\b\w/g, (c) => c.toUpperCase());
 
-    try {
-      if (editingAlbumId) {
-        await updateAlbum(editingAlbumId, payload);
-        addToast("Album updated successfully!", "success");
-      } else {
-        await createAlbum(payload);
-        addToast("Album created successfully!", "success");
+      let initialTitle = cleanName || `Event Photo ${i + 1}`;
+      if (batchName.trim()) {
+        initialTitle = files.length > 1 ? `${batchName.trim()} (${i + 1})` : batchName.trim();
       }
-      
-      const updated = await fetchAlbums();
-      const list: AlbumItem[] = [];
-      (updated || []).forEach((docSnap: any) => {
-        const data = docSnap || {};
 
-        list.push({
-          id: docSnap.id || docSnap._id || "",
-          title: data.title || "",
-          photosCount: data.photosCount || data.photos_count || 0,
-          date: data.date || "",
-          status: data.status || "Published",
-          coverImage: resolveAlbumCover(data),
-          category: data.category || "Workshops",
-          createdAt: data.createdAt || data.created_at || Date.now()
-        });
+      newPending.push({
+        id: `upload-${Date.now()}-${i}`,
+        file,
+        name: file.name,
+        size: formatBytes(file.size),
+        preview: rawBase64,
+        title: initialTitle,
+        category: batchCategory,
+        caption: batchCaption || "",
+        date: dateFormatted,
+        status: batchStatus,
+        tags: [batchCategory]
       });
-      setAlbums(list);
+    }
 
-      setAlbumTitle("");
-      setAlbumDescription("");
-      setDriveLink("");
-      setBannerImage("");
-      setSelectedPhotos([]);
-      setEditingAlbumId(null);
-      setShowCreateAlbumView(false);
-    } catch (err) {
-      console.error("Error saving album:", err);
-      addToast("Failed to save album.", "warning");
+    setPendingUploads((prev) => [...prev, ...newPending]);
+    if (!isUploadModalOpen) setIsUploadModalOpen(true);
+  };
+
+  // Drag and drop handlers
+  const handleDrag = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.type === "dragenter" || e.type === "dragover") {
+      setDragActive(true);
+    } else if (e.type === "dragleave") {
+      setDragActive(false);
     }
   };
 
-  // AI tag state
-  const [tags, setTags] = useState([
-    { name: "Workshop", count: 18, active: true },
-    { name: "Hardware", count: 24, active: true },
-    { name: "Coding", count: 32, active: false },
-    { name: "Symposium", count: 12, active: false },
-  ]);
-  const [newTagInput, setNewTagInput] = useState("");
-
-  // Toast trigger helper
-  const addToast = (text: string, type: ToastMessage["type"] = "success") => {
-    const id = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-    setToastQueue(prev => [...prev, { id, text, type }]);
-    setTimeout(() => {
-      setToastQueue(prev => prev.filter(t => t.id !== id));
-    }, 4000);
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragActive(false);
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      handleFilesSelected(e.dataTransfer.files);
+    }
   };
 
-  // Filter logic
-  const filteredAlbums = useMemo(() => {
-    return albums.filter(album =>
-      album.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      album.category.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [albums, searchQuery]);
+  // Remove pending file from upload queue
+  const handleRemovePending = (id: string) => {
+    setPendingUploads((prev) => prev.filter((p) => p.id !== id));
+  };
 
-  // Form submit - Create new album
-  const handleCreateAlbum = async (e: React.FormEvent) => {
+  // Submit single/batch photos
+  const handleUploadSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!formTitle.trim()) {
-      addToast("Album title is required!", "warning");
+    if (pendingUploads.length === 0) {
+      addToast("Please select at least one image to upload", "warning");
       return;
     }
 
-    let coverName = "galleryLab";
-    let cover = galleryLab;
-    if (formCategory === "Hackathons") {
-      coverName = "galleryCoding";
-      cover = galleryCoding;
-    } else if (formCategory === "Symposiums") {
-      coverName = "gallerySymposium";
-      cover = gallerySymposium;
-    } else if (formCategory === "Socials") {
-      coverName = "galleryCoworking";
-      cover = galleryCoworking;
-    }
-
-    const dateStr = formDate 
-      ? new Date(formDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) 
-      : "Just now";
-
-    const payload = {
-      title: formTitle,
-      photosCount: 0,
-      date: dateStr,
-      status: formStatus,
-      coverImage: coverName,
-      category: formCategory,
-      createdAt: Date.now()
-    };
-
-    addToast("Saving album to database...", "info");
+    setIsUploading(true);
+    addToast(`Processing and compressing ${pendingUploads.length} ${pendingUploads.length === 1 ? "photo" : "photos"}...`, "info");
 
     try {
-      const createdRes = await createAlbum(payload);
-      const newAlbumItem: AlbumItem = {
-        id: createdRes.id || createdRes.album?.id || `${Date.now()}`,
-        title: formTitle,
-        photosCount: 0,
-        date: dateStr,
-        status: formStatus,
-        coverImage: cover,
-        category: formCategory
-      };
+      // Compress and format items
+      const itemsToUpload = await Promise.all(
+        pendingUploads.map(async (p, idx) => {
+          const compressed = await compressImage(p.preview);
+          const cleanEventName = batchName.trim() || p.title.replace(/\s*\(\d+\)$/, "").replace(/\s*#\d+$/, "").trim();
+          return {
+            title: p.title.trim() || `Photo ${idx + 1}`,
+            eventTitle: cleanEventName,
+            imageUrl: compressed,
+            coverImage: compressed,
+            bannerImage: compressed,
+            category: p.category || batchCategory,
+            caption: p.caption || "",
+            description: p.caption || "",
+            date: p.date || new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+            status: p.status || batchStatus,
+            tags: p.tags && p.tags.length > 0 ? p.tags : [p.category || batchCategory],
+            photosCount: 1,
+            images: [{ url: compressed, caption: p.caption || "", uploadedAt: Date.now() }],
+            createdAt: Date.now()
+          };
+        })
+      );
 
-      setAlbums(prev => [newAlbumItem, ...prev]);
-      setIsCreateModalOpen(false);
-      
-      setFormTitle("");
-      setFormStatus("Published");
-      setFormCategory("Workshops");
-      setFormDate("");
-
-      addToast(`Album "${formTitle}" created successfully!`);
-    } catch (err) {
-      console.error("Error saving album to database:", err);
-      addToast("Failed to create album.", "warning");
-    }
-  };
-
-  // Form submit - Upload Images
-  const handleUploadImages = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (selectedFileCount <= 0) {
-      addToast("Please select at least 1 image to upload", "warning");
-      return;
-    }
-
-    addToast("Updating album counts in database...", "info");
-
-    try {
-      const targetAlbum = albums.find(a => a.id === uploadAlbumId);
-      if (targetAlbum) {
-        await updateAlbum(uploadAlbumId, { photosCount: targetAlbum.photosCount + selectedFileCount });
-
-        setAlbums(prev => prev.map(alb => {
-          if (alb.id === uploadAlbumId) {
-            return { ...alb, photosCount: alb.photosCount + selectedFileCount };
-          }
-          return alb;
-        }));
+      if (itemsToUpload.length === 1) {
+        await createAlbum(itemsToUpload[0]);
+      } else {
+        await bulkCreateAlbums(itemsToUpload);
       }
 
+      dataCache.invalidate("public_gallery_photos");
+      addToast(`Successfully uploaded ${itemsToUpload.length} ${itemsToUpload.length === 1 ? "photo" : "photos"}!`, "success");
+      setPendingUploads([]);
       setIsUploadModalOpen(false);
-      setSelectedFileCount(0);
-      addToast(`Successfully uploaded ${selectedFileCount} images!`);
+      await loadPhotos();
     } catch (err) {
-      console.error("Error updating image count in database:", err);
-      addToast("Failed to upload image metadata.", "warning");
-    }
-  };
-
-  // Simulate file selection
-  const simulateFileSelection = () => {
-    const randomCount = Math.floor(Math.random() * 5) + 1;
-    setSelectedFileCount(randomCount);
-    addToast(`Selected ${randomCount} files for upload`, "info");
-  };
-
-  // Toggle album status
-  const toggleAlbumStatus = async (id: string) => {
-    const targetAlbum = albums.find(a => a.id === id);
-    if (!targetAlbum) return;
-
-    const nextStatus = targetAlbum.status === "Published" ? "Draft" : "Published";
-
-    try {
-      await updateAlbum(id, { status: nextStatus });
-
-      setAlbums(prev => prev.map(alb => {
-        if (alb.id === id) {
-          addToast(`"${alb.title}" status changed to ${nextStatus.toUpperCase()}`);
-          return { ...alb, status: nextStatus };
-        }
-        return alb;
-      }));
-    } catch (err) {
-      console.error("Error toggling status in database:", err);
-      addToast("Failed to update status.", "warning");
-    }
-  };
-
-  // Trigger delete confirmation modal
-  const handleDeleteAlbum = (id: string, title: string) => {
-    setDeleteConfirmAlbum({ id, title });
-  };
-
-  // Confirm delete action
-  const confirmDeleteAlbum = async () => {
-    if (!deleteConfirmAlbum) return;
-    const { id, title } = deleteConfirmAlbum;
-
-    try {
-      await deleteAlbum(id);
-
-      setAlbums(prev => prev.filter(alb => alb.id !== id));
-      addToast(`Album "${title}" deleted from gallery directory.`, "success");
-    } catch (err) {
-      console.error("Error deleting album from database:", err);
-      addToast("Failed to delete album.", "warning");
+      console.error("Error uploading photos:", err);
+      addToast("Failed to save photos to database.", "warning");
     } finally {
-      setDeleteConfirmAlbum(null);
+      setIsUploading(false);
     }
   };
 
+  // Open Edit Modal
+  const handleOpenEdit = (photo: GalleryPhotoItem) => {
+    setEditingPhoto(photo);
+    setEditTitle(photo.title || "");
+    setEditCategory(photo.category || "Workshops");
+    setEditCaption(photo.caption || photo.description || "");
+    setEditDate(photo.date || "");
+    setEditStatus(photo.status || "Published");
+    setEditTags(photo.tags || [photo.category || "Workshops"]);
+    setEditImagePreview(photo.imageUrl);
+    setIsEditModalOpen(true);
+  };
 
+  // Handle Edit Image Replacement
+  const handleEditImageChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const base64 = await fileToBase64(file);
+    const compressed = await compressImage(base64);
+    setEditImagePreview(compressed);
+  };
 
-  // Add AI tag
-  const handleAddTag = (e: React.FormEvent) => {
+  // Save Edited Photo
+  const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newTagInput.trim()) return;
-    if (tags.some(t => t.name.toLowerCase() === newTagInput.trim().toLowerCase())) {
-      addToast("Tag already exists", "warning");
+    if (!editingPhoto) return;
+
+    if (!editTitle.trim()) {
+      addToast("Photo title is required!", "warning");
       return;
     }
-    setTags(prev => [...prev, { name: newTagInput.trim(), count: 0, active: true }]);
-    setNewTagInput("");
-    addToast(`Added tag "${newTagInput.trim()}"`);
+
+    const cleanEvent = editTitle.trim().replace(/\s*\(\d+\)$/, "").replace(/\s*#\d+$/, "").trim();
+    const payload = {
+      title: editTitle.trim(),
+      eventTitle: cleanEvent,
+      category: editCategory,
+      caption: editCaption.trim(),
+      description: editCaption.trim(),
+      date: editDate || editingPhoto.date,
+      status: editStatus,
+      tags: editTags,
+      imageUrl: editImagePreview || editingPhoto.imageUrl,
+      coverImage: editImagePreview || editingPhoto.imageUrl,
+      bannerImage: editImagePreview || editingPhoto.imageUrl,
+      updatedAt: Date.now()
+    };
+
+    addToast("Saving photo updates...", "info");
+
+    try {
+      await updateAlbum(editingPhoto.id, payload);
+      dataCache.invalidate("public_gallery_photos");
+      setPhotos((prev) =>
+        prev.map((p) => (p.id === editingPhoto.id ? { ...p, ...payload } : p))
+      );
+      setIsEditModalOpen(false);
+      setEditingPhoto(null);
+      addToast("Photo details updated successfully!", "success");
+    } catch (err) {
+      console.error("Error updating photo:", err);
+      addToast("Failed to update photo.", "warning");
+    }
   };
 
-  // Toggle Tag Activity
-  const toggleTag = (name: string) => {
-    setTags(prev => prev.map(t => {
-      if (t.name === name) return { ...t, active: !t.active };
-      return t;
-    }));
+  // Toggle Publish / Draft status
+  const handleToggleStatus = async (photo: GalleryPhotoItem) => {
+    const newStatus: "Published" | "Draft" = photo.status === "Published" ? "Draft" : "Published";
+    try {
+      await updateAlbum(photo.id, { status: newStatus });
+      dataCache.invalidate("public_gallery_photos");
+      setPhotos((prev) =>
+        prev.map((p) => (p.id === photo.id ? { ...p, status: newStatus } : p))
+      );
+      addToast(`"${photo.title}" changed to ${newStatus.toUpperCase()}`, "info");
+    } catch (err) {
+      console.error("Error updating status:", err);
+      addToast("Failed to toggle status.", "warning");
+    }
   };
 
-  if (showCreateAlbumView) {
-    return (
-      <div className="space-y-6 text-left relative">
-        <SEO 
-          title="Create New Album - Gallery Portal" 
-          description="Draft and configure a new visual album for Azure Intelligence."
-        />
+  // Delete photo
+  const handleDeletePhoto = async () => {
+    if (!deleteConfirmPhoto) return;
+    try {
+      await deleteAlbum(deleteConfirmPhoto.id);
+      dataCache.invalidate("public_gallery_photos");
+      setPhotos((prev) => prev.filter((p) => p.id !== deleteConfirmPhoto.id));
+      addToast(`Photo "${deleteConfirmPhoto.title}" deleted.`, "info");
+      setDeleteConfirmPhoto(null);
+    } catch (err) {
+      console.error("Error deleting photo:", err);
+      addToast("Failed to delete photo.", "warning");
+    }
+  };
 
-        {/* Toast Notification Container */}
-        <div className="fixed top-5 right-5 z-[9999] flex flex-col gap-2 max-w-sm">
-          <AnimatePresence>
-            {toastQueue.map(toast => (
-              <motion.div
-                key={toast.id}
-                initial={{ opacity: 0, y: -20, scale: 0.9 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-                className={`p-4 rounded-xl shadow-lg flex items-center gap-3 border text-sm font-semibold 
-                  ${toast.type === "success" ? "bg-green-50 border-green-200 text-green-800" : ""}
-                  ${toast.type === "info" ? "bg-blue-50 border-blue-200 text-blue-800" : ""}
-                  ${toast.type === "warning" ? "bg-yellow-50 border-yellow-200 text-yellow-800" : ""}`}
-              >
-                <CheckCircle className="h-4.5 w-4.5 shrink-0" />
-                <span>{toast.text}</span>
-              </motion.div>
-            ))}
-          </AnimatePresence>
+  // Filtered photos list
+  const filteredPhotos = useMemo(() => {
+    return photos.filter((p) => {
+      const matchesSearch =
+        p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (p.caption && p.caption.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        p.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (p.tags && p.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase())));
+
+      const matchesCategory = selectedCategory === "All" || p.category === selectedCategory;
+      const matchesStatus = statusFilter === "All" || p.status === statusFilter;
+
+      return matchesSearch && matchesCategory && matchesStatus;
+    });
+  }, [photos, searchQuery, selectedCategory, statusFilter]);
+
+  // Statistics
+  const totalPhotosCount = photos.length;
+  const publishedCount = photos.filter((p) => p.status === "Published").length;
+  const draftsCount = photos.filter((p) => p.status === "Draft").length;
+  const recentCount = useMemo(() => {
+    return photos.filter((p) => {
+      const created = p.createdAt || 0;
+      return Date.now() - created < 604800000; // 7 days
+    }).length;
+  }, [photos]);
+
+  const getCategoryBadgeClass = (category: string) => {
+    switch (category) {
+      case "Hackathons":
+        return "bg-rose-50 text-rose-700 border-rose-200/80";
+      case "Symposiums":
+        return "bg-amber-50 text-amber-700 border-amber-200/80";
+      case "Socials":
+        return "bg-emerald-50 text-emerald-700 border-emerald-200/80";
+      default:
+        return "bg-blue-50 text-blue-700 border-blue-200/80";
+    }
+  };
+
+  return (
+    <div className="p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-200">
+      <SEO
+        title="Gallery Management | AI Verse Faculty Hub"
+        description="Upload and manage individual event photos, symposium visual records, and community milestones."
+      />
+
+      {/* Toast Notifications */}
+      <div className="fixed bottom-5 right-5 z-[100] flex flex-col gap-2 pointer-events-none">
+        {toastQueue.map((toast) => (
+          <div
+            key={toast.id}
+            className={`px-4 py-3 rounded-2xl shadow-xl border text-xs font-bold flex items-center gap-2 pointer-events-auto transition-all transform animate-in slide-in-from-bottom-3 ${
+              toast.type === "success"
+                ? "bg-slate-900 text-white border-slate-800"
+                : toast.type === "warning"
+                  ? "bg-amber-50 text-amber-900 border-amber-200"
+                  : "bg-blue-50 text-blue-900 border-blue-200"
+            }`}
+          >
+            {toast.type === "success" && <CheckCircle className="w-4 h-4 text-emerald-400" />}
+            {toast.type === "warning" && <AlertTriangle className="w-4 h-4 text-amber-500" />}
+            {toast.type === "info" && <Info className="w-4 h-4 text-blue-500" />}
+            <span>{toast.text}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Top Header Bar */}
+      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 bg-white p-6 rounded-3xl border border-slate-200/80 shadow-2xs">
+        <div className="space-y-1">
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200/60 text-[10px] font-black uppercase tracking-wider">
+            <ImageIcon className="w-3.5 h-3.5" />
+            <span>Single Photo Gallery Architecture</span>
+          </div>
+          <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-[#0F172A]">
+            Gallery Management
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-500 font-medium">
+            Upload and organize individual photos, moments, and event visuals across AI Verse.
+          </p>
         </div>
 
-        <div className="space-y-6 text-left animate-in fade-in slide-in-from-bottom-3 duration-200">
-          {/* Creation Header bar */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-4 border-b border-slate-100">
-            <div className="flex items-center gap-3">
-              <button 
-                onClick={() => setShowCreateAlbumView(false)}
-                className="w-10 h-10 rounded-xl border border-slate-200 bg-white hover:bg-slate-50 transition-colors flex items-center justify-center text-slate-450 hover:text-slate-700 shadow-sm"
-              >
-                <ArrowLeft className="h-5 w-5" />
-              </button>
-              <div>
-                <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">Create New Album</h1>
-                <p className="text-[10px] text-slate-450 font-bold tracking-wider mt-1.5 uppercase">
-                  Drafting: <span className="text-slate-700 normal-case font-extrabold">{albumTitle || "Untitled Album"}</span> • Last saved Just now
-                </p>
-              </div>
-            </div>
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <button
+            onClick={loadPhotos}
+            className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
+            title="Refresh gallery photos"
+          >
+            <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-blue-600" : ""}`} />
+          </button>
 
-            <div className="flex items-center gap-3 shrink-0">
-              <div className="relative hidden md:block">
-                <Search className="h-4 w-4 absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input 
-                  type="text" 
-                  disabled
-                  placeholder="Search faculty assets..."
-                  className="pl-10 pr-4 py-2 text-xs border border-slate-200 rounded-xl bg-slate-50/50 w-56 font-semibold"
-                />
-              </div>
+          <Button
+            variant="gradient"
+            onClick={() => {
+              setPendingUploads([]);
+              setIsUploadModalOpen(true);
+            }}
+            className="rounded-2xl px-5 py-2.5 font-black text-xs shadow-md hover:shadow-lg flex items-center gap-2 cursor-pointer"
+          >
+            <Plus className="w-4 h-4" />
+            <span>Upload Photo</span>
+          </Button>
+        </div>
+      </div>
 
-              <button className="p-2 text-slate-450 hover:text-slate-600 bg-white rounded-xl border border-slate-200 shadow-sm relative">
-                <Bell className="h-5 w-5" />
-                <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-red-500 rounded-full"></span>
-              </button>
-
-              <button 
-                onClick={() => handleSaveAlbum("Draft")}
-                className="inline-flex items-center gap-2 px-5 py-2.5 bg-[#2563EB] hover:bg-blue-700 text-white rounded-2xl text-xs font-bold shadow-sm shadow-blue-600/10 hover:shadow transition-all"
-              >
-                <Save className="h-4 w-4" />
-                Save Album
-              </button>
+      {/* Metric Summary Cards */}
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-2xs">
+          <div className="flex items-center justify-between text-slate-400 mb-2">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider">Total Photos</span>
+            <div className="p-2 rounded-xl bg-blue-50 text-blue-600">
+              <ImageIcon className="w-4 h-4" />
             </div>
           </div>
+          <div className="text-2xl sm:text-3xl font-black text-[#0F172A]">{totalPhotosCount}</div>
+          <div className="text-[11px] text-slate-400 font-medium mt-0.5">Separate single assets</div>
+        </div>
 
-          {/* Creation Grid Layout */}
-          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-            
-            {/* Left side: Album Details & Image Dropzone */}
-            <div className="lg:col-span-8 space-y-6">
-              
-              {/* Card 1: Album Details */}
-              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.015)]">
-                <div className="flex items-center gap-2 pb-4 border-b border-slate-50">
-                  <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
-                    <Info className="h-4 w-4" />
+        <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-2xs">
+          <div className="flex items-center justify-between text-slate-400 mb-2">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider">Published</span>
+            <div className="p-2 rounded-xl bg-emerald-50 text-emerald-600">
+              <CheckCircle className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="text-2xl sm:text-3xl font-black text-emerald-600">{publishedCount}</div>
+          <div className="text-[11px] text-emerald-700 font-medium mt-0.5">Live on public gallery</div>
+        </div>
+
+        <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-2xs">
+          <div className="flex items-center justify-between text-slate-400 mb-2">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider">Recent Uploads</span>
+            <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
+              <Clock className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="text-2xl sm:text-3xl font-black text-indigo-600">{recentCount}</div>
+          <div className="text-[11px] text-slate-400 font-medium mt-0.5">In the past 7 days</div>
+        </div>
+
+        <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-2xs">
+          <div className="flex items-center justify-between text-slate-400 mb-2">
+            <span className="text-[10px] font-extrabold uppercase tracking-wider">Drafts</span>
+            <div className="p-2 rounded-xl bg-amber-50 text-amber-600">
+              <Layers className="w-4 h-4" />
+            </div>
+          </div>
+          <div className="text-2xl sm:text-3xl font-black text-amber-600">{draftsCount}</div>
+          <div className="text-[11px] text-slate-400 font-medium mt-0.5">Unpublished items</div>
+        </div>
+      </div>
+
+      {/* Filter Toolbar & Search Bar */}
+      <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-2xs flex flex-col md:flex-row md:items-center justify-between gap-3">
+        {/* Category Filter Pills */}
+        <div className="flex items-center gap-1.5 overflow-x-auto pb-1 md:pb-0">
+          <button
+            onClick={() => setSelectedCategory("All")}
+            className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer shrink-0 ${
+              selectedCategory === "All"
+                ? "bg-slate-900 text-white shadow-xs"
+                : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+            }`}
+          >
+            All ({photos.length})
+          </button>
+          {CATEGORY_OPTIONS.map((cat) => {
+            const count = photos.filter((p) => p.category === cat).length;
+            const isSelected = selectedCategory === cat;
+            return (
+              <button
+                key={cat}
+                onClick={() => setSelectedCategory(cat)}
+                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer shrink-0 flex items-center gap-1.5 ${
+                  isSelected
+                    ? "bg-blue-600 text-white shadow-xs font-black"
+                    : "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60"
+                }`}
+              >
+                <span>{cat}</span>
+                <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${isSelected ? "bg-white/25 text-white" : "bg-slate-200 text-slate-700 font-black"}`}>
+                  {count}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Right Search & View Mode Controls */}
+        <div className="flex items-center gap-2.5">
+          <div className="relative flex-1 sm:w-64">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search photo title, tags..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-7 py-1.5 text-xs font-bold text-[#0F172A] placeholder-slate-400 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-0.5 cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            )}
+          </div>
+
+          <div className="flex items-center bg-slate-100 p-1 rounded-xl border border-slate-200">
+            <button
+              onClick={() => setViewMode("grid")}
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                viewMode === "grid" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-500 hover:text-slate-700"
+              }`}
+              title="Grid View"
+            >
+              <LayoutGrid className="w-4 h-4" />
+            </button>
+            <button
+              onClick={() => setViewMode("list")}
+              className={`p-1.5 rounded-lg transition-all cursor-pointer ${
+                viewMode === "list" ? "bg-white text-blue-600 shadow-2xs" : "text-slate-500 hover:text-slate-700"
+              }`}
+              title="List View"
+            >
+              <List className="w-4 h-4" />
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Main Gallery Directory */}
+      {loading ? (
+        <div className="bg-white rounded-3xl p-16 border border-slate-200/80 text-center space-y-3">
+          <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
+          <p className="text-xs font-bold text-slate-500">Loading gallery photos from database...</p>
+        </div>
+      ) : filteredPhotos.length === 0 ? (
+        <div className="bg-white rounded-3xl p-16 border border-dashed border-slate-300 text-center space-y-4">
+          <div className="w-16 h-16 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mx-auto shadow-inner">
+            <ImageIcon className="w-8 h-8" />
+          </div>
+          <div className="space-y-1 max-w-sm mx-auto">
+            <h3 className="text-base font-black text-[#0F172A]">No Photos Found</h3>
+            <p className="text-xs text-slate-400 font-medium">
+              {searchQuery || selectedCategory !== "All"
+                ? "No gallery images match your current filter criteria."
+                : "Your gallery is currently empty. Upload your first event photo now!"}
+            </p>
+          </div>
+          <Button
+            variant="gradient"
+            onClick={() => {
+              setPendingUploads([]);
+              setIsUploadModalOpen(true);
+            }}
+            className="rounded-xl px-5 py-2 text-xs font-black shadow-md cursor-pointer"
+          >
+            <Plus className="w-4 h-4 mr-1.5" />
+            <span>Upload Photo Now</span>
+          </Button>
+        </div>
+      ) : viewMode === "grid" ? (
+        /* GRID VIEW (Visual Cards) */
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
+          {/* Quick Upload Tile */}
+          <div
+            onClick={() => {
+              setPendingUploads([]);
+              setIsUploadModalOpen(true);
+            }}
+            className="group rounded-3xl border-2 border-dashed border-slate-200 hover:border-blue-500/80 bg-slate-50/50 hover:bg-blue-50/20 p-6 flex flex-col items-center justify-center text-center transition-all duration-200 cursor-pointer min-h-[280px]"
+          >
+            <div className="w-12 h-12 rounded-2xl bg-white shadow-md border border-slate-200/80 flex items-center justify-center text-slate-400 group-hover:text-blue-600 group-hover:scale-110 transition-all mb-3">
+              <Plus className="w-6 h-6" />
+            </div>
+            <h4 className="text-sm font-black text-[#0F172A] group-hover:text-blue-600 transition-colors">
+              Add New Photo
+            </h4>
+            <p className="text-xs text-slate-400 font-medium max-w-[200px] mt-1">
+              Upload single or multiple event photos directly
+            </p>
+          </div>
+
+          {filteredPhotos.map((photo) => {
+            return (
+              <div
+                key={photo.id}
+                className="group bg-white rounded-3xl border border-slate-200/90 shadow-2xs hover:shadow-xl hover:border-blue-200 transition-all duration-300 overflow-hidden flex flex-col"
+              >
+                {/* Photo Thumbnail */}
+                <div className="relative aspect-[4/3] bg-slate-900 overflow-hidden">
+                  <img
+                    src={photo.imageUrl}
+                    alt={photo.title}
+                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                    loading="lazy"
+                  />
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-3.5" />
+
+                  {/* Top Badges */}
+                  <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none">
+                    <span
+                      className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border shadow-xs backdrop-blur-md ${getCategoryBadgeClass(
+                        photo.category
+                      )}`}
+                    >
+                      {photo.category}
+                    </span>
+
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleToggleStatus(photo);
+                      }}
+                      className={`pointer-events-auto text-[10px] font-black uppercase px-2 py-0.5 rounded-full border cursor-pointer transition-all shadow-xs ${
+                        photo.status === "Published"
+                          ? "bg-emerald-500 text-white border-emerald-400"
+                          : "bg-amber-400 text-slate-900 border-amber-300"
+                      }`}
+                      title="Click to toggle Published / Draft"
+                    >
+                      {photo.status}
+                    </button>
                   </div>
-                  <h3 className="text-sm font-bold text-slate-800 tracking-tight">Album Details</h3>
+
+                  {/* Quick Action Overlay on Hover */}
+                  <div className="absolute bottom-3 right-3 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <button
+                      onClick={() => setLightboxPhoto(photo)}
+                      className="p-2 bg-white/90 hover:bg-white text-slate-800 rounded-xl shadow-md transition-transform hover:scale-110 cursor-pointer"
+                      title="View Full Resolution"
+                    >
+                      <Eye className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => handleOpenEdit(photo)}
+                      className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md transition-transform hover:scale-110 cursor-pointer"
+                      title="Edit Photo Details"
+                    >
+                      <Pencil className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setDeleteConfirmPhoto(photo)}
+                      className="p-2 bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-md transition-transform hover:scale-110 cursor-pointer"
+                      title="Delete Photo"
+                    >
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
                 </div>
 
-                <div className="mt-5 space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* Photo Details */}
+                <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
+                  <div className="space-y-1">
+                    <h3
+                      className="font-black text-sm text-[#0F172A] line-clamp-1 leading-snug hover:text-blue-600 cursor-pointer transition-colors"
+                      onClick={() => setLightboxPhoto(photo)}
+                      title={photo.title}
+                    >
+                      {photo.title}
+                    </h3>
+                    {photo.caption && (
+                      <p className="text-xs text-slate-500 font-medium line-clamp-2 leading-relaxed">
+                        {photo.caption}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400 font-medium">
+                    <span className="flex items-center gap-1">
+                      <Calendar className="w-3 h-3 text-slate-400" />
+                      {photo.date}
+                    </span>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => handleOpenEdit(photo)}
+                        className="text-blue-600 hover:text-blue-700 font-bold hover:underline cursor-pointer"
+                      >
+                        Edit
+                      </button>
+                      <span>•</span>
+                      <button
+                        onClick={() => setDeleteConfirmPhoto(photo)}
+                        className="text-red-500 hover:text-red-600 font-bold hover:underline cursor-pointer"
+                      >
+                        Delete
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        /* LIST VIEW (Table) */
+        <div className="bg-white rounded-3xl border border-slate-200/80 shadow-2xs overflow-hidden">
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-xs border-collapse">
+              <thead className="bg-slate-50 text-slate-500 font-extrabold uppercase text-[10px] tracking-wider border-b border-slate-200/80 select-none">
+                <tr>
+                  <th className="py-3.5 px-4">Photo Preview</th>
+                  <th className="py-3.5 px-4 min-w-[200px]">Title & Caption</th>
+                  <th className="py-3.5 px-4">Category</th>
+                  <th className="py-3.5 px-4">Date</th>
+                  <th className="py-3.5 px-4 text-center">Status</th>
+                  <th className="py-3.5 px-4 text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100 font-medium">
+                {filteredPhotos.map((photo) => (
+                  <tr key={photo.id} className="hover:bg-slate-50/80 transition-colors">
+                    <td className="py-3 px-4">
+                      <div
+                        onClick={() => setLightboxPhoto(photo)}
+                        className="w-14 h-11 rounded-xl bg-slate-900 overflow-hidden shadow-2xs cursor-pointer border border-slate-200"
+                      >
+                        <img
+                          src={photo.imageUrl}
+                          alt={photo.title}
+                          className="w-full h-full object-cover hover:scale-110 transition-transform"
+                        />
+                      </div>
+                    </td>
+
+                    <td className="py-3 px-4">
+                      <div className="space-y-0.5 max-w-md">
+                        <div
+                          onClick={() => setLightboxPhoto(photo)}
+                          className="font-black text-[#0F172A] hover:text-blue-600 cursor-pointer transition-colors"
+                        >
+                          {photo.title}
+                        </div>
+                        {photo.caption && (
+                          <div className="text-[11px] text-slate-500 line-clamp-1">
+                            {photo.caption}
+                          </div>
+                        )}
+                      </div>
+                    </td>
+
+                    <td className="py-3 px-4">
+                      <span
+                        className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${getCategoryBadgeClass(
+                          photo.category
+                        )}`}
+                      >
+                        {photo.category}
+                      </span>
+                    </td>
+
+                    <td className="py-3 px-4 text-slate-600 font-medium">
+                      {photo.date}
+                    </td>
+
+                    <td className="py-3 px-4 text-center">
+                      <button
+                        onClick={() => handleToggleStatus(photo)}
+                        className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border cursor-pointer transition-all ${
+                          photo.status === "Published"
+                            ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
+                            : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
+                        }`}
+                      >
+                        {photo.status}
+                      </button>
+                    </td>
+
+                    <td className="py-3 px-4 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button
+                          onClick={() => setLightboxPhoto(photo)}
+                          className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                          title="Preview"
+                        >
+                          <Eye className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => handleOpenEdit(photo)}
+                          className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                          title="Edit"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          onClick={() => setDeleteConfirmPhoto(photo)}
+                          className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
+                          title="Delete"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================= */}
+      {/* MODAL 1: UPLOAD PHOTOS (SINGLE & BATCH) */}
+      {/* ========================================================= */}
+      <AnimatePresence>
+        {isUploadModalOpen && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl max-w-2xl w-full flex flex-col shadow-2xl border border-slate-200 overflow-hidden my-8"
+            >
+              {/* Header */}
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50">
+                <div className="space-y-0.5">
+                  <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-200 text-[10px] font-black uppercase">
+                    <Upload className="w-3 h-3" />
+                    <span>Upload Individual Visuals</span>
+                  </div>
+                  <h2 className="text-lg font-black text-[#0F172A]">
+                    Upload Gallery Photos
+                  </h2>
+                </div>
+                <button
+                  onClick={() => setIsUploadModalOpen(false)}
+                  className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleUploadSubmit} className="p-6 space-y-5 overflow-y-auto max-h-[75vh]">
+                {/* Drag and drop upload box */}
+                <div
+                  onDragEnter={handleDrag}
+                  onDragLeave={handleDrag}
+                  onDragOver={handleDrag}
+                  onDrop={handleDrop}
+                  onClick={() => fileInputRef.current?.click()}
+                  className={`border-2 border-dashed rounded-3xl p-8 text-center transition-all cursor-pointer ${
+                    dragActive
+                      ? "border-blue-500 bg-blue-50/60 scale-[1.01]"
+                      : "border-slate-300 hover:border-blue-400 bg-slate-50/60 hover:bg-blue-50/20"
+                  }`}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    multiple
+                    accept="image/png, image/jpeg, image/jpg, image/webp"
+                    onChange={(e) => handleFilesSelected(e.target.files)}
+                    className="hidden"
+                  />
+                  <div className="w-14 h-14 rounded-2xl bg-white shadow-md border border-slate-200/80 flex items-center justify-center text-blue-600 mx-auto mb-3">
+                    <Upload className="w-7 h-7" />
+                  </div>
+                  <h4 className="text-sm font-black text-[#0F172A]">
+                    Click to browse or drag & drop photos here
+                  </h4>
+                  <p className="text-xs text-slate-400 font-medium mt-1">
+                    Supports PNG, JPG, JPEG, WEBP. Select 1 photo or multiple photos at once.
+                  </p>
+                </div>
+
+                {/* Common Defaults for Uploads */}
+                <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 space-y-3">
+                  <div>
+                    <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
+                      Photo / Event Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={batchName}
+                      onChange={(e) => handleBatchNameChange(e.target.value)}
+                      placeholder="E.g. Code Slayer Hackathon 2026, AI Symposium, Student Project..."
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-bold text-[#0F172A] placeholder-slate-400 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Album Title</label>
-                      <input 
-                        type="text"
-                        placeholder="e.g. Winter Symposium 2026"
-                        value={albumTitle}
-                        onChange={(e) => setAlbumTitle(e.target.value)}
-                        className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold text-slate-800 placeholder-slate-400"
+                      <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
+                        Category
+                      </label>
+                      <select
+                        value={batchCategory}
+                        onChange={(e) => {
+                          const newCat = e.target.value as GalleryPhotoItem["category"];
+                          setBatchCategory(newCat);
+                          setPendingUploads((prev) =>
+                            prev.map((p) => ({ ...p, category: newCat }))
+                          );
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-[#0F172A] outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
+                      >
+                        {CATEGORY_OPTIONS.map((cat) => (
+                          <option key={cat} value={cat}>
+                            {cat}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
+                        Date
+                      </label>
+                      <input
+                        type="date"
+                        value={batchDate}
+                        onChange={(e) => {
+                          setBatchDate(e.target.value);
+                          const formatted = new Date(e.target.value).toLocaleDateString("en-US", {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric"
+                          });
+                          setPendingUploads((prev) =>
+                            prev.map((p) => ({ ...p, date: formatted }))
+                          );
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-[#0F172A] outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
                       />
                     </div>
 
                     <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Event Category</label>
-                      <select 
-                        value={albumCategory}
-                        onChange={(e) => setAlbumCategory(e.target.value)}
-                        className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold text-slate-800"
+                      <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
+                        Publish Status
+                      </label>
+                      <select
+                        value={batchStatus}
+                        onChange={(e) => {
+                          const newSt = e.target.value as "Published" | "Draft";
+                          setBatchStatus(newSt);
+                          setPendingUploads((prev) =>
+                            prev.map((p) => ({ ...p, status: newSt }))
+                          );
+                        }}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-[#0F172A] outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
                       >
-                        <option value="Workshops">Workshops</option>
-                        <option value="Hackathons">Hackathons</option>
-                        <option value="Symposiums">Symposiums</option>
-                        <option value="Socials">Socials</option>
+                        <option value="Published">Published (Public)</option>
+                        <option value="Draft">Draft (Hidden)</option>
                       </select>
                     </div>
                   </div>
 
                   <div>
-                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-2">Album Description</label>
-                    <textarea 
-                      placeholder="Briefly describe the context and objectives of this media album..."
-                      value={albumDescription}
-                      onChange={(e) => setAlbumDescription(e.target.value)}
-                      rows={4}
-                      className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold text-slate-800 placeholder-slate-400 resize-none"
-                    ></textarea>
-                  </div>
-                </div>
-              </div>
-
-              {/* Card 2: Google Drive Link card */}
-              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.015)] space-y-4">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-50">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
-                      <LinkIcon className="h-4 w-4" />
-                    </div>
-                    <h3 className="text-sm font-bold text-slate-800 tracking-tight">Google Drive Link</h3>
-                  </div>
-                  <span className="text-[9px] font-extrabold text-blue-700 bg-blue-50 border border-blue-200/60 px-2 py-0.5 rounded-lg tracking-wider uppercase">
-                    Cloud Link
-                  </span>
-                </div>
-
-                <div className="pt-1 space-y-4">
-                  <div className="space-y-2">
-                    <label className="block text-[10px] font-extrabold text-slate-400 uppercase tracking-widest">
-                      Google Drive Folder or File Link
+                    <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
+                      Caption / Description (Optional)
                     </label>
-                    <div className="relative flex items-center">
-                      <ExternalLink className="absolute left-4 h-4 w-4 text-slate-400 pointer-events-none" />
-                      <input 
-                        type="url"
-                        placeholder="https://drive.google.com/drive/folders/1a2b3c4d5e6f7g8h9..."
-                        value={driveLink}
-                        onChange={(e) => setDriveLink(e.target.value)}
-                        className="w-full pl-11 pr-4 py-3 border border-slate-200 rounded-2xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold text-slate-800 placeholder-slate-400 transition-all"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Status Banner / Sharing Guidance */}
-                  {driveLink ? (
-                    <div className="p-3.5 rounded-2xl bg-emerald-50/70 border border-emerald-200/50 flex items-center justify-between gap-3 text-emerald-800 text-xs font-semibold">
-                      <div className="flex items-center gap-2.5 min-w-0">
-                        <CheckCircle className="h-4 w-4 text-emerald-600 shrink-0" />
-                        <span className="truncate">Google Drive link attached successfully</span>
-                      </div>
-                      <a 
-                        href={driveLink} 
-                        target="_blank" 
-                        rel="noopener noreferrer"
-                        className="text-[10px] font-extrabold underline text-emerald-700 hover:text-emerald-900 shrink-0"
-                      >
-                        Test Link
-                      </a>
-                    </div>
-                  ) : (
-                    <div className="p-4 rounded-2xl bg-slate-50 border border-slate-100/80 flex items-start gap-3 text-slate-500 text-xs font-medium">
-                      <Info className="h-4 w-4 text-blue-500 shrink-0 mt-0.5" />
-                      <div className="space-y-1">
-                        <p className="font-semibold text-slate-700">How to share your Google Drive link:</p>
-                        <ol className="list-decimal list-inside text-[11px] space-y-0.5 text-slate-500 font-normal">
-                          <li>Open your folder in Google Drive and click <strong>Share</strong>.</li>
-                          <li>Set general access permission to <strong>"Anyone with the link"</strong>.</li>
-                          <li>Copy the link and paste it into the input field above.</li>
-                        </ol>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              {/* Card 3: Upload Event Banner card */}
-              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.015)] space-y-4">
-                <div className="flex items-center justify-between pb-4 border-b border-slate-50">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-emerald-50 flex items-center justify-center text-emerald-600">
-                      <ImageIcon className="h-4 w-4" />
-                    </div>
-                    <h3 className="text-sm font-bold text-slate-800 tracking-tight">Upload Event Banner</h3>
-                  </div>
-                  <span className="text-[9px] font-extrabold text-emerald-700 bg-emerald-50 border border-emerald-200/60 px-2 py-0.5 rounded-lg tracking-wider uppercase">
-                    Cover Banner
-                  </span>
-                </div>
-
-                <div className="pt-1 space-y-4">
-                  {bannerImage ? (
-                    <div className="relative group rounded-2xl overflow-hidden border border-slate-200 shadow-sm bg-slate-50">
-                      <img 
-                        src={bannerImage} 
-                        alt="Event Banner Preview" 
-                        className="w-full h-44 object-cover transition-transform duration-300 group-hover:scale-105"
-                      />
-                      <div className="absolute inset-0 bg-slate-900/50 opacity-0 group-hover:opacity-100 transition-opacity p-4 flex items-center justify-center gap-3">
-                        <button 
-                          type="button"
-                          onClick={() => bannerInputRef.current?.click()}
-                          className="px-3.5 py-2 bg-white text-slate-800 rounded-xl text-xs font-bold shadow-md hover:bg-slate-50 transition-all flex items-center gap-1.5"
-                        >
-                          <Upload className="h-3.5 w-3.5 text-blue-600" />
-                          Change Banner
-                        </button>
-                        <button 
-                          type="button"
-                          onClick={() => setBannerImage("")}
-                          className="px-3.5 py-2 bg-red-600 text-white rounded-xl text-xs font-bold shadow-md hover:bg-red-700 transition-all flex items-center gap-1.5"
-                        >
-                          <X className="h-3.5 w-3.5" />
-                          Remove
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div 
-                      onClick={() => bannerInputRef.current?.click()}
-                      onDragOver={(e) => e.preventDefault()}
-                      onDrop={(e) => {
-                        e.preventDefault();
-                        if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-                          const file = e.dataTransfer.files[0];
-                          const reader = new FileReader();
-                          reader.onloadend = () => {
-                            setBannerImage(reader.result as string);
-                            addToast("Event banner uploaded successfully!", "success");
-                          };
-                          reader.readAsDataURL(file);
-                        }
+                    <input
+                      type="text"
+                      value={batchCaption}
+                      onChange={(e) => {
+                        const val = e.target.value;
+                        setBatchCaption(val);
+                        setPendingUploads((prev) =>
+                          prev.map((p) => ({ ...p, caption: val }))
+                        );
                       }}
-                      className="border-2 border-dashed border-slate-200 hover:border-emerald-500 rounded-2xl p-8 text-center cursor-pointer hover:bg-emerald-50/30 transition-all duration-300 flex flex-col items-center justify-center space-y-3"
-                    >
-                      <div className="w-12 h-12 rounded-2xl bg-[#E6F9F0] text-[#10B981] flex items-center justify-center shadow-inner">
-                        <Upload className="h-5 w-5 stroke-[2.5]" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-extrabold text-slate-800 tracking-tight">Drag & drop event banner here</h4>
-                        <p className="text-xs text-slate-400 font-semibold mt-1">
-                          or <span className="text-[#10B981] hover:underline font-bold">browse files</span> (PNG, JPG, WEBP recommended)
-                        </p>
-                      </div>
-                    </div>
-                  )}
-
-                  <input 
-                    type="file" 
-                    accept="image/*"
-                    ref={bannerInputRef}
-                    onChange={(e) => {
-                      if (e.target.files && e.target.files[0]) {
-                        const file = e.target.files[0];
-                        const reader = new FileReader();
-                        reader.onloadend = () => {
-                          setBannerImage(reader.result as string);
-                          addToast("Event banner uploaded successfully!", "success");
-                        };
-                        reader.readAsDataURL(file);
-                      }
-                    }}
-                    className="hidden"
-                  />
-                </div>
-              </div>
-            </div>
-
-            {/* Right side: Gallery settings, tags, actions */}
-            <div className="lg:col-span-4 space-y-6">
-              
-              {/* Card 3: Gallery Settings */}
-              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.015)]">
-                <div className="flex items-center gap-2 pb-4 border-b border-slate-50">
-                  <div className="w-8 h-8 rounded-lg bg-blue-50 flex items-center justify-center text-blue-600">
-                    <SettingsIcon className="h-4 w-4" />
-                  </div>
-                  <h3 className="text-sm font-bold text-slate-800 tracking-tight">Gallery Settings</h3>
-                </div>
-
-                <div className="mt-5 space-y-4">
-                  {/* Public Visibility Toggle */}
-                  <div className="flex items-center justify-between gap-4 p-1">
-                    <div className="text-left leading-tight">
-                      <h4 className="text-xs font-bold text-slate-800">Public Visibility</h4>
-                      <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Visible to all students & faculty</p>
-                    </div>
-                    <button 
-                      type="button"
-                      onClick={() => setIsPublicVisible(!isPublicVisible)}
-                      className={`w-10 h-5.5 rounded-full relative transition-colors focus:outline-none shrink-0
-                        ${isPublicVisible ? "bg-[#2563EB]" : "bg-slate-200"}`}
-                    >
-                      <span className={`w-4 h-4 rounded-full bg-white absolute top-0.75 left-0.75 transition-transform
-                        ${isPublicVisible ? "translate-x-4.5" : ""}`}
-                      ></span>
-                    </button>
-                  </div>
-
-                  {/* Feature on Home Toggle */}
-                  <div className="flex items-center justify-between gap-4 p-1">
-                    <div className="text-left leading-tight">
-                      <h4 className="text-xs font-bold text-slate-800">Feature on Home</h4>
-                      <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Promote in main dashboard feed</p>
-                    </div>
-                    <button 
-                      type="button"
-                      onClick={() => setIsFeaturedOnHome(!isFeaturedOnHome)}
-                      className={`w-10 h-5.5 rounded-full relative transition-colors focus:outline-none shrink-0
-                        ${isFeaturedOnHome ? "bg-[#2563EB]" : "bg-slate-200"}`}
-                    >
-                      <span className={`w-4 h-4 rounded-full bg-white absolute top-0.75 left-0.75 transition-transform
-                        ${isFeaturedOnHome ? "translate-x-4.5" : ""}`}
-                      ></span>
-                    </button>
-                  </div>
-
-                  {/* Enable Comments Toggle */}
-                  <div className="flex items-center justify-between gap-4 p-1">
-                    <div className="text-left leading-tight">
-                      <h4 className="text-xs font-bold text-slate-800">Enable Comments</h4>
-                      <p className="text-[10px] text-slate-400 font-semibold mt-0.5">Allow community feedback</p>
-                    </div>
-                    <button 
-                      type="button"
-                      onClick={() => setIsCommentsEnabled(!isCommentsEnabled)}
-                      className={`w-10 h-5.5 rounded-full relative transition-colors focus:outline-none shrink-0
-                        ${isCommentsEnabled ? "bg-[#2563EB]" : "bg-slate-200"}`}
-                    >
-                      <span className={`w-4 h-4 rounded-full bg-white absolute top-0.75 left-0.75 transition-transform
-                        ${isCommentsEnabled ? "translate-x-4.5" : ""}`}
-                      ></span>
-                    </button>
+                      placeholder="Optional caption or note about this moment..."
+                      className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-1.5 text-xs font-medium text-[#0F172A] placeholder-slate-400 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
+                    />
                   </div>
                 </div>
-              </div>
 
-              {/* Card 4: Search Tags */}
-              <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.015)]">
-                <div className="flex items-center gap-2 pb-4 border-b border-slate-50">
-                  <h3 className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Search Tags</h3>
-                </div>
+                {/* Queue of Selected Photos */}
+                {pendingUploads.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex items-center justify-between text-xs font-black text-[#0F172A]">
+                      <span>Selected Photos ({pendingUploads.length})</span>
+                      <button
+                        type="button"
+                        onClick={() => setPendingUploads([])}
+                        className="text-red-500 hover:text-red-700 font-bold cursor-pointer"
+                      >
+                        Clear All
+                      </button>
+                    </div>
 
-                <div className="mt-4 space-y-4">
-                  {/* Tag list */}
-                  {searchTags.length > 0 && (
-                    <div className="flex flex-wrap gap-1.5">
-                      {searchTags.map(tg => (
-                        <span key={tg} className="inline-flex items-center gap-1 px-2.5 py-1 rounded-xl bg-blue-50 text-blue-600 text-[10px] font-bold uppercase tracking-wider">
-                          {tg}
-                          <button 
-                            onClick={() => setSearchTags(prev => prev.filter(t => t !== tg))}
-                            className="text-blue-500 hover:text-blue-700"
+                    <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                      {pendingUploads.map((p) => (
+                        <div
+                          key={p.id}
+                          className="bg-white p-3 rounded-2xl border border-slate-200/90 shadow-2xs flex items-center gap-3.5"
+                        >
+                          <div className="w-14 h-14 rounded-xl bg-slate-900 overflow-hidden shrink-0 border border-slate-200">
+                            <img
+                              src={p.preview}
+                              alt={p.name}
+                              className="w-full h-full object-cover"
+                            />
+                          </div>
+
+                          <div className="flex-1 min-w-0 space-y-1.5">
+                            <input
+                              type="text"
+                              value={p.title}
+                              onChange={(e) => {
+                                const val = e.target.value;
+                                setPendingUploads((prev) =>
+                                  prev.map((item) =>
+                                    item.id === p.id ? { ...item, title: val } : item
+                                  )
+                                );
+                              }}
+                              placeholder="Photo title / event name..."
+                              className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1 text-xs font-black text-[#0F172A] outline-none focus:bg-white focus:border-blue-500"
+                            />
+
+                            <div className="flex items-center gap-2 text-[10px] text-slate-400 font-medium">
+                              <span>{p.size}</span>
+                              <span>•</span>
+                              <span className="text-blue-600 font-bold">{p.category}</span>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => handleRemovePending(p.id)}
+                            className="p-1.5 text-slate-400 hover:text-red-600 rounded-lg hover:bg-red-50 transition-colors cursor-pointer"
+                            title="Remove from queue"
                           >
-                            <X className="h-3 w-3" />
+                            <X className="w-4 h-4" />
                           </button>
-                        </span>
+                        </div>
                       ))}
                     </div>
-                  )}
+                  </div>
+                )}
 
-                  {/* Add Tag row */}
-                  <div className="relative flex items-center gap-2">
-                    <input 
+                {/* Footer Buttons */}
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setIsUploadModalOpen(false)}
+                    className="px-5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                  >
+                    Cancel
+                  </button>
+
+                  <Button
+                    variant="gradient"
+                    type="submit"
+                    disabled={isUploading || pendingUploads.length === 0}
+                    className="px-6 py-2.5 text-xs font-black rounded-xl shadow-md cursor-pointer flex items-center gap-2"
+                  >
+                    {isUploading ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Uploading...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4" />
+                        <span>
+                          Upload {pendingUploads.length > 0 ? `(${pendingUploads.length}) Photos` : "Photos"}
+                        </span>
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ========================================================= */}
+      {/* MODAL 2: EDIT PHOTO DETAILS */}
+      {/* ========================================================= */}
+      <AnimatePresence>
+        {isEditModalOpen && editingPhoto && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-50 flex items-center justify-center p-4 overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl max-w-xl w-full flex flex-col shadow-2xl border border-slate-200 overflow-hidden my-8"
+            >
+              <div className="p-6 border-b border-slate-100 flex items-center justify-between shrink-0 bg-slate-50/50">
+                <div className="space-y-0.5">
+                  <span className="text-[10px] font-black uppercase text-blue-600 bg-blue-50 px-2.5 py-0.5 rounded-full border border-blue-200">
+                    Edit Photo Metadata
+                  </span>
+                  <h2 className="text-lg font-black text-[#0F172A]">
+                    Edit Photo Details
+                  </h2>
+                </div>
+                <button
+                  onClick={() => setIsEditModalOpen(false)}
+                  className="p-2 text-slate-400 hover:text-slate-600 rounded-xl hover:bg-slate-100 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveEdit} className="p-6 space-y-4 overflow-y-auto max-h-[75vh]">
+                {/* Photo Preview & Replacement */}
+                <div className="flex items-center gap-4 p-3 bg-slate-50 rounded-2xl border border-slate-200/80">
+                  <div className="w-20 h-16 rounded-xl bg-slate-900 overflow-hidden shrink-0 border border-slate-200 shadow-2xs">
+                    <img
+                      src={editImagePreview || editingPhoto.imageUrl}
+                      alt="Preview"
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <button
+                      type="button"
+                      onClick={() => editFileInputRef.current?.click()}
+                      className="text-xs font-bold text-blue-600 hover:text-blue-700 bg-white px-3 py-1 rounded-lg border border-slate-200 shadow-2xs cursor-pointer hover:bg-slate-50 transition-all"
+                    >
+                      Replace Image File
+                    </button>
+                    <input
+                      ref={editFileInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleEditImageChange}
+                      className="hidden"
+                    />
+                    <p className="text-[10px] text-slate-400 font-medium">
+                      PNG, JPG or WEBP up to 10MB
+                    </p>
+                  </div>
+                </div>
+
+                {/* Title */}
+                <div>
+                  <label className="text-xs font-black text-slate-700 block mb-1">
+                    Photo Title *
+                  </label>
+                  <input
+                    type="text"
+                    value={editTitle}
+                    onChange={(e) => setEditTitle(e.target.value)}
+                    required
+                    placeholder="E.g. AI Symposium Keynote Address"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-bold text-[#0F172A] outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Category & Status */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-xs font-black text-slate-700 block mb-1">
+                      Category
+                    </label>
+                    <select
+                      value={editCategory}
+                      onChange={(e) => setEditCategory(e.target.value as any)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-[#0F172A] outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    >
+                      {CATEGORY_OPTIONS.map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-xs font-black text-slate-700 block mb-1">
+                      Visibility Status
+                    </label>
+                    <select
+                      value={editStatus}
+                      onChange={(e) => setEditStatus(e.target.value as any)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-bold text-[#0F172A] outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    >
+                      <option value="Published">Published (Public)</option>
+                      <option value="Draft">Draft (Hidden)</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Date */}
+                <div>
+                  <label className="text-xs font-black text-slate-700 block mb-1">
+                    Event Date
+                  </label>
+                  <input
+                    type="text"
+                    value={editDate}
+                    onChange={(e) => setEditDate(e.target.value)}
+                    placeholder="E.g. Oct 24, 2026"
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-bold text-[#0F172A] outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  />
+                </div>
+
+                {/* Caption */}
+                <div>
+                  <label className="text-xs font-black text-slate-700 block mb-1">
+                    Caption / Description
+                  </label>
+                  <textarea
+                    rows={3}
+                    value={editCaption}
+                    onChange={(e) => setEditCaption(e.target.value)}
+                    placeholder="Add context, speaker details, or team highlights..."
+                    className="w-full bg-slate-50 border border-slate-200 rounded-xl p-3 text-xs font-medium text-[#0F172A] outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none"
+                  />
+                </div>
+
+                {/* Tags */}
+                <div>
+                  <label className="text-xs font-black text-slate-700 block mb-1">
+                    Tags
+                  </label>
+                  <div className="flex items-center gap-2 mb-2">
+                    <input
                       type="text"
-                      placeholder="Add tag..."
-                      value={newTagText}
-                      onChange={(e) => setNewTagText(e.target.value)}
+                      value={newTagInput}
+                      onChange={(e) => setNewTagInput(e.target.value)}
                       onKeyDown={(e) => {
                         if (e.key === "Enter") {
                           e.preventDefault();
-                          if (newTagText.trim() && !searchTags.includes(newTagText.trim())) {
-                            setSearchTags(prev => [...prev, newTagText.trim()]);
-                            setNewTagText("");
+                          if (newTagInput.trim() && !editTags.includes(newTagInput.trim())) {
+                            setEditTags([...editTags, newTagInput.trim()]);
+                            setNewTagInput("");
                           }
                         }
                       }}
-                      className="w-full px-4 py-2 border border-slate-200 rounded-xl text-xs focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold text-slate-800 placeholder-slate-450"
+                      placeholder="Add tag and press Enter..."
+                      className="flex-1 bg-slate-50 border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-[#0F172A] outline-none focus:bg-white focus:border-blue-500"
                     />
-                    <button 
+                    <button
+                      type="button"
                       onClick={() => {
-                        if (newTagText.trim() && !searchTags.includes(newTagText.trim())) {
-                          setSearchTags(prev => [...prev, newTagText.trim()]);
-                          setNewTagText("");
+                        if (newTagInput.trim() && !editTags.includes(newTagInput.trim())) {
+                          setEditTags([...editTags, newTagInput.trim()]);
+                          setNewTagInput("");
                         }
                       }}
-                      className="w-8 h-8 rounded-lg bg-blue-50 hover:bg-blue-100 flex items-center justify-center text-blue-600 font-bold shrink-0 shadow-inner"
+                      className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
                     >
-                      <Plus className="h-4.5 w-4.5 stroke-[2.5]" />
+                      Add
                     </button>
                   </div>
-                </div>
-              </div>
 
-              {/* Action Buttons card */}
-              <div className="space-y-2 pt-2">
-                <button 
-                  onClick={() => handleSaveAlbum("Published")}
-                  className="w-full py-3 bg-[#2563EB] hover:bg-blue-700 text-white rounded-2xl text-xs font-bold transition-all shadow-sm shadow-blue-600/10 hover:shadow-md"
-                >
-                  Create Album & Publish
-                </button>
-
-                <button 
-                  onClick={() => setShowCreateAlbumView(false)}
-                  className="w-full py-3 border border-slate-200 hover:bg-slate-50 text-slate-650 rounded-2xl text-xs font-bold transition-all bg-white"
-                >
-                  Discard Draft
-                </button>
-              </div>
-
-            </div>
-
-          </div>
-        </div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="space-y-6 text-left relative">
-      <SEO 
-        title="Gallery Management - Admin Portal" 
-        description="Manage visuals, albums, event photography, symposium uploads, and media storage configurations." 
-        keywords="AI Verse Faculty Gallery, Album Directory, Image Storage Optimization"
-      />
-
-      {/* Toast Notification Container */}
-      <div className="fixed top-5 right-5 z-[9999] flex flex-col gap-2 max-w-sm">
-        <AnimatePresence>
-          {toastQueue.map(toast => (
-            <motion.div
-              key={toast.id}
-              initial={{ opacity: 0, y: -20, scale: 0.9 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
-              className={`p-4 rounded-xl shadow-lg flex items-center gap-3 border text-sm font-semibold 
-                ${toast.type === "success" ? "bg-green-50 border-green-200 text-green-800" : ""}
-                ${toast.type === "info" ? "bg-blue-50 border-blue-200 text-blue-800" : ""}
-                ${toast.type === "warning" ? "bg-yellow-50 border-yellow-200 text-yellow-800" : ""}`}
-            >
-              <CheckCircle className="h-4.5 w-4.5 shrink-0" />
-              <span>{toast.text}</span>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-      </div>
-
-      {/* Header section with Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-        <div>
-          <h1 className="text-3xl font-extrabold text-slate-800 tracking-tight font-sans">Gallery Management</h1>
-          <p className="text-slate-500 text-sm mt-1 font-medium">
-            Manage visuals for events, symposiums, and faculty milestones.
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
-          <Button 
-            variant="outline" 
-            size="md" 
-            onClick={() => setIsUploadModalOpen(true)}
-            className="flex items-center gap-2 border-slate-200 bg-white hover:bg-slate-50"
-          >
-            <Upload className="h-4 w-4" />
-            Upload Images
-          </Button>
-          <Button 
-            variant="primary" 
-            size="md" 
-            onClick={() => setShowCreateAlbumView(true)}
-            className="flex items-center gap-2 bg-[#2563EB] hover:bg-blue-700 text-white"
-          >
-            <Plus className="h-4 w-4" />
-            Create New Album
-          </Button>
-        </div>
-      </div>
-
-      {/* Row of 4 Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-        
-        {/* Card 1: TOTAL ALBUMS */}
-        <div className="bg-white p-6 rounded-card border border-slate-100 shadow-card flex flex-col justify-between h-[130px]">
-          <div className="flex items-center justify-between">
-            <div className="p-3 bg-blue-50 rounded-xl">
-              <Folder className="h-6 w-6 text-[#2563EB]" />
-            </div>
-            <Badge variant="success" className="text-green-600 bg-green-50/50 border-green-100 font-bold">+12%</Badge>
-          </div>
-          <div>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Albums</span>
-            <span className="text-2xl font-black text-slate-800 leading-none">{albums.length}</span>
-          </div>
-        </div>
-
-        {/* Card 2: TOTAL IMAGES */}
-        <div className="bg-white p-6 rounded-card border border-slate-100 shadow-card flex flex-col justify-between h-[130px]">
-          <div className="flex items-center justify-between">
-            <div className="p-3 bg-teal-50 rounded-xl">
-              <ImageIcon className="h-6 w-6 text-teal-600" />
-            </div>
-            <Badge variant="success" className="text-green-600 bg-green-50/50 border-green-100 font-bold">+156</Badge>
-          </div>
-          <div>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Total Images</span>
-            <span className="text-2xl font-black text-slate-800 leading-none">{totalImages.toLocaleString()}</span>
-          </div>
-        </div>
-
-        {/* Card 3: RECENT UPLOADS */}
-        <div className="bg-white p-6 rounded-card border border-slate-100 shadow-card flex flex-col justify-between h-[130px]">
-          <div className="flex items-center justify-between">
-            <div className="p-3 bg-amber-50 rounded-xl">
-              <Clock className="h-6 w-6 text-amber-500" />
-            </div>
-            <div className="flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-50 text-emerald-600 border border-emerald-100 text-[10px] font-bold">
-              <span className="w-1 h-1 rounded-full bg-emerald-500 animate-ping"></span>
-              Active
-            </div>
-          </div>
-          <div>
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Recent Uploads</span>
-            <span className="text-2xl font-black text-slate-800 leading-none">
-              {recentUploads} <span className="text-xs text-slate-400 font-bold normal-case">this week</span>
-            </span>
-          </div>
-        </div>
-
-        {/* Card 4: DRAFT ALBUMS */}
-        <div className="bg-white p-6 rounded-card border border-slate-100 shadow-card flex flex-col justify-between h-[130px]">
-          <div className="flex items-center justify-between">
-            <div className="w-12 h-12 bg-purple-50 text-purple-600 rounded-2xl flex items-center justify-center">
-              <LayoutGrid className="h-6 w-6" />
-            </div>
-            <Badge variant="gray" className="font-bold text-slate-500">
-              Review
-            </Badge>
-          </div>
-          <div className="space-y-1">
-            <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Draft Albums</span>
-            <span className="text-2xl font-black text-slate-800 leading-none">
-              {albums.filter(a => a.status === "Draft").length} <span className="text-xs text-slate-400 font-bold normal-case">pending</span>
-            </span>
-          </div>
-        </div>
-
-      </div>
-
-      {/* Main Layout Grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
-        
-        {/* Left Column: Gallery Directory (12 / 12) */}
-        <div className="lg:col-span-12 space-y-6">
-          <div className="bg-white p-6 rounded-card border border-slate-100 shadow-card">
-            
-            {/* Gallery Directory Header Controls */}
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 mb-6">
-              <div>
-                <h2 className="text-xl font-bold text-slate-800">Gallery Directory</h2>
-              </div>
-              
-              <div className="flex items-center gap-3">
-                {/* Search Bar */}
-                <div className="relative">
-                  <span className="absolute inset-y-0 left-0 pl-3.5 flex items-center pointer-events-none text-slate-400">
-                    <Search className="h-4 w-4" />
-                  </span>
-                  <input
-                    type="text"
-                    placeholder="Filter albums..."
-                    value={searchQuery}
-                    onChange={(e) => setSearchQuery(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-slate-200 rounded-xl bg-slate-50 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-medium transition-all"
-                  />
-                </div>
-
-                {/* View Toggles */}
-                <div className="flex items-center border border-slate-200 rounded-xl bg-slate-50 p-1">
-                  <button
-                    onClick={() => setViewMode("grid")}
-                    className={`p-1.5 rounded-lg transition-colors ${viewMode === "grid" ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-700"}`}
-                    title="Grid View"
-                  >
-                    <LayoutGrid className="h-4.5 w-4.5" />
-                  </button>
-                  <button
-                    onClick={() => setViewMode("list")}
-                    className={`p-1.5 rounded-lg transition-colors ${viewMode === "list" ? "bg-white text-blue-600 shadow-sm" : "text-slate-400 hover:text-slate-700"}`}
-                    title="List View"
-                  >
-                    <List className="h-4.5 w-4.5" />
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Grid vs List album presentation */}
-            {viewMode === "grid" ? (
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                {filteredAlbums.map((album) => (
-                  <div 
-                    key={album.id} 
-                    className="group bg-white rounded-card overflow-hidden border border-slate-100 shadow-sm hover:shadow-md transition-all duration-300 relative flex flex-col justify-between"
-                  >
-                    {/* Cover image container */}
-                    <div className="relative h-48 w-full overflow-hidden bg-slate-100">
-                      <img 
-                        src={album.coverImage} 
-                        alt={album.title}
-                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500" 
-                      />
-                      
-                      {/* Publish / Draft Status Badge overlay */}
-                      <button 
-                        onClick={() => toggleAlbumStatus(album.id)}
-                        className="absolute top-4 right-4 cursor-pointer focus:outline-none"
+                  <div className="flex flex-wrap gap-1.5">
+                    {editTags.map((tag) => (
+                      <span
+                        key={tag}
+                        className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-lg bg-blue-50 text-blue-700 border border-blue-200 text-[11px] font-bold"
                       >
-                        <Badge 
-                          variant={album.status === "Published" ? "success" : "warning"}
-                          className="shadow-sm font-bold uppercase tracking-wider text-[9px]"
+                        #{tag}
+                        <button
+                          type="button"
+                          onClick={() => setEditTags(editTags.filter((t) => t !== tag))}
+                          className="hover:text-red-600 cursor-pointer"
                         >
-                          {album.status}
-                        </Badge>
-                      </button>
-
-                      {/* Cover Category tag overlay */}
-                      <div className="absolute bottom-4 left-4">
-                        <span className="px-2.5 py-1 bg-slate-900/70 backdrop-blur-sm text-white text-[10px] font-bold rounded-lg uppercase tracking-wider">
-                          {album.category}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Album Info */}
-                    <div className="p-5 text-left flex-grow">
-                      <h3 className="font-extrabold text-base text-slate-800 leading-snug group-hover:text-[#2563EB] transition-colors">
-                        {album.title}
-                      </h3>
-                      
-                      <div className="flex items-center gap-4 text-xs font-semibold text-slate-400 mt-3">
-                        <div className="flex items-center gap-1.5">
-                          <ImageIcon className="h-3.5 w-3.5" />
-                          <span>{album.photosCount} Photos</span>
-                        </div>
-                        <div className="flex items-center gap-1.5">
-                          <Clock className="h-3.5 w-3.5" />
-                          <span>{album.date}</span>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Quick action buttons footer */}
-                    <div className="border-t border-slate-50 px-5 py-3.5 bg-slate-50/50 flex items-center justify-between">
-                      <button 
-                        onClick={() => toggleAlbumStatus(album.id)}
-                        className="text-xs font-bold text-blue-600 hover:text-blue-800 transition-colors"
-                      >
-                        Set to {album.status === "Published" ? "Draft" : "Publish"}
-                      </button>
-                      <div className="flex items-center gap-2">
-                        <button 
-                          onClick={() => handleOpenEditAlbum(album)}
-                          className="text-slate-400 hover:text-blue-600 transition-colors p-1.5 hover:bg-white rounded-lg border border-transparent hover:border-slate-200"
-                          title="Edit Album"
-                        >
-                          <Pencil className="h-4 w-4" />
+                          <X className="w-3 h-3" />
                         </button>
-                        <button 
-                          onClick={() => handleDeleteAlbum(album.id, album.title)}
-                          className="text-slate-400 hover:text-red-600 transition-colors p-1.5 hover:bg-white rounded-lg border border-transparent hover:border-slate-200"
-                          title="Delete Album"
-                        >
-                          <Trash2 className="h-4 w-4" />
-                        </button>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-
-                {/* Dotted "Create New Album" card */}
-                <div 
-                  onClick={() => {
-                    setEditingAlbumId(null);
-                    setAlbumTitle("");
-                    setAlbumDescription("");
-                    setDriveLink("");
-                    setBannerImage("");
-                    setShowCreateAlbumView(true);
-                  }}
-                  className="border-2 border-dashed border-slate-200 hover:border-blue-500 rounded-card flex flex-col items-center justify-center p-8 cursor-pointer hover:bg-slate-50/50 transition-all duration-300 min-h-[300px]"
-                >
-                  <div className="p-4 bg-slate-100 rounded-full group-hover:bg-blue-50 text-slate-400 group-hover:text-blue-500 transition-colors">
-                    <Plus className="h-8 w-8" />
-                  </div>
-                  <span className="mt-4 font-bold text-slate-700 text-sm">Create New Album</span>
-                  <p className="text-slate-400 text-xs mt-1 text-center font-medium max-w-[200px]">
-                    Create a blank canvas to organize your visual memories.
-                  </p>
-                </div>
-              </div>
-            ) : (
-              /* List view presentation */
-              <div className="overflow-x-auto">
-                <table className="w-full text-left border-collapse">
-                  <thead>
-                    <tr className="border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      <th className="pb-3 pl-4">Album Name</th>
-                      <th className="pb-3">Category</th>
-                      <th className="pb-3 text-center">Status</th>
-                      <th className="pb-3">Photos Count</th>
-                      <th className="pb-3">Date Created</th>
-                      <th className="pb-3 text-right pr-4">Actions</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {filteredAlbums.map((album) => (
-                      <tr 
-                        key={album.id} 
-                        className="border-b border-slate-50 hover:bg-slate-50/50 transition-colors group"
-                      >
-                        <td className="py-4 pl-4 font-bold text-slate-800">
-                          <div className="flex items-center gap-3">
-                            <img src={album.coverImage} className="w-10 h-10 object-cover rounded-lg shrink-0 border" alt="" />
-                            <span className="group-hover:text-[#2563EB] transition-colors">{album.title}</span>
-                          </div>
-                        </td>
-                        <td className="py-4 text-xs font-bold text-slate-500 uppercase tracking-wider">{album.category}</td>
-                        <td className="py-4 text-center">
-                          <button 
-                            onClick={() => toggleAlbumStatus(album.id)}
-                            className="cursor-pointer focus:outline-none"
-                          >
-                            <Badge 
-                              variant={album.status === "Published" ? "success" : "warning"}
-                              className="font-bold uppercase tracking-wider text-[9px]"
-                            >
-                              {album.status}
-                            </Badge>
-                          </button>
-                        </td>
-                        <td className="py-4 text-sm font-semibold text-slate-600">{album.photosCount} Photos</td>
-                        <td className="py-4 text-sm font-semibold text-slate-500">{album.date}</td>
-                        <td className="py-4 text-right pr-4">
-                          <div className="flex items-center justify-end gap-2">
-                            <button
-                              onClick={() => toggleAlbumStatus(album.id)}
-                              className="text-xs font-bold text-blue-600 hover:underline mr-2"
-                            >
-                              Toggle
-                            </button>
-                            <button
-                              onClick={() => handleOpenEditAlbum(album)}
-                              className="text-slate-400 hover:text-blue-600 p-1.5 hover:bg-slate-100 rounded-lg"
-                              title="Edit Album"
-                            >
-                              <Pencil className="h-4 w-4" />
-                            </button>
-                            <button
-                              onClick={() => handleDeleteAlbum(album.id, album.title)}
-                              className="text-slate-400 hover:text-red-500 p-1.5 hover:bg-slate-100 rounded-lg"
-                              title="Delete Album"
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </button>
-                          </div>
-                        </td>
-                      </tr>
+                      </span>
                     ))}
-                    {filteredAlbums.length === 0 && (
-                      <tr>
-                        <td colSpan={6} className="py-8 text-center text-slate-400 font-semibold text-sm">
-                          No albums match your filter criteria.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-
-
-      </div>
-
-      {/* CREATE NEW ALBUM MODAL */}
-      {isCreateModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsCreateModalOpen(false)}></div>
-          
-          <div className="bg-white rounded-card shadow-xl border border-slate-100 max-w-md w-full relative z-10 p-6 sm:p-8 animate-in fade-in zoom-in-95 duration-200">
-            <button 
-              onClick={() => setIsCreateModalOpen(false)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 hover:bg-slate-50 rounded-lg"
-            >
-              <X className="h-5 w-5" />
-            </button>
-
-            <h3 className="text-xl font-bold text-slate-800">Create New Album</h3>
-            <p className="text-slate-500 text-xs mt-1 font-medium">Add a new collection to hold event photos.</p>
-
-            <form onSubmit={handleCreateAlbum} className="mt-6 space-y-4 text-left">
-              <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Album Title</label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. AI Symposium 2026"
-                  value={formTitle}
-                  onChange={(e) => setFormTitle(e.target.value)}
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Category</label>
-                  <select
-                    value={formCategory}
-                    onChange={(e) => setFormCategory(e.target.value as AlbumItem["category"])}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
-                  >
-                    <option value="Workshops">Workshops</option>
-                    <option value="Hackathons">Hackathons</option>
-                    <option value="Symposiums">Symposiums</option>
-                    <option value="Socials">Socials</option>
-                  </select>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Status</label>
-                  <select
-                    value={formStatus}
-                    onChange={(e) => setFormStatus(e.target.value as AlbumItem["status"])}
-                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
-                  >
-                    <option value="Published">Published</option>
-                    <option value="Draft">Draft</option>
-                  </select>
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Album Date</label>
-                <DatePicker
-                  value={formDate}
-                  onChange={(val) => setFormDate(val)}
-                  placeholder="Select album date"
-                  className="bg-white border-slate-200"
-                />
-              </div>
-
-              <div className="pt-4 flex items-center justify-end gap-3">
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={() => setIsCreateModalOpen(false)}
-                  className="border-slate-200"
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  type="submit" 
-                  variant="primary"
-                  className="bg-[#2563EB] text-white hover:bg-blue-700"
-                >
-                  Create Album
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* UPLOAD IMAGES MODAL */}
-      {isUploadModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsUploadModalOpen(false)}></div>
-          
-          <div className="bg-white rounded-card shadow-xl border border-slate-100 max-w-md w-full relative z-10 p-6 sm:p-8 animate-in fade-in zoom-in-95 duration-200">
-            <button 
-              onClick={() => setIsUploadModalOpen(false)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 hover:bg-slate-50 rounded-lg"
-            >
-              <X className="h-5 w-5" />
-            </button>
-
-            <h3 className="text-xl font-bold text-slate-800">Upload Images</h3>
-            <p className="text-slate-500 text-xs mt-1 font-medium">Add photos to an existing gallery album.</p>
-
-            <form onSubmit={handleUploadImages} className="mt-6 space-y-4 text-left">
-              <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Destination Album</label>
-                <select
-                  value={uploadAlbumId}
-                  onChange={(e) => setUploadAlbumId(e.target.value)}
-                  className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
-                >
-                  {albums.map(alb => (
-                    <option key={alb.id} value={alb.id}>{alb.title}</option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Upload Drag & Drop mock zone */}
-              <div>
-                <label className="block text-xs font-bold text-slate-400 uppercase tracking-wider mb-2">Select Files</label>
-                <div 
-                  onClick={simulateFileSelection}
-                  className="border-2 border-dashed border-slate-200 hover:border-blue-500 rounded-xl p-8 text-center cursor-pointer hover:bg-slate-50 transition-all space-y-2"
-                >
-                  <div className="p-3 bg-slate-100 rounded-full inline-block text-slate-400">
-                    <Upload className="h-6 w-6" />
-                  </div>
-                  <div className="font-bold text-sm text-slate-700">Click to choose image files</div>
-                  <div className="text-slate-400 text-xs font-semibold">Supports PNG, JPG, WEBP (Max 10MB each)</div>
-                </div>
-
-                {selectedFileCount > 0 && (
-                  <div className="mt-3 flex items-center justify-between text-xs bg-slate-50 p-2.5 rounded-lg border">
-                    <span className="font-bold text-slate-600">Selected {selectedFileCount} images ready</span>
-                    <button 
-                      type="button" 
-                      onClick={() => setSelectedFileCount(0)}
-                      className="text-red-500 font-bold hover:underline"
-                    >
-                      Clear
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              <div className="pt-4 flex items-center justify-end gap-3">
-                <Button 
-                  type="button" 
-                  variant="outline" 
-                  onClick={() => setIsUploadModalOpen(false)}
-                  className="border-slate-200"
-                >
-                  Cancel
-                </Button>
-                <Button 
-                  type="submit" 
-                  variant="primary"
-                  className="bg-[#2563EB] text-white hover:bg-blue-700"
-                >
-                  Upload & Save
-                </Button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* VIEW ALL RECENT UPLOADS MODAL (LIGHTBOX) */}
-      {isViewAllModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-sm" onClick={() => setIsViewAllModalOpen(false)}></div>
-          
-          <div className="bg-white rounded-card shadow-xl border border-slate-100 max-w-3xl w-full relative z-10 p-6 sm:p-8 animate-in fade-in zoom-in-95 duration-200 max-h-[85vh] flex flex-col">
-            <button 
-              onClick={() => setIsViewAllModalOpen(false)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 hover:bg-slate-50 rounded-lg"
-            >
-              <X className="h-5 w-5" />
-            </button>
-
-            <h3 className="text-xl font-bold text-slate-800">Recently Uploaded Media</h3>
-            <p className="text-slate-500 text-xs mt-1 font-medium">Browse and manage recent asset uploads.</p>
-
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4 mt-6 overflow-y-auto flex-grow pr-1.5">
-              {recentImages.map(img => (
-                <div key={img.id} className="group relative bg-slate-50 rounded-xl border overflow-hidden h-32 flex flex-col justify-between">
-                  <img src={img.url} className="w-full h-full object-cover" alt="" />
-                  <div className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover:opacity-100 transition-opacity p-2 flex flex-col justify-between text-left">
-                    <span className="text-[10px] text-white/80 font-medium truncate block">{img.name}</span>
-                    <div className="flex items-center justify-between">
-                      <span className="text-[9px] text-white/60 font-bold">{img.size}</span>
-                      <button 
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (confirm("Delete this photo?")) {
-                            setRecentImages(prev => prev.filter(i => i.id !== img.id));
-                            addToast("Image deleted.");
-                          }
-                        }}
-                        className="text-red-400 hover:text-red-500 p-1 rounded hover:bg-white/10"
-                        title="Delete Image"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                      </button>
-                    </div>
                   </div>
                 </div>
-              ))}
-            </div>
 
-            <div className="pt-4 mt-6 border-t flex justify-end">
-              <Button variant="outline" onClick={() => setIsViewAllModalOpen(false)} className="border-slate-200">
-                Close
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* SMART ORGANIZING / REVIEW TAGS MODAL */}
-      {isTagModalOpen && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm" onClick={() => setIsTagModalOpen(false)}></div>
-          
-          <div className="bg-white rounded-card shadow-xl border border-slate-100 max-w-md w-full relative z-10 p-6 sm:p-8 animate-in fade-in zoom-in-95 duration-200">
-            <button 
-              onClick={() => setIsTagModalOpen(false)}
-              className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-1.5 hover:bg-slate-50 rounded-lg"
-            >
-              <X className="h-5 w-5" />
-            </button>
-
-            <div className="flex items-center gap-2.5 text-blue-600">
-              <Sparkles className="h-5 w-5" />
-              <h3 className="text-xl font-bold text-slate-800">Review AI Auto-Tags</h3>
-            </div>
-            <p className="text-slate-500 text-xs mt-1.5 font-medium leading-relaxed">
-              AI analysis scans uploaded images and assigns searchable metadata categories. Review or toggle active tags below.
-            </p>
-
-            <form onSubmit={handleAddTag} className="mt-6 flex gap-2">
-              <input
-                type="text"
-                placeholder="Add custom tag..."
-                value={newTagInput}
-                onChange={(e) => setNewTagInput(e.target.value)}
-                className="flex-grow px-4 py-2 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold"
-              />
-              <Button type="submit" variant="primary" size="sm" className="bg-[#2563EB] text-white">
-                Add
-              </Button>
-            </form>
-
-            <div className="mt-5 space-y-3.5 text-left">
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Auto-Assigned Tags</span>
-              
-              <div className="flex flex-wrap gap-2">
-                {tags.map(tag => (
+                {/* Modal Footer */}
+                <div className="pt-3 border-t border-slate-100 flex items-center justify-end gap-2.5">
                   <button
-                    key={tag.name}
                     type="button"
-                    onClick={() => toggleTag(tag.name)}
-                    className={`px-3 py-1.5 rounded-xl border text-xs font-semibold transition-all flex items-center gap-2
-                      ${tag.active 
-                        ? "bg-blue-50 text-blue-700 border-blue-200 font-bold" 
-                        : "bg-slate-50 text-slate-400 border-slate-200 line-through"
-                      }`}
+                    onClick={() => setIsEditModalOpen(false)}
+                    className="px-5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
                   >
-                    <span>{tag.name}</span>
-                    {tag.count > 0 && <span className="bg-white/80 px-1 py-0.5 rounded text-[9px] font-bold">{tag.count}</span>}
+                    Cancel
                   </button>
-                ))}
+                  <Button
+                    variant="gradient"
+                    type="submit"
+                    className="px-6 py-2.5 text-xs font-black rounded-xl shadow-md cursor-pointer flex items-center gap-2"
+                  >
+                    <Save className="w-4 h-4" />
+                    <span>Save Changes</span>
+                  </Button>
+                </div>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ========================================================= */}
+      {/* MODAL 3: LIGHTBOX / FULL IMAGE PREVIEW */}
+      {/* ========================================================= */}
+      <AnimatePresence>
+        {lightboxPhoto && (
+          <div
+            onClick={() => setLightboxPhoto(null)}
+            className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-[80] flex items-center justify-center p-4 md:p-8"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.9 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.9 }}
+              onClick={(e) => e.stopPropagation()}
+              className="relative max-w-4xl w-full bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex flex-col max-h-[90vh]"
+            >
+              {/* Top Controls */}
+              <div className="p-4 bg-slate-950/80 border-b border-white/10 flex items-center justify-between shrink-0 text-white">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full border ${getCategoryBadgeClass(
+                        lightboxPhoto.category
+                      )}`}
+                    >
+                      {lightboxPhoto.category}
+                    </span>
+                    <span className="text-xs text-slate-400 font-mono">
+                      {lightboxPhoto.date}
+                    </span>
+                  </div>
+                  <h3 className="text-base font-black text-white">{lightboxPhoto.title}</h3>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => handleOpenEdit(lightboxPhoto)}
+                    className="p-2 text-slate-300 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
+                    title="Edit Details"
+                  >
+                    <Pencil className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => setLightboxPhoto(null)}
+                    className="p-2 text-slate-300 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
               </div>
-            </div>
 
-            <div className="pt-6 mt-6 border-t flex justify-end gap-3">
-              <Button variant="outline" onClick={() => setIsTagModalOpen(false)} className="border-slate-200">
-                Cancel
-              </Button>
-              <Button 
-                variant="primary" 
-                className="bg-[#2563EB] text-white hover:bg-blue-700" 
-                onClick={() => {
-                  setIsTagModalOpen(false);
-                  addToast("AI Auto-tags settings saved successfully.");
-                }}
-              >
-                Approve & Save Tags
-              </Button>
-            </div>
+              {/* Full Image Container */}
+              <div className="flex-1 bg-black flex items-center justify-center overflow-hidden p-2">
+                <img
+                  src={lightboxPhoto.imageUrl}
+                  alt={lightboxPhoto.title}
+                  className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl shadow-2xl"
+                />
+              </div>
+
+              {/* Caption Footer */}
+              {lightboxPhoto.caption && (
+                <div className="p-4 bg-slate-950/90 border-t border-white/10 text-xs text-slate-300 font-medium">
+                  {lightboxPhoto.caption}
+                </div>
+              )}
+            </motion.div>
           </div>
-        </div>
-      )}
+        )}
+      </AnimatePresence>
 
-      {/* DELETE CONFIRMATION MODAL */}
-      {deleteConfirmAlbum && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-          <div 
-            className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200" 
-            onClick={() => setDeleteConfirmAlbum(null)}
-          ></div>
-          
-          <div className="bg-white rounded-3xl shadow-2xl border border-slate-100 max-w-sm w-full relative z-10 p-6 sm:p-7 text-center animate-in fade-in zoom-in-95 duration-200 space-y-4">
-            <div className="w-12 h-12 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center mx-auto shadow-inner">
-              <AlertTriangle className="h-6 w-6 stroke-[2.2]" />
-            </div>
+      {/* ========================================================= */}
+      {/* MODAL 4: DELETE CONFIRMATION */}
+      {/* ========================================================= */}
+      <AnimatePresence>
+        {deleteConfirmPhoto && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-[90] flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              className="bg-white rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 text-center space-y-4"
+            >
+              <div className="w-12 h-12 rounded-2xl bg-red-50 text-red-600 flex items-center justify-center mx-auto shadow-inner">
+                <Trash2 className="w-6 h-6" />
+              </div>
 
-            <div className="space-y-1">
-              <h3 className="text-base font-extrabold text-slate-800 tracking-tight">Delete Gallery Album?</h3>
-              <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                Are you sure you want to delete <span className="font-bold text-slate-700">"{deleteConfirmAlbum.title}"</span> from the gallery directory? This action cannot be undone.
-              </p>
-            </div>
+              <div className="space-y-1">
+                <h3 className="text-base font-black text-[#0F172A]">Delete Photo?</h3>
+                <p className="text-xs text-slate-500 font-medium leading-relaxed">
+                  Are you sure you want to permanently delete{" "}
+                  <strong className="text-slate-800">"{deleteConfirmPhoto.title}"</strong>? This action cannot be undone.
+                </p>
+              </div>
 
-            <div className="pt-2 flex items-center justify-center gap-3">
-              <button
-                type="button"
-                onClick={() => setDeleteConfirmAlbum(null)}
-                className="w-full py-2.5 px-4 border border-slate-200 hover:bg-slate-50 text-slate-700 rounded-xl text-xs font-bold transition-all bg-white"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={confirmDeleteAlbum}
-                className="w-full py-2.5 px-4 bg-red-600 hover:bg-red-700 text-white rounded-xl text-xs font-bold transition-all shadow-md shadow-red-600/20"
-              >
-                Delete Album
-              </button>
-            </div>
+              <div className="flex items-center justify-center gap-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => setDeleteConfirmPhoto(null)}
+                  className="px-5 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeletePhoto}
+                  className="px-6 py-2.5 text-xs font-black text-white bg-red-600 hover:bg-red-700 rounded-xl shadow-md transition-all cursor-pointer"
+                >
+                  Confirm Delete
+                </button>
+              </div>
+            </motion.div>
           </div>
-        </div>
-      )}
-
+        )}
+      </AnimatePresence>
     </div>
   );
 };

@@ -1,88 +1,146 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo, useCallback } from "react";
 import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import Button from "../../components/ui/Button";
 
-// Import local assets
-import galleryLab from "../../assets/images/gallery_lab.png";
-import gallerySymposium from "../../assets/images/gallery_symposium.png";
-import galleryVr from "../../assets/images/gallery_vr.png";
-import galleryCoding from "../../assets/images/gallery_coding.png";
-import galleryCoworking from "../../assets/images/gallery_coworking.png";
-import galleryCollab from "../../assets/images/gallery_collab.png";
-
 import SEO from "../../components/layout/SEO";
-import { db } from "../../config/firebase";
-import { collection, getDocs } from "firebase/firestore";
+import { db, collection, getDocs } from "../../config/firebase";
+import { fetchAlbums } from "../../services/apiClient";
 import { dataCache } from "../../utils/dataCache";
-import { Calendar, X, FolderOpen, Sparkles, ChevronRight, ExternalLink } from "lucide-react";
+import { 
+  Calendar, 
+  X, 
+  Sparkles, 
+  ChevronRight, 
+  ChevronLeft,
+  ExternalLink, 
+  Eye, 
+  Search, 
+  Image as ImageIcon,
+  Download
+} from "lucide-react";
 
-interface AlbumItem {
+export interface EventPhoto {
   id: string;
   title: string;
-  photosCount: number;
+  imageUrl: string;
+  caption?: string;
   date: string;
-  status: string;
   category: "Workshops" | "Hackathons" | "Symposiums" | "Socials";
-  coverImage: string;
-  description: string;
+  tags?: string[];
   driveLink?: string;
-  images: string[];
+  createdAt?: number;
+}
+
+export interface EventGallerySection {
+  eventKey: string;
+  eventTitle: string;
+  category: "Workshops" | "Hackathons" | "Symposiums" | "Socials";
+  date: string;
+  description?: string;
+  driveLink?: string;
+  tags?: string[];
+  createdAt: number;
+  photos: EventPhoto[];
 }
 
 const GalleryPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"All" | "Workshops" | "Hackathons" | "Symposiums" | "Socials">("All");
-  const [albums, setAlbums] = useState<AlbumItem[]>(() => dataCache.get<AlbumItem[]>("public_gallery") || []);
-  const [loading, setLoading] = useState<boolean>(() => !dataCache.get<AlbumItem[]>("public_gallery"));
-  const [selectedAlbum, setSelectedAlbum] = useState<AlbumItem | null>(null);
-  const [selectedImage, setSelectedImage] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [photos, setPhotos] = useState<EventPhoto[]>(() => dataCache.get<EventPhoto[]>("public_gallery_photos") || []);
+  const [loading, setLoading] = useState<boolean>(() => !dataCache.get<EventPhoto[]>("public_gallery_photos"));
+  
+  // Lightbox State (Active Event Section & Photo Index)
+  const [activeLightbox, setActiveLightbox] = useState<{
+    section: EventGallerySection;
+    index: number;
+  } | null>(null);
 
   useEffect(() => {
     const fetchGallery = async () => {
       try {
-        const querySnapshot = await getDocs(collection(db, "albums"));
-        const list: AlbumItem[] = [];
-
-        const resolveCover = (data: any, category: string) => {
+        const resolveCover = (data: any) => {
+          if (data?.imageUrl && typeof data.imageUrl === "string" && data.imageUrl.trim() !== "") {
+            return data.imageUrl;
+          }
+          if (data?.url && typeof data.url === "string" && data.url.trim() !== "") {
+            return data.url;
+          }
           if (data?.bannerImage && typeof data.bannerImage === "string" && data.bannerImage.trim() !== "") {
             return data.bannerImage;
           }
           if (data?.coverImage && typeof data.coverImage === "string" && (data.coverImage.startsWith("data:") || data.coverImage.startsWith("http") || data.coverImage.startsWith("/"))) {
             return data.coverImage;
           }
-          const name = data?.coverImage;
-          if (name === "galleryCoding" || category === "Hackathons") return galleryCoding;
-          if (name === "gallerySymposium" || category === "Symposiums") return gallerySymposium;
-          if (name === "galleryCoworking" || category === "Socials") return galleryCoworking;
-          if (name === "galleryCollab") return galleryCollab;
-          if (name === "galleryVr") return galleryVr;
-          return galleryLab;
+          return "";
         };
 
-        querySnapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          if (data.status !== "Published") return; // Skip drafts
+        // 1. Try Backend API
+        let backendItems: any[] = [];
+        try {
+          backendItems = await fetchAlbums();
+        } catch (apiErr) {
+          console.warn("Backend fetch error, trying Firestore fallback:", apiErr);
+        }
 
-          const albumCategory = (data.category || "Workshops") as AlbumItem["category"];
-          
-          list.push({
-            id: docSnap.id,
-            title: data.title || "Unnamed Album",
-            photosCount: data.photosCount || 0,
-            date: data.date || "Just now",
-            status: data.status || "Published",
-            coverImage: resolveCover(data, albumCategory),
-            category: albumCategory,
-            description: data.description || "No event description available.",
-            driveLink: data.driveLink || "",
-            images: data.images || []
-          });
+        // 2. Try Firestore fallback if empty
+        if (!backendItems || backendItems.length === 0) {
+          const querySnapshot = await getDocs(collection(db, "albums"));
+          backendItems = querySnapshot.docs.map((d) => ({ ...d.data(), id: d.id }));
+        }
+
+        const list: EventPhoto[] = [];
+
+        (backendItems || []).forEach((data: any) => {
+          if (data.status === "Draft") return; // Skip drafts
+
+          const category = (data.category || "Workshops") as EventPhoto["category"];
+          const dateStr = data.date || "Just now";
+          const drive = data.driveLink || "";
+          const tags = Array.isArray(data.tags) ? data.tags : [];
+          const createdAt = data.createdAt || data.created_at || Date.now();
+          const baseTitle = (data.eventTitle || data.title || "Visual Moment").trim();
+
+          // Case A: Item contains multiple images inside `images` array
+          if (Array.isArray(data.images) && data.images.length > 0) {
+            data.images.forEach((imgObj: any, idx: number) => {
+              const url = typeof imgObj === "string" ? imgObj : imgObj?.url;
+              if (!url) return;
+              list.push({
+                id: `${data.id || data._id || 'album'}-${idx}`,
+                title: baseTitle,
+                imageUrl: url,
+                category: category,
+                date: dateStr,
+                caption: (typeof imgObj === "object" ? imgObj.caption : "") || data.caption || data.description || "",
+                driveLink: drive,
+                tags: tags,
+                createdAt: createdAt
+              });
+            });
+          } else {
+            // Case B: Single photo item
+            const photoUrl = resolveCover(data);
+            if (photoUrl) {
+              list.push({
+                id: data.id || data._id || `${Date.now()}-${Math.random()}`,
+                title: data.title || baseTitle,
+                imageUrl: photoUrl,
+                category: category,
+                date: dateStr,
+                caption: data.caption || data.description || "",
+                driveLink: drive,
+                tags: tags,
+                createdAt: createdAt
+              });
+            }
+          }
         });
 
-        setAlbums(list);
-        dataCache.set("public_gallery", list);
+        setPhotos(list);
+        dataCache.set("public_gallery_photos", list);
       } catch (err) {
-        console.error("Error loading gallery items from database:", err);
+        console.error("Error loading gallery photos:", err);
       } finally {
         setLoading(false);
       }
@@ -91,11 +149,65 @@ const GalleryPage: React.FC = () => {
     fetchGallery();
   }, []);
 
-  // Filter gallery items based on selected tab
-  const filteredAlbums = albums.filter(album => {
-    if (activeTab === "All") return true;
-    return album.category === activeTab;
-  });
+  // Group photos by clean Event Name + Date + Category
+  const groupedEvents = useMemo<EventGallerySection[]>(() => {
+    const groupMap = new Map<string, EventGallerySection>();
+
+    photos.forEach((photo) => {
+      // Clean event title: strip trailing sequential numbers like "(1)", "(2)", "#1"
+      const cleanTitle = photo.title
+        .replace(/\s*\(\d+\)$/, "")
+        .replace(/\s*#\d+$/, "")
+        .trim() || "Event Highlights";
+
+      const groupKey = `${cleanTitle.toLowerCase()}___${photo.category}___${photo.date}`;
+
+      if (!groupMap.has(groupKey)) {
+        groupMap.set(groupKey, {
+          eventKey: groupKey,
+          eventTitle: cleanTitle,
+          category: photo.category,
+          date: photo.date,
+          description: photo.caption || "",
+          driveLink: photo.driveLink || "",
+          tags: photo.tags || [],
+          createdAt: photo.createdAt || 0,
+          photos: [photo]
+        });
+      } else {
+        const group = groupMap.get(groupKey)!;
+        // Avoid duplicate photos
+        if (!group.photos.some((p) => p.imageUrl === photo.imageUrl && p.id === photo.id)) {
+          group.photos.push(photo);
+        }
+        if (!group.description && photo.caption) {
+          group.description = photo.caption;
+        }
+        if (!group.driveLink && photo.driveLink) {
+          group.driveLink = photo.driveLink;
+        }
+      }
+    });
+
+    return Array.from(groupMap.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [photos]);
+
+  // Filter grouped events by selected category tab and search query
+  const filteredEvents = useMemo(() => {
+    return groupedEvents.filter((eventSection) => {
+      const matchesTab = activeTab === "All" || eventSection.category === activeTab;
+      const query = searchQuery.toLowerCase().trim();
+      const matchesSearch =
+        query === "" ||
+        eventSection.eventTitle.toLowerCase().includes(query) ||
+        (eventSection.description && eventSection.description.toLowerCase().includes(query)) ||
+        eventSection.category.toLowerCase().includes(query) ||
+        (eventSection.tags && eventSection.tags.some((t) => t.toLowerCase().includes(query))) ||
+        eventSection.photos.some((p) => p.caption && p.caption.toLowerCase().includes(query));
+
+      return matchesTab && matchesSearch;
+    });
+  }, [groupedEvents, activeTab, searchQuery]);
 
   const tabOptions: Array<"All" | "Workshops" | "Hackathons" | "Symposiums" | "Socials"> = [
     "All",
@@ -108,15 +220,43 @@ const GalleryPage: React.FC = () => {
   const getCategoryStyles = (category: string) => {
     switch (category) {
       case "Hackathons":
-        return "bg-rose-50/80 text-rose-600 border border-rose-100/50";
+        return "bg-rose-50/90 text-rose-700 border-rose-200/80";
       case "Symposiums":
-        return "bg-amber-50/80 text-amber-600 border border-amber-100/50";
+        return "bg-amber-50/90 text-amber-700 border-amber-200/80";
       case "Socials":
-        return "bg-emerald-50/80 text-emerald-600 border border-emerald-100/50";
-      default: // Workshops
-        return "bg-blue-50/80 text-[#2563EB] border border-blue-100/50";
+        return "bg-emerald-50/90 text-emerald-700 border-emerald-200/80";
+      default:
+        return "bg-blue-50/90 text-blue-700 border-blue-200/80";
     }
   };
+
+  // Keyboard navigation for Lightbox
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => {
+      if (!activeLightbox) return;
+      if (e.key === "Escape") {
+        setActiveLightbox(null);
+      } else if (e.key === "ArrowLeft") {
+        setActiveLightbox((prev) => {
+          if (!prev) return null;
+          const newIdx = prev.index > 0 ? prev.index - 1 : prev.section.photos.length - 1;
+          return { ...prev, index: newIdx };
+        });
+      } else if (e.key === "ArrowRight") {
+        setActiveLightbox((prev) => {
+          if (!prev) return null;
+          const newIdx = prev.index < prev.section.photos.length - 1 ? prev.index + 1 : 0;
+          return { ...prev, index: newIdx };
+        });
+      }
+    },
+    [activeLightbox]
+  );
+
+  useEffect(() => {
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [handleKeyDown]);
 
   return (
     <div className="overflow-hidden bg-[#FAFBFC] pb-24 min-h-screen font-sans">
@@ -127,29 +267,27 @@ const GalleryPage: React.FC = () => {
       />
       
       {/* ================= HERO / HEADER SECTION ================= */}
-      <section className="relative pt-28 pb-16 px-6 lg:px-8 text-center bg-gradient-to-b from-blue-50/20 via-white to-transparent">
-        {/* Soft background glow */}
+      <section className="relative pt-28 pb-14 px-6 lg:px-8 text-center bg-gradient-to-b from-blue-50/25 via-white to-transparent">
         <div className="absolute inset-0 overflow-hidden pointer-events-none -z-10">
           <div className="absolute top-[10%] left-[50%] -translate-x-1/2 w-[700px] h-[500px] rounded-full bg-blue-50/40 blur-[120px]"></div>
         </div>
 
-        <div className="max-w-3xl mx-auto space-y-5">
-          {/* Subheader tag */}
+        <div className="max-w-3xl mx-auto space-y-4">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.5 }}
-            className="inline-flex items-center gap-1.5 px-3 py-1 bg-blue-50 border border-blue-100 rounded-full text-[#2563EB] text-[10px] font-bold tracking-widest uppercase"
+            className="inline-flex items-center gap-1.5 px-3.5 py-1 bg-blue-50 border border-blue-200/60 rounded-full text-[#2563EB] text-[10px] font-black tracking-widest uppercase"
           >
-            <Sparkles className="w-3 h-3" />
-            Visual Archive
+            <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+            <span>Visual Archive & Moments</span>
           </motion.div>
 
           <motion.h1 
             initial={{ opacity: 0, y: -20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6 }}
-            className="text-5xl md:text-6xl font-serif font-semibold text-transparent bg-clip-text bg-gradient-to-r from-slate-900 via-[#2563EB] to-slate-900 tracking-tight"
+            className="text-4xl sm:text-5xl md:text-6xl font-black text-transparent bg-clip-text bg-gradient-to-r from-slate-950 via-[#2563EB] to-slate-900 tracking-tight"
           >
             Our Visual Legacy
           </motion.h1>
@@ -164,206 +302,318 @@ const GalleryPage: React.FC = () => {
         </div>
       </section>
 
-      {/* ================= TAB CONTROLS ================= */}
-      <section className="max-w-7xl mx-auto px-6 lg:px-8 mb-16">
-        <div className="flex flex-wrap items-center justify-center gap-2">
-          {tabOptions.map((tab) => {
-            const isActive = activeTab === tab;
-            return (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`px-5 py-2.5 rounded-full text-xs font-bold tracking-wide border transition-all duration-300 select-none
-                  ${isActive
-                    ? "bg-[#2563EB] text-white border-[#2563EB] shadow-md shadow-blue-500/10 scale-102"
-                    : "bg-white text-slate-500 border-slate-200/80 hover:border-slate-350 hover:bg-slate-50"
+      {/* ================= TAB CONTROLS & SEARCH ================= */}
+      <section className="max-w-7xl mx-auto px-6 lg:px-8 mb-10">
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-4 border-b border-slate-200/80 pb-6">
+          {/* Category Tabs */}
+          <div className="flex flex-wrap items-center justify-center sm:justify-start gap-2">
+            {tabOptions.map((tab) => {
+              const isActive = activeTab === tab;
+              const count = tab === "All" 
+                ? groupedEvents.length 
+                : groupedEvents.filter((g) => g.category === tab).length;
+              return (
+                <button
+                  key={tab}
+                  onClick={() => setActiveTab(tab)}
+                  className={`px-4 py-2 rounded-full text-xs font-bold tracking-wide border transition-all duration-200 select-none cursor-pointer flex items-center gap-1.5 ${
+                    isActive
+                      ? "bg-[#2563EB] text-white border-[#2563EB] shadow-md shadow-blue-500/20 scale-102 font-black"
+                      : "bg-white text-slate-600 border-slate-200/80 hover:border-slate-300 hover:bg-slate-50"
                   }`}
+                >
+                  <span>{tab}</span>
+                  <span className={`text-[10px] px-1.5 py-0.2 rounded-full ${isActive ? "bg-white/25 text-white" : "bg-slate-100 text-slate-600 font-black"}`}>
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Search Box */}
+          <div className="relative w-full sm:w-72">
+            <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
+            <input
+              type="text"
+              placeholder="Search event name, tags..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full bg-white border border-slate-200 rounded-full pl-9 pr-8 py-2 text-xs font-bold text-[#0F172A] placeholder-slate-400 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
+            />
+            {searchQuery && (
+              <button
+                onClick={() => setSearchQuery("")}
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 cursor-pointer"
               >
-                {tab}
+                <X className="w-3.5 h-3.5" />
               </button>
-            );
-          })}
+            )}
+          </div>
         </div>
       </section>
 
-      {/* ================= GALLERY IMAGES GRID ================= */}
+      {/* ================= GROUPED EVENTS & SIDE-BY-SIDE GALLERY ================= */}
       <section className="max-w-7xl mx-auto px-6 lg:px-8 mb-24">
         {loading ? (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8">
-            {[1, 2, 3].map((n) => (
-              <div key={n} className="bg-white rounded-[24px] overflow-hidden border border-slate-100 p-5 space-y-4 animate-pulse">
-                <div className="aspect-[4/3] w-full rounded-2xl bg-slate-100"></div>
-                <div className="h-4 w-3/4 rounded bg-slate-100"></div>
-                <div className="h-3 w-1/3 rounded bg-slate-100"></div>
+          <div className="space-y-8">
+            {[1, 2].map((n) => (
+              <div key={n} className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-100 shadow-xs space-y-5 animate-pulse">
+                <div className="h-6 w-1/3 bg-slate-100 rounded-lg"></div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+                  {[1, 2, 3, 4].map((i) => (
+                    <div key={i} className="aspect-[4/3] rounded-2xl bg-slate-100"></div>
+                  ))}
+                </div>
               </div>
             ))}
           </div>
+        ) : filteredEvents.length === 0 ? (
+          <div className="bg-white rounded-3xl p-16 border border-dashed border-slate-200 text-center space-y-3 shadow-xs">
+            <div className="w-14 h-14 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mx-auto">
+              <ImageIcon className="w-7 h-7" />
+            </div>
+            <h3 className="text-base font-black text-[#0F172A]">
+              {groupedEvents.length === 0 ? "No Gallery Photos Yet" : "No Events Found in this Category"}
+            </h3>
+            <p className="text-xs text-slate-400 font-medium max-w-sm mx-auto">
+              {groupedEvents.length === 0
+                ? "Photos uploaded by faculty and organizers will appear here grouped by event."
+                : "Try selecting \"All\" or searching for a different event title."}
+            </p>
+          </div>
         ) : (
-          <motion.div 
-            layout
-            className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-8"
-          >
-            {filteredAlbums.map((album) => (
+          <div className="space-y-10">
+            {filteredEvents.map((eventSection) => (
               <motion.div
                 layout
-                key={album.id}
-                onClick={() => setSelectedAlbum(album)}
-                initial={{ opacity: 0, scale: 0.95 }}
-                animate={{ opacity: 1, scale: 1 }}
-                exit={{ opacity: 0, scale: 0.95 }}
+                key={eventSection.eventKey}
+                initial={{ opacity: 0, y: 15 }}
+                animate={{ opacity: 1, y: 0 }}
                 transition={{ duration: 0.4 }}
-                className="group bg-white rounded-[24px] overflow-hidden shadow-[0_8px_30px_rgba(0,0,0,0.012)] border border-slate-100 hover:shadow-card hover:-translate-y-1 transition-all duration-300 cursor-pointer"
+                className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/80 shadow-xs hover:shadow-md transition-shadow space-y-6"
               >
-                <div className="relative overflow-hidden aspect-[16/10] bg-slate-50 flex items-center justify-center">
-                  <img
-                    src={album.coverImage}
-                    alt={album.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                  />
-                  
-                  {/* Category overlay */}
-                  <div className="absolute top-4 left-4 z-10">
-                    <span className={`px-2.5 py-1 text-[9px] font-bold rounded-lg uppercase tracking-wider ${getCategoryStyles(album.category)}`}>
-                      {album.category}
-                    </span>
+                {/* ================= UPPER: EVENT NAME & DETAILS HEADER ================= */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+                  <div className="space-y-1.5">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={`px-2.5 py-0.5 text-[10px] font-black rounded-full uppercase tracking-wider border ${getCategoryStyles(eventSection.category)}`}>
+                        {eventSection.category}
+                      </span>
+                      <span className="text-xs font-bold text-slate-500 flex items-center gap-1">
+                        <Calendar className="w-3.5 h-3.5 text-blue-500" />
+                        <span>{eventSection.date}</span>
+                      </span>
+                      <span className="text-[10px] font-black text-slate-600 bg-slate-100 px-2 py-0.5 rounded-full border border-slate-200">
+                        {eventSection.photos.length} {eventSection.photos.length === 1 ? "Photo" : "Photos"}
+                      </span>
+                    </div>
+
+                    <h2 className="text-xl sm:text-2xl font-black text-[#0F172A] tracking-tight hover:text-blue-600 transition-colors">
+                      {eventSection.eventTitle}
+                    </h2>
+
+                    {eventSection.description && (
+                      <p className="text-xs sm:text-sm text-slate-500 font-medium leading-relaxed max-w-2xl">
+                        {eventSection.description}
+                      </p>
+                    )}
                   </div>
+
+                  {eventSection.driveLink && (
+                    <a
+                      href={eventSection.driveLink}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold transition-colors w-fit shadow-2xs"
+                    >
+                      <span>Drive Folder</span>
+                      <ExternalLink className="w-3.5 h-3.5" />
+                    </a>
+                  )}
                 </div>
 
-                {/* Title & Info */}
-                <div className="p-5 text-left space-y-2">
-                  <h3 className="font-extrabold text-base text-slate-800 leading-snug group-hover:text-[#2563EB] transition-colors line-clamp-1">
-                    {album.title}
-                  </h3>
-                  <p className="text-slate-400 text-xs font-semibold flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5 text-[#2563EB]" />
-                    <span>{album.date}</span>
-                  </p>
+                {/* ================= SIDE BY SIDE: EVENT IMAGES GRID ================= */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 sm:gap-5">
+                  {eventSection.photos.map((photo, pIdx) => (
+                    <motion.div
+                      key={photo.id}
+                      onClick={() => setActiveLightbox({ section: eventSection, index: pIdx })}
+                      whileHover={{ scale: 1.02 }}
+                      transition={{ duration: 0.2 }}
+                      className="group relative aspect-[4/3] rounded-2xl overflow-hidden bg-slate-900 shadow-2xs border border-slate-200/80 cursor-pointer flex items-center justify-center"
+                    >
+                      <img
+                        src={photo.imageUrl}
+                        alt={photo.caption || photo.title || eventSection.eventTitle}
+                        className="w-full h-full object-cover group-hover:scale-108 transition-transform duration-500"
+                        loading="lazy"
+                      />
+
+                      {/* Hover Overlay */}
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-3">
+                        <span className="text-white text-xs font-bold flex items-center gap-1.5">
+                          <Eye className="w-3.5 h-3.5 text-blue-400" />
+                          <span>View Full</span>
+                        </span>
+                        {photo.caption && (
+                          <span className="text-[10px] text-white/90 truncate max-w-[140px] font-medium">
+                            {photo.caption}
+                          </span>
+                        )}
+                      </div>
+                    </motion.div>
+                  ))}
                 </div>
               </motion.div>
             ))}
-          </motion.div>
+          </div>
         )}
       </section>
 
-      {/* ================= ALBUM LIGHTBOX MODAL ================= */}
+      {/* ================= ENHANCED LIGHTBOX MODAL WITH EVENT NAVIGATION ================= */}
       <AnimatePresence>
-        {selectedAlbum && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-            {/* Backdrop */}
-            <motion.div 
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              className="absolute inset-0 bg-slate-950/40 backdrop-blur-sm" 
-              onClick={() => setSelectedAlbum(null)}
-            ></motion.div>
-
-            {/* Modal Container */}
-            <motion.div 
-              initial={{ opacity: 0, scale: 0.95, y: 15 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95, y: 15 }}
-              transition={{ type: "spring", duration: 0.4 }}
-              className="bg-white rounded-3xl shadow-xl border border-slate-100 max-w-4xl w-full max-h-[85vh] relative z-10 flex flex-col overflow-hidden text-left"
+        {activeLightbox && (
+          <div
+            onClick={() => setActiveLightbox(null)}
+            className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-slate-950/92 backdrop-blur-md"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.94 }}
+              onClick={(e) => e.stopPropagation()}
+              className="relative max-w-5xl w-full bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex flex-col max-h-[92vh]"
             >
-              {/* Top Close button */}
-              <button
-                onClick={() => setSelectedAlbum(null)}
-                className="absolute top-5 right-5 text-slate-400 hover:text-slate-600 p-2 hover:bg-slate-50 rounded-xl transition-all z-20"
-              >
-                <X className="h-5 w-5" />
-              </button>
-
-              {/* Scrollable Modal Content */}
-              <div className="overflow-y-auto p-6 sm:p-8 space-y-8">
-                {/* Top Row: Event Poster + Details Description */}
-                <div className="grid grid-cols-1 md:grid-cols-12 gap-6 items-start">
-                  {/* Event Poster Column */}
-                  <div className="md:col-span-5 bg-slate-50 border border-slate-100 rounded-2xl overflow-hidden relative shadow-sm flex items-center justify-center p-1">
-                    <img 
-                      src={selectedAlbum.coverImage} 
-                      alt={selectedAlbum.title} 
-                      className="w-full h-auto max-h-[320px] object-contain rounded-xl" 
-                    />
-                    <div className="absolute top-3 left-3 z-10">
-                      <span className={`px-2.5 py-1 text-[9px] font-bold rounded-lg uppercase tracking-wider ${getCategoryStyles(selectedAlbum.category)}`}>
-                        {selectedAlbum.category}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Details / Description Column */}
-                  <div className="md:col-span-7 space-y-4 pt-1 pr-4">
-                    <span className="text-[10px] text-slate-400 font-bold uppercase tracking-widest flex items-center gap-1.5">
-                      <Calendar className="w-3.5 h-3.5 text-[#2563EB]" />
-                      {selectedAlbum.date}
+              {/* Top Header */}
+              <div className="p-4 bg-slate-950/90 border-b border-white/10 flex items-center justify-between shrink-0 text-white">
+                <div className="space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span
+                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full border ${getCategoryStyles(
+                        activeLightbox.section.category
+                      )}`}
+                    >
+                      {activeLightbox.section.category}
                     </span>
-                    
-                    <h3 className="text-xl font-extrabold text-slate-800 tracking-tight leading-snug">{selectedAlbum.title}</h3>
-                    
-                    <div className="h-0.5 w-12 bg-[#2563EB] rounded-full"></div>
-                    
-                    <p className="text-xs text-slate-500 font-medium leading-relaxed whitespace-pre-wrap">
-                      {selectedAlbum.description}
-                    </p>
+                    <span className="text-xs text-slate-400 font-medium">
+                      {activeLightbox.section.date}
+                    </span>
+                    <span className="text-[11px] text-blue-400 font-bold bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
+                      Photo {activeLightbox.index + 1} of {activeLightbox.section.photos.length}
+                    </span>
                   </div>
+                  <h3 className="text-base sm:text-lg font-black text-white">
+                    {activeLightbox.section.eventTitle}
+                  </h3>
                 </div>
 
-                {/* Bottom Row: Google Drive Album Photos Link */}
-                <div className="pt-6 border-t border-slate-100">
-                  <div className="p-6 rounded-2xl bg-gradient-to-r from-blue-50/80 to-indigo-50/50 border border-blue-100/80 flex flex-col sm:flex-row items-center justify-between gap-4">
-                    <div className="flex items-center gap-3 text-left">
-                      <div className="w-10 h-10 rounded-xl bg-[#2563EB] text-white flex items-center justify-center shrink-0 shadow-md shadow-blue-500/20">
-                        <FolderOpen className="h-5 w-5" />
-                      </div>
-                      <div>
-                        <h4 className="text-sm font-extrabold text-slate-800 tracking-tight">Event Photo Gallery</h4>
-                        <p className="text-xs text-slate-500 font-medium mt-0.5">High-resolution event photos & media stored on Google Drive</p>
-                      </div>
-                    </div>
-
-                    {selectedAlbum.driveLink ? (
-                      <a 
-                        href={selectedAlbum.driveLink}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[#2563EB] hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-md shadow-blue-500/20 hover:shadow-lg shrink-0"
-                      >
-                        <span>Click here to view album photos</span>
-                        <ExternalLink className="w-3.5 h-3.5" />
-                      </a>
-                    ) : (
-                      <span className="text-xs font-semibold text-slate-400 bg-white px-4 py-2 rounded-xl border">
-                        No Drive link attached
-                      </span>
-                    )}
-                  </div>
+                <div className="flex items-center gap-2">
+                  <a
+                    href={activeLightbox.section.photos[activeLightbox.index]?.imageUrl}
+                    download={`photo-${activeLightbox.index + 1}.jpg`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-white/10 transition-colors"
+                    title="Download Photo"
+                  >
+                    <Download className="h-4 w-4" />
+                  </a>
+                  <button
+                    onClick={() => setActiveLightbox(null)}
+                    className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-white/10 transition-colors cursor-pointer"
+                  >
+                    <X className="h-5 w-5" />
+                  </button>
                 </div>
               </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
 
-      {/* ================= FULLSCREEN LIGHTBOX MODAL ================= */}
-      <AnimatePresence>
-        {selectedImage && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-sm">
-            <button
-              onClick={() => setSelectedImage(null)}
-              className="absolute top-5 right-5 text-white/80 hover:text-white p-2.5 bg-white/10 hover:bg-white/20 rounded-full transition-all"
-            >
-              <X className="h-6 w-6" />
-            </button>
-            
-            <motion.img 
-              initial={{ opacity: 0, scale: 0.95 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              src={selectedImage} 
-              className="max-w-full max-h-[90vh] object-contain rounded-xl shadow-2xl" 
-              alt="Fullscreen preview" 
-            />
+              {/* High-Res Photo Container with Navigation Arrows */}
+              <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden p-2 min-h-[300px]">
+                <AnimatePresence mode="wait">
+                  <motion.img
+                    key={activeLightbox.section.photos[activeLightbox.index]?.id || activeLightbox.index}
+                    src={activeLightbox.section.photos[activeLightbox.index]?.imageUrl}
+                    alt={activeLightbox.section.eventTitle}
+                    initial={{ opacity: 0, scale: 0.98 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.98 }}
+                    transition={{ duration: 0.2 }}
+                    className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl shadow-2xl"
+                  />
+                </AnimatePresence>
+
+                {/* Left arrow */}
+                {activeLightbox.section.photos.length > 1 && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveLightbox((prev) => {
+                        if (!prev) return null;
+                        const newIdx = prev.index > 0 ? prev.index - 1 : prev.section.photos.length - 1;
+                        return { ...prev, index: newIdx };
+                      });
+                    }}
+                    className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/80 hover:bg-blue-600 text-white flex items-center justify-center transition-all shadow-lg cursor-pointer border border-white/10"
+                    title="Previous Photo"
+                  >
+                    <ChevronLeft className="w-5 h-5" />
+                  </button>
+                )}
+
+                {/* Right arrow */}
+                {activeLightbox.section.photos.length > 1 && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setActiveLightbox((prev) => {
+                        if (!prev) return null;
+                        const newIdx = prev.index < prev.section.photos.length - 1 ? prev.index + 1 : 0;
+                        return { ...prev, index: newIdx };
+                      });
+                    }}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/80 hover:bg-blue-600 text-white flex items-center justify-center transition-all shadow-lg cursor-pointer border border-white/10"
+                    title="Next Photo"
+                  >
+                    <ChevronRight className="w-5 h-5" />
+                  </button>
+                )}
+              </div>
+
+              {/* Bottom Caption & Thumbnails Bar */}
+              <div className="p-4 bg-slate-950/90 border-t border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-300">
+                <div className="space-y-1 max-w-xl">
+                  {activeLightbox.section.photos[activeLightbox.index]?.caption ? (
+                    <p className="font-medium text-slate-200">
+                      {activeLightbox.section.photos[activeLightbox.index].caption}
+                    </p>
+                  ) : activeLightbox.section.description ? (
+                    <p className="text-slate-300">{activeLightbox.section.description}</p>
+                  ) : (
+                    <p className="text-slate-500 italic">No caption provided.</p>
+                  )}
+                </div>
+
+                {/* Thumbnails Row if multi-photo */}
+                {activeLightbox.section.photos.length > 1 && (
+                  <div className="flex items-center gap-1.5 overflow-x-auto max-w-xs py-1">
+                    {activeLightbox.section.photos.map((p, idx) => (
+                      <button
+                        key={p.id || idx}
+                        onClick={() => setActiveLightbox((prev) => prev ? { ...prev, index: idx } : null)}
+                        className={`w-10 h-8 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer ${
+                          idx === activeLightbox.index
+                            ? "border-blue-500 scale-105"
+                            : "border-transparent opacity-50 hover:opacity-100"
+                        }`}
+                      >
+                        <img src={p.imageUrl} alt="" className="w-full h-full object-cover" />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </motion.div>
           </div>
         )}
       </AnimatePresence>
@@ -371,7 +621,6 @@ const GalleryPage: React.FC = () => {
       {/* ================= CALL TO ACTION SECTION ================= */}
       <section className="max-w-5xl mx-auto px-6 lg:px-8 mb-12">
         <div className="bg-gradient-to-r from-[#2563EB] to-blue-600 rounded-[28px] p-10 md:p-14 text-center text-white border border-blue-700 shadow-xl relative overflow-hidden">
-          {/* Subtle decoration elements */}
           <div className="absolute -top-32 -left-32 w-64 h-64 bg-[radial-gradient(circle,rgba(255,255,255,0.1)_0%,transparent_70%)] pointer-events-none transform-gpu" />
           <div className="absolute -bottom-32 -right-32 w-64 h-64 bg-[radial-gradient(circle,rgba(255,255,255,0.15)_0%,transparent_70%)] pointer-events-none transform-gpu" />
           
@@ -390,7 +639,7 @@ const GalleryPage: React.FC = () => {
                 </Button>
               </Link>
               <Link to="/contact">
-                <button className="rounded-full px-6 py-2.5 font-bold border border-white/30 bg-white/10 hover:bg-white/20 hover:scale-102 text-white transition-all text-sm flex items-center gap-1">
+                <button className="rounded-full px-6 py-2.5 font-bold border border-white/30 bg-white/10 hover:bg-white/20 hover:scale-102 text-white transition-all text-sm flex items-center gap-1 cursor-pointer">
                   Submit Your Project
                   <ChevronRight className="w-4 h-4" />
                 </button>
@@ -399,7 +648,6 @@ const GalleryPage: React.FC = () => {
           </div>
         </div>
       </section>
-
     </div>
   );
 };

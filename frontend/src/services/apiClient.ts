@@ -593,6 +593,15 @@ export async function createAlbum(albumObj: any) {
   return res.json();
 }
 
+export async function bulkCreateAlbums(items: any[]) {
+  const res = await fetch(`${API_BASE}/albums/bulk`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify({ items }),
+  });
+  return res.json();
+}
+
 export async function updateAlbum(id: string, patch: any) {
   const res = await fetch(`${API_BASE}/albums/${id}`, {
     method: 'PUT',
