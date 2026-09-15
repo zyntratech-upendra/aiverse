@@ -1,0 +1,92 @@
+name: UAT Deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      service:
+        description: "Select service to deploy"
+        required: true
+        type: choice
+        options:
+          - all
+          - frontend
+          - backend
+          
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_rsa
+          
+          
+          
+          chmod 600 ~/.ssh/id_rsa
+          ssh-keyscan -H ${{ secrets.EC2_HOST }} >> ~/.ssh/known_hosts
+      
+        
+
+      - name: Deploy to EC2
+        run: |
+          ssh ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} << EOF
+
+          set -e
+          SERVICE="${{ github.event.inputs.service }}"
+
+          echo "🚀 Deploying: \$SERVICE"
+
+          cd /opt
+          if [ ! -d "/opt/app/.git" ]; then
+             echo "📥 Cloning repo"
+             git clone -b main https://vasupodagatla:${{ secrets.GIT_TOKEN }}@github.com/zyntratech-upendra/aiverse.git app
+             
+          fi
+          cd /opt/app
+          git pull origin main
+
+          # =========================
+          # FRONTEND
+          # =========================
+          if [[ "\$SERVICE" == "frontend" || "\$SERVICE" == "all" ]]; then
+            echo "📄 Copying frontend .env"
+            cp /opt/frontend/.env /opt/app/frontend/.env
+
+            echo "🎨 Building Frontend"
+            cd frontend
+            npm install
+            npm run build
+
+            echo " Deploying Frontend"
+            sudo rm -rf /usr/share/nginx/html/*
+            sudo cp -r dist/* /usr/share/nginx/html/
+            #sudo rm -rf /var/www/aiplacementprep/*
+            #sudo cp -r dist/* /var/www/aiplacementprep/
+            cd ..
+          fi
+
+          # =========================
+          # BACKEND
+          # =========================
+          if [[ "\$SERVICE" == "backend" || "\$SERVICE" == "all" ]]; then
+            echo "📄 Copying backend .env"
+            cp /opt/backend/.env /opt/app/backend/.env
+
+            echo "🔧 Backend Setup"
+            cd backend
+            npm install
+            #pm2 restart backend --update-env || pm2 start server.js --name backend
+            pm2 restart ai-verse-backend --update-env || pm2 start src/index.js -i 2 --name ai-verse-backend
+            cd ..
+          fi
+
+         
+
+          
+
+          echo "✅ Deployment Completed"
+
+          EOF
