@@ -1,8 +1,16 @@
-# Allow all crawlers
+# Robots.txt for https://aiversevitb.in
+# Official Student Technical Club & Innovation Hub - VIT Bhimavaram
+
 User-agent: *
 Allow: /
+Allow: /events
+Allow: /gallery
+Allow: /team
+Allow: /contact
+Allow: /certificate
+Allow: /ticket/
 
-# Block private/dashboard routes from indexing
+# Block administrative, jury, and internal portals from indexing
 Disallow: /faculty/
 Disallow: /organizer/
 Disallow: /participant/
@@ -11,8 +19,24 @@ Disallow: /jury
 Disallow: /set-password
 Disallow: /login
 
-# Sitemap location
-Sitemap: https://aiversevitb.dpdns.org/sitemap.xml
+# Allow major search engines full access to public pages
+User-agent: Googlebot
+Allow: /
 
-# Crawl delay (optional, for polite crawling)
+User-agent: Bingbot
+Allow: /
+
+User-agent: Applebot
+Allow: /
+
+User-agent: Twitterbot
+Allow: /
+
+User-agent: facebookexternalhit
+Allow: /
+
+# Canonical XML Sitemap
+Sitemap: https://aiversevitb.in/sitemap.xml
+
+# Crawl delay
 Crawl-delay: 1

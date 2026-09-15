@@ -30,7 +30,7 @@ export const sendResendEmail = async ({
   headers,
 }: SendResendEmailParams): Promise<{ success: boolean; data?: any; error?: string }> => {
   const recipients = Array.isArray(to) ? to : [to];
-  const defaultFrom = (import.meta.env.VITE_RESEND_FROM_EMAIL as string) || "AI Verse <events@aiverse.in>";
+  const defaultFrom = (import.meta.env.VITE_RESEND_FROM_EMAIL as string) || "AI Verse <events@aiversevitb.in>";
   const defaultReplyTo = (import.meta.env.VITE_RESEND_REPLY_TO as string) || "aiverse@vishnu.edu.in";
 
   const senderEmail = sanitizeEmailField(from, defaultFrom);

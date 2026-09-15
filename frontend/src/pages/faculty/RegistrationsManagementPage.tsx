@@ -382,7 +382,7 @@ const RegistrationsManagementPage: React.FC = () => {
 
       if (targetEmail && !isQuizReg) {
         const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-        const siteBaseUrl = isLocal ? "https://aiversevitb.dpdns.org" : window.location.origin;
+        const siteBaseUrl = isLocal ? "https://aiversevitb.in" : window.location.origin;
         const ticketUrl = `${siteBaseUrl}/ticket/${reg.id}`;
 
         const emailContent = buildRegistrationConfirmationEmail({

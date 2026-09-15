@@ -27,7 +27,8 @@ import {
   updateRegistration,
   fetchAllQuizzes,
   fetchQuizSubmissions,
-  fetchJuryEvaluations
+  fetchJuryEvaluations,
+  uploadImage
 } from "../../services/apiClient";
 import { useModal } from "../../context/ModalContext";
 import {
@@ -72,13 +73,17 @@ import {
   Trophy,
   Award,
   QrCode,
-  Ticket
+  Ticket,
+  Mail,
+  Send,
+  CheckCircle2,
+  FileSpreadsheet
 } from "lucide-react";
 import DatePicker from "../../components/ui/DatePicker";
 import TimePicker from "../../components/ui/TimePicker";
 import MemberSelectCombobox from "../../components/ui/MemberSelectCombobox";
 import { sendResendEmail } from "../../utils/resendEmailService";
-import { buildRoundPromotionEmail } from "../../utils/emailTemplates";
+import { buildRoundPromotionEmail, buildCertificateEmail } from "../../utils/emailTemplates";
 import { dataCache } from "../../utils/dataCache";
 import { EventLaunchSplash, type EventLaunchData } from "../../components/common/EventLaunchSplash";
 
@@ -622,6 +627,726 @@ const EventManagementPage: React.FC = () => {
         type: "danger"
       });
     }
+  };
+
+  // 🎓 CERTIFICATE MANAGEMENT & EMAIL DISTRIBUTION STATE & HANDLERS
+  const [isCertificateModalOpen, setIsCertificateModalOpen] = useState(false);
+  const [certTab, setCertTab] = useState<"studio" | "distribution" | "logs">("studio");
+  const [certTemplateMode, setCertTemplateMode] = useState<"custom" | "builtin">("custom");
+  const [certCustomTemplateUrl, setCertCustomTemplateUrl] = useState<string>("");
+  const [certCustomTemplateFilename, setCertCustomTemplateFilename] = useState<string>("");
+  const [certType, setCertType] = useState<string>("Certificate of Appreciation");
+  const [certCollegeName, setCertCollegeName] = useState<string>("Vishnu Institute of Technology (Autonomous), Bhimavaram");
+  const [certDeptName, setCertDeptName] = useState<string>("Department of Computer Science & Engineering");
+  const [certIssueDate, setCertIssueDate] = useState<string>(new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }));
+  const [certAudienceFilter, setCertAudienceFilter] = useState<string>("all");
+  const [certSearchQuery, setCertSearchQuery] = useState<string>("");
+  const [selectedCertRecipients, setSelectedCertRecipients] = useState<string[]>([]);
+  const [isSendingCertificates, setIsSendingCertificates] = useState<boolean>(false);
+  const [certSendingProgress, setCertSendingProgress] = useState<{
+    current: number;
+    total: number;
+    currentName: string;
+    currentEmail: string;
+    successCount: number;
+    failCount: number;
+    errorMsg?: string;
+  } | null>(null);
+  const [testCertEmail, setTestCertEmail] = useState<string>("");
+  const [isSendingTestEmail, setIsSendingTestEmail] = useState<boolean>(false);
+  const [testEmailFeedback, setTestEmailFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [certSuccessToast, setCertSuccessToast] = useState<string | null>(null);
+
+  // Custom Template Fine-tuning Options (Participant, Team, Roll Placeholders)
+  const [certNamePosY, setCertNamePosY] = useState<number>(38); // % from top
+  const [certNameFontSize, setCertNameFontSize] = useState<number>(64); // px in 2000px canvas
+  const [certNameColor, setCertNameColor] = useState<string>("#1E3A8A");
+
+  const [certShowTeamName, setCertShowTeamName] = useState<boolean>(true);
+  const [certTeamPosY, setCertTeamPosY] = useState<number>(53); // % from top
+  const [certTeamFontSize, setCertTeamFontSize] = useState<number>(32);
+  const [certTeamColor, setCertTeamColor] = useState<string>("#1E3A8A");
+
+  const [certShowRollNo, setCertShowRollNo] = useState<boolean>(true);
+  const [certRollPosY, setCertRollPosY] = useState<number>(45); // % from top
+  const [certRollFontSize, setCertRollFontSize] = useState<number>(20);
+  const [certRollColor, setCertRollColor] = useState<string>("#475569");
+
+  const [certShowQrCode, setCertShowQrCode] = useState<boolean>(false);
+  const [isSavingCertTemplate, setIsSavingCertTemplate] = useState<boolean>(false);
+  const [certTemplateSaveSuccess, setCertTemplateSaveSuccess] = useState<string | null>(null);
+
+  const certFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleCertTemplateUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please upload a valid image file (PNG, JPG, JPEG, WEBP).");
+      return;
+    }
+
+    if (file.size > 10 * 1024 * 1024) {
+      alert("File size exceeds 10MB limit. Please choose an image smaller than 10MB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (uploadEvent) => {
+      const dataUrl = uploadEvent.target?.result as string;
+      if (dataUrl) {
+        setCertCustomTemplateUrl(dataUrl);
+        setCertCustomTemplateFilename(file.name);
+        setCertTemplateMode("custom");
+        setCertShowQrCode(false);
+        setCertTemplateSaveSuccess(`Template "${file.name}" uploaded! You can now adjust Participant and Team Name positions.`);
+        setTimeout(() => setCertTemplateSaveSuccess(null), 5000);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveCertTemplate = () => {
+    setCertCustomTemplateUrl("");
+    setCertCustomTemplateFilename("");
+    setCertTemplateMode("builtin");
+  };
+
+  const compressBase64Image = (dataUrl: string, maxWidth = 1600, quality = 0.8): Promise<string> => {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.crossOrigin = "anonymous";
+      img.onload = () => {
+        let w = img.width;
+        let h = img.height;
+        if (w > maxWidth) {
+          h = Math.round((h * maxWidth) / w);
+          w = maxWidth;
+        }
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        if (!ctx) {
+          resolve(dataUrl);
+          return;
+        }
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/jpeg", quality));
+      };
+      img.onerror = () => resolve(dataUrl);
+      img.src = dataUrl;
+    });
+  };
+
+  const handleSaveCertificateTemplateConfig = async () => {
+    if (!eventAccessEvent?.id) {
+      alert("No active event selected.");
+      return;
+    }
+
+    setIsSavingCertTemplate(true);
+    setCertTemplateSaveSuccess(null);
+
+    try {
+      let resolvedTemplateUrl = certCustomTemplateUrl || "";
+
+      // If user uploaded a new local base64 template image, upload to Cloudinary/server or compress
+      if (resolvedTemplateUrl && resolvedTemplateUrl.startsWith("data:image/")) {
+        try {
+          const uploadRes = await uploadImage(resolvedTemplateUrl, "ai_verse_certificates");
+          if (uploadRes?.secure_url || uploadRes?.url) {
+            resolvedTemplateUrl = uploadRes.secure_url || uploadRes.url;
+            setCertCustomTemplateUrl(resolvedTemplateUrl);
+          }
+        } catch (uploadErr) {
+          console.warn("Cloudinary upload notice, compressing base64 for reliable persistence:", uploadErr);
+          if (resolvedTemplateUrl.length > 350000) {
+            try {
+              const compressed = await compressBase64Image(resolvedTemplateUrl, 1600, 0.78);
+              resolvedTemplateUrl = compressed;
+              setCertCustomTemplateUrl(resolvedTemplateUrl);
+            } catch (compErr) {
+              console.warn("Base64 compression fallback warning:", compErr);
+            }
+          }
+        }
+      }
+
+      const certConfig = {
+        templateMode: resolvedTemplateUrl ? "custom" : certTemplateMode,
+        customTemplateUrl: resolvedTemplateUrl,
+        customTemplateFilename: certCustomTemplateFilename || "",
+        certType,
+        collegeName: certCollegeName,
+        deptName: certDeptName,
+        issueDate: certIssueDate,
+        namePosY: certNamePosY,
+        nameFontSize: certNameFontSize,
+        nameColor: certNameColor,
+        showTeamName: certShowTeamName,
+        teamPosY: certTeamPosY,
+        teamFontSize: certTeamFontSize,
+        teamColor: certTeamColor,
+        showRollNo: certShowRollNo,
+        rollPosY: certRollPosY,
+        rollFontSize: certRollFontSize,
+        rollColor: certRollColor,
+        showQrCode: certShowQrCode,
+        updatedAt: Date.now(),
+      };
+
+      // 1. Save to Firestore
+      const evRef = doc(db, "events", eventAccessEvent.id);
+      await updateDoc(evRef, {
+        certificateConfig: certConfig,
+        updatedAt: Date.now(),
+      });
+
+      // 2. Sync to MongoDB/backend if available
+      try {
+        await updateEvent(eventAccessEvent.id, {
+          certificateConfig: certConfig
+        });
+      } catch (apiErr) {
+        console.warn("Backend updateEvent notice (Firestore saved successfully):", apiErr);
+      }
+
+      // 3. Update local state
+      setEventAccessEvent((prev: any) => ({
+        ...prev,
+        certificateConfig: certConfig,
+      }));
+
+      setEvents((prev) =>
+        prev.map((e) =>
+          e.id === eventAccessEvent.id ? { ...e, certificateConfig: certConfig } : e
+        )
+      );
+
+      setCertTemplateSaveSuccess("✅ Template & positioning saved permanently for this event!");
+      setTimeout(() => setCertTemplateSaveSuccess(null), 6000);
+    } catch (err: any) {
+      console.error("Error saving certificate config:", err);
+      alert(`Failed to save certificate template configuration: ${err?.message || "Unknown error"}`);
+    } finally {
+      setIsSavingCertTemplate(false);
+    }
+  };
+
+  const handleDownloadBlankTemplateGuide = () => {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const W = 2000;
+    const H = 1414;
+    canvas.width = W;
+    canvas.height = H;
+
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.strokeStyle = "#CBD5E1";
+    ctx.lineWidth = 4;
+    ctx.setLineDash([12, 12]);
+    ctx.strokeRect(60, 60, W - 120, H - 120);
+    ctx.setLineDash([]);
+
+    ctx.fillStyle = "#64748B";
+    ctx.font = "bold 34px sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("AI VERSE CERTIFICATE CANVAS (2000 × 1414 px)", W / 2, 220);
+    ctx.font = "22px sans-serif";
+    ctx.fillStyle = "#94A3B8";
+    ctx.fillText("Recommended canvas aspect ratio for custom Canva / Photoshop certificate background designs.", W / 2, 280);
+
+    ctx.strokeStyle = "#93C5FD";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(300, 520, 1400, 240);
+    ctx.fillStyle = "#2563EB";
+    ctx.font = "bold 24px sans-serif";
+    ctx.fillText("✦ PARTICIPANT NAME & CREDENTIALS ZONE ✦", W / 2, 640);
+
+    const link = document.createElement("a");
+    link.download = `AI_Verse_Blank_Certificate_Template_Guide_2000x1414.png`;
+    link.href = canvas.toDataURL("image/png");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Flattened list of all individual recipients (Lead + all Team Members)
+  const flattenedCertRecipients = useMemo(() => {
+    const list: any[] = [];
+    (eventAccessRegistrations || []).forEach((reg: any) => {
+      const regId = reg.id || reg._id;
+      const isGroup = !!reg.groupName && reg.groupName !== "Individual RSVP";
+      const teamName = isGroup ? reg.groupName : "";
+      const leadEmail = (reg.teamLeadPersonalEmail || reg.userEmail || reg.personalEmail || reg.teamLeadEmail || reg.email || "").trim().toLowerCase();
+      const leadName = reg.teamLeadName || reg.fullName || reg.name || "Participant";
+      const leadStudentId = reg.teamLeadStudentId || reg.studentId || "";
+
+      // 1. Add Team Lead / Individual
+      if (leadEmail) {
+        list.push({
+          key: `${regId}_lead`,
+          regId,
+          isLead: true,
+          memberIndex: -1,
+          name: leadName,
+          email: leadEmail,
+          studentId: leadStudentId,
+          teamName,
+          currentRound: reg.currentRound || 1,
+          roundStatus: reg.roundStatus || "Active",
+          attendanceMarked: !!reg.attendanceMarked,
+          submissionStatus: reg.submissionStatus === "Submitted" || !!reg.submittedAt ? "Submitted" : (reg.submissionStatus || "Draft"),
+          isPromoted: (reg.currentRound || 1) > 1 || reg.roundStatus === "Qualified",
+          isWinner: reg.isWinner || reg.rank || (reg.roundStatus === "Qualified" && reg.currentRound >= (eventAccessEvent?.totalRounds || 3)),
+          certificateIssued: !!reg.certificateIssued,
+          certificateId: reg.certificateId || `AIV-${regId.slice(-6).toUpperCase()}-L`,
+          certificateSentAt: reg.certificateSentAt || null,
+          certificateType: reg.certificateType || certType,
+        });
+      }
+
+      // 2. Add Team Members
+      if (Array.isArray(reg.members)) {
+        reg.members.forEach((m: any, mIdx: number) => {
+          const mEmail = (m.email || m.personalEmail || "").trim().toLowerCase();
+          if (mEmail && m.name) {
+            list.push({
+              key: `${regId}_m_${mIdx}`,
+              regId,
+              isLead: false,
+              memberIndex: mIdx,
+              name: m.name,
+              email: mEmail,
+              studentId: m.studentId || m.rollNo || "",
+              teamName,
+              currentRound: reg.currentRound || 1,
+              roundStatus: reg.roundStatus || "Active",
+              attendanceMarked: !!reg.attendanceMarked,
+              submissionStatus: reg.submissionStatus === "Submitted" || !!reg.submittedAt ? "Submitted" : (reg.submissionStatus || "Draft"),
+              isPromoted: (reg.currentRound || 1) > 1 || reg.roundStatus === "Qualified",
+              isWinner: reg.isWinner || reg.rank || (reg.roundStatus === "Qualified" && reg.currentRound >= (eventAccessEvent?.totalRounds || 3)),
+              certificateIssued: !!(m.certificateIssued || (reg.certificateIssued && m.certificateIssued !== false)),
+              certificateId: m.certificateId || `AIV-${regId.slice(-4).toUpperCase()}-M${mIdx + 1}`,
+              certificateSentAt: m.certificateSentAt || reg.certificateSentAt || null,
+              certificateType: m.certificateType || reg.certificateType || certType,
+            });
+          }
+        });
+      }
+    });
+    return list;
+  }, [eventAccessRegistrations, eventAccessEvent, certType]);
+
+  // Filtered recipients based on Audience Tab and Search Query
+  const filteredCertRecipients = useMemo(() => {
+    let result = flattenedCertRecipients;
+
+    // Audience Filter
+    if (certAudienceFilter === "promoted" || certAudienceFilter === "promoted_r2") {
+      result = result.filter(r => (r.currentRound || 1) >= 2 || r.isPromoted);
+    } else if (certAudienceFilter === "all_r2") {
+      result = result.filter(r => (r.currentRound || 1) >= 2);
+    } else if (certAudienceFilter === "promoted_r3") {
+      result = result.filter(r => (r.currentRound || 1) >= 3 || ((r.currentRound || 1) === 2 && r.roundStatus === "Qualified"));
+    } else if (certAudienceFilter === "all_r3") {
+      result = result.filter(r => (r.currentRound || 1) >= 3);
+    } else if (certAudienceFilter === "attended") {
+      result = result.filter(r => r.attendanceMarked);
+    } else if (certAudienceFilter === "submitted") {
+      result = result.filter(r => r.submissionStatus === "Submitted");
+    } else if (certAudienceFilter === "winners") {
+      result = result.filter(r => r.isWinner);
+    } else if (certAudienceFilter === "unsent") {
+      result = result.filter(r => !r.certificateIssued);
+    }
+
+    // Search Query Filter
+    if (certSearchQuery.trim()) {
+      const q = certSearchQuery.toLowerCase().trim();
+      result = result.filter(r =>
+        r.name.toLowerCase().includes(q) ||
+        r.email.toLowerCase().includes(q) ||
+        r.studentId.toLowerCase().includes(q) ||
+        r.teamName.toLowerCase().includes(q) ||
+        (r.certificateId && r.certificateId.toLowerCase().includes(q))
+      );
+    }
+
+    return result;
+  }, [flattenedCertRecipients, certAudienceFilter, certSearchQuery]);
+
+  const handleOpenCertificateModal = () => {
+    setCertAudienceFilter("all");
+    setCertSearchQuery("");
+    setCertSendingProgress(null);
+    setTestEmailFeedback(null);
+    // Select all recipients by default
+    setSelectedCertRecipients(flattenedCertRecipients.map(r => r.key));
+
+    // Hydrate template configuration from event if exists
+    const cfg = eventAccessEvent?.certificateConfig || {};
+    if (cfg.templateMode) setCertTemplateMode(cfg.templateMode);
+    if (cfg.customTemplateUrl) {
+      setCertCustomTemplateUrl(cfg.customTemplateUrl);
+      setCertCustomTemplateFilename(cfg.customTemplateFilename || "custom_template.png");
+    }
+    if (cfg.certType) setCertType(cfg.certType);
+    if (cfg.collegeName) setCertCollegeName(cfg.collegeName);
+    if (cfg.deptName) setCertDeptName(cfg.deptName);
+    if (cfg.issueDate) setCertIssueDate(cfg.issueDate);
+    if (cfg.namePosY !== undefined) setCertNamePosY(cfg.namePosY);
+    if (cfg.nameFontSize !== undefined) setCertNameFontSize(cfg.nameFontSize);
+    if (cfg.nameColor) setCertNameColor(cfg.nameColor);
+    if (cfg.showTeamName !== undefined) setCertShowTeamName(cfg.showTeamName);
+    if (cfg.teamPosY !== undefined) setCertTeamPosY(cfg.teamPosY);
+    if (cfg.teamFontSize !== undefined) setCertTeamFontSize(cfg.teamFontSize);
+    if (cfg.teamColor) setCertTeamColor(cfg.teamColor);
+    if (cfg.showRollNo !== undefined) setCertShowRollNo(cfg.showRollNo);
+    if (cfg.rollPosY !== undefined) setCertRollPosY(cfg.rollPosY);
+    if (cfg.rollFontSize !== undefined) setCertRollFontSize(cfg.rollFontSize);
+    if (cfg.rollColor) setCertRollColor(cfg.rollColor);
+    if (cfg.showQrCode !== undefined) setCertShowQrCode(cfg.showQrCode);
+
+    setIsCertificateModalOpen(true);
+  };
+
+  const handleToggleSelectAllCertRecipients = () => {
+    const currentFilteredKeys = filteredCertRecipients.map(r => r.key);
+    const allFilteredSelected = currentFilteredKeys.every(k => selectedCertRecipients.includes(k));
+
+    if (allFilteredSelected) {
+      setSelectedCertRecipients(prev => prev.filter(k => !currentFilteredKeys.includes(k)));
+    } else {
+      setSelectedCertRecipients(prev => Array.from(new Set([...prev, ...currentFilteredKeys])));
+    }
+  };
+
+  const handleToggleSelectCertRecipient = (key: string) => {
+    setSelectedCertRecipients(prev =>
+      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
+    );
+  };
+
+  // Bulk Dispatch Certificates via Email
+  const handleSendCertificatesBatch = async () => {
+    const recipientsToSend = flattenedCertRecipients.filter(r => selectedCertRecipients.includes(r.key));
+
+    if (recipientsToSend.length === 0) {
+      await showAlert({
+        title: "No Recipients Selected",
+        message: "Please select at least one participant to send certificates.",
+        type: "warning",
+      });
+      return;
+    }
+
+    const confirmed = await showConfirm({
+      title: `Dispatch ${recipientsToSend.length} Certificate(s)?`,
+      message: `You are about to email official "${certType}" certificates directly to ${recipientsToSend.length} participant(s). Would you like to proceed?`,
+      confirmText: `🚀 Send ${recipientsToSend.length} Certificates`,
+      cancelText: "Cancel",
+      type: "primary",
+    });
+    if (!confirmed) return;
+
+    setIsSendingCertificates(true);
+    setCertSendingProgress({
+      current: 0,
+      total: recipientsToSend.length,
+      currentName: "",
+      currentEmail: "",
+      successCount: 0,
+      failCount: 0,
+    });
+
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    const siteBaseUrl = isLocal ? "https://aiversevitb.in" : window.location.origin;
+    let successCount = 0;
+    let failCount = 0;
+
+    for (let i = 0; i < recipientsToSend.length; i++) {
+      const recipient = recipientsToSend[i];
+      const certId = recipient.certificateId || `AIV-${Date.now().toString(36).toUpperCase()}-${i + 1}`;
+      const certUrl = `${siteBaseUrl}/certificate/${certId}?name=${encodeURIComponent(recipient.name)}&event=${encodeURIComponent(eventAccessEvent?.title || "AI Verse Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(recipient.studentId)}&team=${encodeURIComponent(recipient.teamName)}&mode=${encodeURIComponent(certTemplateMode)}&nameY=${encodeURIComponent(certNamePosY)}&nameSize=${encodeURIComponent(certNameFontSize)}&nameColor=${encodeURIComponent(certNameColor)}&teamY=${encodeURIComponent(certTeamPosY)}&teamSize=${encodeURIComponent(certTeamFontSize)}&teamColor=${encodeURIComponent(certTeamColor)}&showTeam=${certShowTeamName}&rollY=${encodeURIComponent(certRollPosY)}&rollSize=${encodeURIComponent(certRollFontSize)}&rollColor=${encodeURIComponent(certRollColor)}&showRoll=${certShowRollNo}&showQr=${certShowQrCode}`;
+
+      setCertSendingProgress({
+        current: i + 1,
+        total: recipientsToSend.length,
+        currentName: recipient.name,
+        currentEmail: recipient.email,
+        successCount,
+        failCount,
+      });
+
+      try {
+        const emailData = buildCertificateEmail({
+          recipientName: recipient.name,
+          eventTitle: eventAccessEvent?.title || "AI Verse Event",
+          certificateType: certType,
+          groupName: recipient.teamName,
+          studentId: recipient.studentId,
+          certificateId: certId,
+          issueDate: certIssueDate,
+          collegeName: certCollegeName,
+          certificateUrl: certUrl,
+        });
+
+        const emailRes = await sendResendEmail({
+          to: recipient.email,
+          subject: emailData.subject,
+          text: emailData.text,
+          html: emailData.html,
+        });
+
+        if (emailRes.success) {
+          successCount++;
+          const now = Date.now();
+
+          // Persist status to Firebase
+          try {
+            const regRef = doc(db, "registrations", recipient.regId);
+            if (recipient.isLead) {
+              await updateDoc(regRef, {
+                certificateIssued: true,
+                certificateId: certId,
+                certificateType: certType,
+                certificateSentAt: now,
+                certificateTemplateMode: certTemplateMode,
+                certificateNamePosY: certNamePosY,
+                certificateNameFontSize: certNameFontSize,
+                certificateNameColor: certNameColor,
+                certificateTeamPosY: certTeamPosY,
+                certificateTeamFontSize: certTeamFontSize,
+                certificateTeamColor: certTeamColor,
+                certificateShowTeamName: certShowTeamName,
+                certificateRollPosY: certRollPosY,
+                certificateRollFontSize: certRollFontSize,
+                certificateRollColor: certRollColor,
+                certificateShowRollNo: certShowRollNo,
+                certificateShowQrCode: certShowQrCode,
+                updatedAt: now,
+              });
+            } else {
+              // Update specific member inside members array
+              const regDoc = (eventAccessRegistrations || []).find((r: any) => (r.id || r._id) === recipient.regId);
+              if (regDoc && Array.isArray(regDoc.members)) {
+                const updatedMembers = [...regDoc.members];
+                if (updatedMembers[recipient.memberIndex]) {
+                  updatedMembers[recipient.memberIndex] = {
+                    ...updatedMembers[recipient.memberIndex],
+                    certificateIssued: true,
+                    certificateId: certId,
+                    certificateSentAt: now,
+                  };
+                  await updateDoc(regRef, {
+                    members: updatedMembers,
+                    certificateIssued: true,
+                    updatedAt: now,
+                  });
+                }
+              }
+            }
+
+            // Sync local state
+            setEventAccessRegistrations((prev: any[]) =>
+              prev.map(r => {
+                if ((r.id || r._id) === recipient.regId) {
+                  if (recipient.isLead) {
+                    return { ...r, certificateIssued: true, certificateId: certId, certificateSentAt: now, certificateType: certType };
+                  } else {
+                    const newMembers = Array.isArray(r.members) ? [...r.members] : [];
+                    if (newMembers[recipient.memberIndex]) {
+                      newMembers[recipient.memberIndex] = {
+                        ...newMembers[recipient.memberIndex],
+                        certificateIssued: true,
+                        certificateId: certId,
+                        certificateSentAt: now,
+                      };
+                    }
+                    return { ...r, members: newMembers, certificateIssued: true };
+                  }
+                }
+                return r;
+              })
+            );
+          } catch (dbErr) {
+            console.warn("Could not update Firestore certificate status:", dbErr);
+          }
+        } else {
+          failCount++;
+          console.error(`Failed to send certificate to ${recipient.email}:`, emailRes.error);
+        }
+      } catch (sendErr) {
+        failCount++;
+        console.error(`Exception sending certificate to ${recipient.email}:`, sendErr);
+      }
+
+      // Small delay between mail deliveries for smooth queue dispatch
+      if (i < recipientsToSend.length - 1) {
+        await new Promise(r => setTimeout(r, 200));
+      }
+    }
+
+    setIsSendingCertificates(false);
+    setCertSuccessToast(`Successfully sent ${successCount} certificate(s) via email!${failCount > 0 ? ` (${failCount} failed)` : ""}`);
+    setTimeout(() => setCertSuccessToast(null), 5000);
+  };
+
+  // Send Single Test Certificate Email
+  const handleSendTestCertificate = async () => {
+    if (!testCertEmail || !testCertEmail.includes("@")) {
+      setTestEmailFeedback({ type: "error", message: "Please enter a valid email address." });
+      return;
+    }
+
+    setIsSendingTestEmail(true);
+    setTestEmailFeedback(null);
+
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    const siteBaseUrl = isLocal ? "https://aiversevitb.in" : window.location.origin;
+    const testCertId = `AIV-TEST-${Date.now().toString(36).toUpperCase()}`;
+    const certUrl = `${siteBaseUrl}/certificate/${testCertId}?name=${encodeURIComponent("Faculty Test Recipient")}&event=${encodeURIComponent(eventAccessEvent?.title || "AI Verse Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=23PA1A0501&team=CodeCrafters&mode=${encodeURIComponent(certTemplateMode)}&nameY=${encodeURIComponent(certNamePosY)}&nameSize=${encodeURIComponent(certNameFontSize)}&nameColor=${encodeURIComponent(certNameColor)}&teamY=${encodeURIComponent(certTeamPosY)}&teamSize=${encodeURIComponent(certTeamFontSize)}&teamColor=${encodeURIComponent(certTeamColor)}&showTeam=${certShowTeamName}&rollY=${encodeURIComponent(certRollPosY)}&rollSize=${encodeURIComponent(certRollFontSize)}&rollColor=${encodeURIComponent(certRollColor)}&showRoll=${certShowRollNo}&showQr=${certShowQrCode}`;
+
+    try {
+      const emailData = buildCertificateEmail({
+        recipientName: "Faculty Test Recipient",
+        eventTitle: eventAccessEvent?.title || "AI Verse Event",
+        certificateType: certType,
+        groupName: "CodeCrafters",
+        studentId: "23PA1A0501",
+        certificateId: testCertId,
+        issueDate: certIssueDate,
+        collegeName: certCollegeName,
+        certificateUrl: certUrl,
+      });
+
+      const res = await sendResendEmail({
+        to: testCertEmail.trim().toLowerCase(),
+        subject: `[TEST PREVIEW] ${emailData.subject}`,
+        text: emailData.text,
+        html: emailData.html,
+      });
+
+      if (res.success) {
+        setTestEmailFeedback({ type: "success", message: `Test certificate email dispatched successfully to ${testCertEmail}!` });
+      } else {
+        setTestEmailFeedback({ type: "error", message: res.error || "Failed to send test email." });
+      }
+    } catch (err: any) {
+      setTestEmailFeedback({ type: "error", message: err?.message || "Network error sending test email." });
+    } finally {
+      setIsSendingTestEmail(false);
+    }
+  };
+
+  // Export Certificate Issuance Log CSV
+  const handleExportCertificateLogsCsv = () => {
+    if (flattenedCertRecipients.length === 0) {
+      alert("No participant records found.");
+      return;
+    }
+
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    const siteBaseUrl = isLocal ? "https://aiversevitb.in" : window.location.origin;
+
+    const exportData = flattenedCertRecipients.map((r, idx) => ({
+      "S.No": idx + 1,
+      "Certificate ID": r.certificateId || `AIV-${r.regId.slice(-6).toUpperCase()}`,
+      "Participant Name": r.name,
+      "Email Address": r.email,
+      "Roll / Student ID": r.studentId || "N/A",
+      "Team Name": r.teamName || "Individual",
+      "Role": r.isLead ? "Team Lead" : "Member",
+      "Event Title": eventAccessEvent?.title || "Event",
+      "Certificate Type": r.certificateType || certType,
+      "Issuance Status": r.certificateIssued ? "Issued & Emailed" : "Pending",
+      "Dispatched Timestamp": r.certificateSentAt ? new Date(r.certificateSentAt).toLocaleString() : "Not Sent",
+      "Online Verification URL": `${siteBaseUrl}/certificate/${r.certificateId || `AIV-${r.regId.slice(-6).toUpperCase()}`}`,
+    }));
+
+    const csv = Papa.unparse(exportData);
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    link.setAttribute("download", `Certificates_Log_${(eventAccessEvent?.title || "Event").replace(/[^a-zA-Z0-9]/g, "_")}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  // Download Sample Certificate PNG (with custom background & coordinate overlays)
+  const handleDownloadSampleCertificatePng = () => {
+    if (!certCustomTemplateUrl) {
+      alert("Please upload a certificate template background image first.");
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const W = 2000;
+    const H = 1414;
+    canvas.width = W;
+    canvas.height = H;
+
+    const renderOverlayContent = () => {
+      // 1. Participant Name (Positioned dynamically by slider)
+      const nameY = (H * certNamePosY) / 100;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = certNameColor || "#0F172A";
+      ctx.font = `bold ${certNameFontSize || 64}px Georgia, Cambria, 'Times New Roman', serif`;
+      ctx.fillText("Sample Participant Name", W / 2, nameY);
+
+      // 2. Roll No / Student ID (if enabled)
+      if (certShowRollNo) {
+        const rollY = (H * certRollPosY) / 100;
+        ctx.fillStyle = certRollColor || "#475569";
+        ctx.font = `bold ${certRollFontSize || 20}px -apple-system, BlinkMacSystemFont, monospace`;
+        ctx.fillText("Roll: 23PA1A0501", W / 2, rollY);
+      }
+
+      // 3. Team Name (if enabled)
+      if (certShowTeamName) {
+        const teamY = (H * certTeamPosY) / 100;
+        ctx.fillStyle = certTeamColor || "#1E3A8A";
+        ctx.font = `bold ${certTeamFontSize || 32}px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
+        ctx.fillText("CodeCrafters", W / 2, teamY);
+      }
+
+      // 4. Verification ID / Footer (if enabled)
+      if (certShowQrCode) {
+        ctx.fillStyle = "#64748B";
+        ctx.font = "bold 16px monospace";
+        ctx.fillText(`Certificate ID: AIV-SAMPLE-2026   •   Issue Date: ${certIssueDate}   •   Verify at: aiversevitb.in/certificate`, W / 2, H - 35);
+      }
+
+      const link = document.createElement("a");
+      link.download = `Sample_Certificate_${certType.replace(/[^a-zA-Z0-9]/g, "_")}.png`;
+      link.href = canvas.toDataURL("image/png");
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    };
+
+    const img = new Image();
+    img.crossOrigin = "anonymous";
+    img.onload = () => {
+      ctx.drawImage(img, 0, 0, W, H);
+      renderOverlayContent();
+    };
+    img.onerror = () => {
+      alert("Failed to load certificate template background image for export.");
+    };
+    img.src = certCustomTemplateUrl;
   };
 
   // Multi-Problem Statements State
@@ -1262,7 +1987,7 @@ const EventManagementPage: React.FC = () => {
       // Dispatch Congratulation & Promotion Emails via Resend to Team Leads
       const targetRoundDef = liveRoundsList.find(r => r.roundNumber === promoteToRound);
       const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-      const siteBaseUrl = isLocal ? "https://aiversevitb.dpdns.org" : window.location.origin;
+      const siteBaseUrl = isLocal ? "https://aiversevitb.in" : window.location.origin;
       const dashboardUrl = `${siteBaseUrl}/participant`;
 
       let emailsSentCount = 0;
@@ -1974,6 +2699,7 @@ const EventManagementPage: React.FC = () => {
   const [formIsVirtual, setFormIsVirtual] = useState(true);
   const [formLocation, setFormLocation] = useState("");
   const [formRegDeadline, setFormRegDeadline] = useState("");
+  const [formRegDeadlineTime, setFormRegDeadlineTime] = useState("");
   const [formMaxParticipants, setFormMaxParticipants] = useState("");
   const [formEnableWaitlist, setFormEnableWaitlist] = useState(false);
   const [formMinTeamSize, setFormMinTeamSize] = useState("1");
@@ -2224,6 +2950,9 @@ const EventManagementPage: React.FC = () => {
         endTime: formEndTime,
         isVirtual: formIsVirtual,
         regDeadline: formRegDeadline,
+        regDeadlineTime: formRegDeadlineTime,
+        registrationDeadline: formRegDeadline,
+        registrationDeadlineTime: formRegDeadlineTime,
         enableWaitlist: formEnableWaitlist,
         posterFilename: formPosterImages[0]?.filename || "",
         posterPreview: safePosterPreview,
@@ -2442,6 +3171,7 @@ const EventManagementPage: React.FC = () => {
       setFormIsVirtual(true);
       setFormLocation("");
       setFormRegDeadline("");
+      setFormRegDeadlineTime("");
       setFormMaxParticipants("");
       setFormEnableWaitlist(false);
       setFormPosterImages([]);
@@ -2625,7 +3355,8 @@ const EventManagementPage: React.FC = () => {
         setFormEndTime(data.endTime || "");
         setFormIsVirtual(data.isVirtual !== undefined ? data.isVirtual : true);
         setFormLocation(data.location || "");
-        setFormRegDeadline(data.regDeadline || "");
+        setFormRegDeadline(data.regDeadline || data.registrationDeadline || "");
+        setFormRegDeadlineTime(data.regDeadlineTime || data.registrationDeadlineTime || "");
         setFormMaxParticipants(data.maxReg ? String(data.maxReg) : "");
         setFormEnableWaitlist(data.enableWaitlist || false);
         setFormPosterImages(data.posterImages || (data.posterPreview ? [{ filename: data.posterFilename || "poster.png", preview: data.posterPreview }] : []));
@@ -3412,13 +4143,23 @@ const EventManagementPage: React.FC = () => {
                       Registration Details
                     </h3>
 
-                    <div>
-                      <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Registration Deadline</label>
-                      <DatePicker
-                        value={formRegDeadline}
-                        onChange={(val) => setFormRegDeadline(val)}
-                        placeholder="Select deadline"
-                      />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Registration Deadline Date</label>
+                        <DatePicker
+                          value={formRegDeadline}
+                          onChange={(val) => setFormRegDeadline(val)}
+                          placeholder="Select deadline date"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">Registration End Time</label>
+                        <TimePicker
+                          value={formRegDeadlineTime}
+                          onChange={(val) => setFormRegDeadlineTime(val)}
+                          placeholder="e.g. 11:55 PM"
+                        />
+                      </div>
                     </div>
 
                     {formCategory === "Hackathon" && (
@@ -6287,10 +7028,10 @@ const EventManagementPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* CARD 4: Problem Statements (Row 2 - Span 3 of 6) */}
+              {/* CARD 4: Problem Statements (Row 2 - Span 2 of 6) */}
               <div
                 onClick={handleOpenMultiProblemModal}
-                className="lg:col-span-3 bg-white p-6 rounded-3xl text-slate-800 shadow-sm relative overflow-hidden border border-slate-200/90 hover:border-blue-500 hover:shadow-xl hover:shadow-blue-500/10 transition-all duration-200 group flex flex-col justify-between h-full min-h-[280px] cursor-pointer hover:-translate-y-1 transform-gpu"
+                className="lg:col-span-2 bg-white p-6 rounded-3xl text-slate-800 shadow-sm relative overflow-hidden border border-slate-200/90 hover:border-blue-500 hover:shadow-xl hover:shadow-blue-500/10 transition-all duration-200 group flex flex-col justify-between h-full min-h-[280px] cursor-pointer hover:-translate-y-1 transform-gpu"
               >
                 <div className="absolute right-0 top-0 w-48 h-48 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.06),transparent_70%)] pointer-events-none" />
 
@@ -6339,10 +7080,10 @@ const EventManagementPage: React.FC = () => {
                 <div className="relative z-10 pt-5 space-y-3.5">
                   <div className="grid grid-cols-2 gap-2.5">
                     <div className="px-3 py-2 rounded-xl bg-slate-50 text-slate-700 border border-slate-200/70 text-xs font-bold text-center shadow-2xs">
-                      Active Statements: <span className="text-blue-600 font-black">{eventAccessEvent?.problemStatements?.length || (eventAccessEvent?.problemStatementTitle ? 1 : 0)}</span>
+                      Active: <span className="text-blue-600 font-black">{eventAccessEvent?.problemStatements?.length || (eventAccessEvent?.problemStatementTitle ? 1 : 0)}</span>
                     </div>
                     <div className="px-3 py-2 rounded-xl bg-slate-50 text-slate-700 border border-slate-200/70 text-xs font-bold text-center shadow-2xs">
-                      Track: <span className="text-slate-900 font-black">{eventAccessEvent?.problemStatementTrack || "Multi-Track"}</span>
+                      Track: <span className="text-slate-900 font-black truncate">{eventAccessEvent?.problemStatementTrack || "Multi-Track"}</span>
                     </div>
                   </div>
 
@@ -6357,17 +7098,17 @@ const EventManagementPage: React.FC = () => {
                     <FileCode className="w-4 h-4 shrink-0" />
                     <span>
                       {eventAccessEvent?.problemStatementTitle || eventAccessEvent?.problemStatements?.length
-                        ? "Manage Problem Statements"
-                        : "+ Give Problem Statements"}
+                        ? "Manage Statements"
+                        : "+ Add Statements"}
                     </span>
                   </button>
                 </div>
               </div>
 
-              {/* CARD 5: Submissions (Row 2 - Span 3 of 6) */}
+              {/* CARD 5: Submissions (Row 2 - Span 2 of 6) */}
               <div
                 onClick={handleOpenSubmissionsModal}
-                className="lg:col-span-3 bg-white p-6 rounded-3xl text-slate-800 shadow-sm relative overflow-hidden border border-slate-200/90 hover:border-blue-500 hover:shadow-xl hover:shadow-blue-500/10 transition-all duration-200 group flex flex-col justify-between h-full min-h-[280px] cursor-pointer hover:-translate-y-1 transform-gpu"
+                className="lg:col-span-2 bg-white p-6 rounded-3xl text-slate-800 shadow-sm relative overflow-hidden border border-slate-200/90 hover:border-blue-500 hover:shadow-xl hover:shadow-blue-500/10 transition-all duration-200 group flex flex-col justify-between h-full min-h-[280px] cursor-pointer hover:-translate-y-1 transform-gpu"
               >
                 <div className="absolute right-0 top-0 w-48 h-48 bg-[radial-gradient(circle_at_top_right,rgba(37,99,235,0.06),transparent_70%)] pointer-events-none" />
 
@@ -6423,6 +7164,76 @@ const EventManagementPage: React.FC = () => {
                   >
                     <Eye className="w-4 h-4 shrink-0" />
                     <span>Monitor Submissions</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* CARD 6: Certificates & Distribution (Row 2 - Span 2 of 6) */}
+              <div
+                onClick={handleOpenCertificateModal}
+                className="lg:col-span-2 bg-white p-6 rounded-3xl text-slate-800 shadow-sm relative overflow-hidden border border-slate-200/90 hover:border-amber-500 hover:shadow-xl hover:shadow-amber-500/10 transition-all duration-200 group flex flex-col justify-between h-full min-h-[280px] cursor-pointer hover:-translate-y-1 transform-gpu"
+              >
+                <div className="absolute right-0 top-0 w-48 h-48 bg-[radial-gradient(circle_at_top_right,rgba(245,158,11,0.08),transparent_70%)] pointer-events-none" />
+
+                <div className="relative z-10 space-y-4 text-left">
+                  {/* Top Tags */}
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-amber-50 text-amber-800 border border-amber-200">
+                      CERTIFICATE ENGINE
+                    </span>
+                    {flattenedCertRecipients.some(r => r.certificateIssued) ? (
+                      <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                        {flattenedCertRecipients.filter(r => r.certificateIssued).length} ISSUED
+                      </span>
+                    ) : (
+                      <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200 flex items-center gap-1.5">
+                        <span className="w-1.5 h-1.5 rounded-full bg-blue-500 animate-pulse" />
+                        READY TO ISSUE
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Title & Icon */}
+                  <div className="flex items-center gap-3.5 pt-1">
+                    <div className="w-12 h-12 rounded-2xl bg-amber-50 text-amber-600 border border-amber-200/80 flex items-center justify-center shrink-0 group-hover:scale-105 group-hover:bg-amber-600 group-hover:text-white transition-all shadow-xs">
+                      <Award className="w-6 h-6" />
+                    </div>
+                    <div>
+                      <h3 className="text-lg font-black tracking-tight text-slate-900 leading-tight">
+                        Certificates & Distribution
+                      </h3>
+                      <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Awards & Email Delivery</p>
+                    </div>
+                  </div>
+
+                  {/* Description */}
+                  <p className="text-xs text-slate-500 font-medium leading-relaxed min-h-[36px]">
+                    Generate verifiable digital certificates, customize templates, and bulk dispatch to participant emails.
+                  </p>
+                </div>
+
+                {/* Bottom Section: Stat Pills + Full Width Button */}
+                <div className="relative z-10 pt-5 space-y-3.5">
+                  <div className="grid grid-cols-2 gap-2.5">
+                    <div className="px-3 py-2 rounded-xl bg-slate-50 text-slate-700 border border-slate-200/70 text-xs font-bold text-center shadow-2xs">
+                      Issued: <span className="text-emerald-600 font-black">{flattenedCertRecipients.filter(r => r.certificateIssued).length}</span>
+                    </div>
+                    <div className="px-3 py-2 rounded-xl bg-slate-50 text-slate-700 border border-slate-200/70 text-xs font-bold text-center shadow-2xs">
+                      Pending: <span className="text-amber-600 font-black">{flattenedCertRecipients.filter(r => !r.certificateIssued).length}</span>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleOpenCertificateModal();
+                    }}
+                    className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-amber-600 via-amber-500 to-indigo-600 hover:from-amber-500 hover:to-indigo-500 active:scale-95 text-white font-black text-xs sm:text-sm transition-all shadow-md shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer border border-amber-400/20"
+                  >
+                    <Award className="w-4 h-4 shrink-0 text-amber-200" />
+                    <span>Manage & Distribute Certificates</span>
                   </button>
                 </div>
               </div>
@@ -9214,6 +10025,1198 @@ const EventManagementPage: React.FC = () => {
                 Done
               </button>
             </div>
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* 🎓 CERTIFICATE & EMAIL DISTRIBUTION FULL PAGE MODAL */}
+      {isCertificateModalOpen && createPortal(
+        <div className="fixed inset-0 z-[9999999] bg-slate-100 text-slate-900 overflow-y-auto flex flex-col w-screen h-screen animate-in fade-in duration-200">
+
+          {/* Sticky Full-Width Dark Blue Top Header Bar */}
+          <div className="w-full bg-[#1E3A8A] text-white px-6 sm:px-10 py-4 flex items-center justify-between shadow-xl sticky top-0 z-50 shrink-0">
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => setIsCertificateModalOpen(false)}
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all cursor-pointer border border-white/15 active:scale-95"
+              >
+                <ChevronLeft className="h-4 w-4" />
+                <span>Back to Event Access</span>
+              </button>
+
+              <div className="flex items-center gap-3">
+                <span className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest bg-amber-400/20 text-amber-200 border border-amber-300/30 flex items-center gap-1.5">
+                  <Award className="w-3.5 h-3.5 text-amber-300" />
+                  CERTIFICATES & MAILING HUB
+                </span>
+                <span className="text-white/40 text-sm hidden sm:inline">•</span>
+                <span className="text-sm font-black text-blue-100 truncate max-w-xs sm:max-w-md">
+                  {eventAccessEvent?.title || "AI Verse Event"}
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="hidden md:flex items-center gap-3 bg-white/10 px-4 py-2 rounded-2xl border border-white/15 text-xs font-black">
+                <span className="text-emerald-400 flex items-center gap-1">
+                  <CheckCircle2 className="w-3.5 h-3.5" />
+                  {flattenedCertRecipients.filter(r => r.certificateIssued).length} Issued & Sent
+                </span>
+                <span className="text-white/30">|</span>
+                <span className="text-amber-300 flex items-center gap-1">
+                  <Award className="w-3.5 h-3.5" />
+                  {flattenedCertRecipients.filter(r => !r.certificateIssued).length} Pending
+                </span>
+                <span className="text-white/30">|</span>
+                <span className="text-slate-200">Total: {flattenedCertRecipients.length} Recipients</span>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleExportCertificateLogsCsv}
+                className="px-4 py-2 bg-white/10 hover:bg-white/20 active:scale-95 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all cursor-pointer border border-white/20 shadow-xs"
+                title="Export all certificate records as CSV"
+              >
+                <Download className="w-4 h-4" />
+                <span className="hidden sm:inline">Export CSV</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setIsCertificateModalOpen(false)}
+                className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/25 active:scale-95 text-white flex items-center justify-center transition-all border border-white/20 cursor-pointer shadow-xs"
+                title="Close Full Page"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+          </div>
+
+          {/* Full Page Main Body */}
+          <div className="w-full max-w-[1600px] mx-auto p-4 sm:p-8 flex-1 space-y-6 flex flex-col">
+
+            {/* Success Feedback Toast */}
+            {certSuccessToast && (
+              <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-200 text-emerald-800 text-xs font-bold flex items-center justify-between shadow-sm animate-in slide-in-from-top-2">
+                <div className="flex items-center gap-2.5">
+                  <ShieldCheck className="h-5 w-5 text-emerald-600 shrink-0" />
+                  <span>{certSuccessToast}</span>
+                </div>
+                <button
+                  onClick={() => setCertSuccessToast(null)}
+                  className="text-emerald-700 hover:text-emerald-900 font-extrabold text-xs cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
+            )}
+
+            {/* Navigation Tabs Bar */}
+            <div className="bg-white p-4 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-4 shrink-0">
+              <div className="flex items-center gap-2 overflow-x-auto w-full sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => setCertTab("distribution")}
+                  className={`px-5 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                    certTab === "distribution"
+                      ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-md shadow-blue-500/20"
+                      : "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200"
+                  }`}
+                >
+                  <Send className="w-4 h-4" />
+                  <span>Email Distribution Engine</span>
+                  <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
+                    certTab === "distribution" ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700"
+                  }`}>
+                    {selectedCertRecipients.length}
+                  </span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCertTab("studio")}
+                  className={`px-5 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                    certTab === "studio"
+                      ? "bg-gradient-to-r from-amber-600 to-indigo-600 text-white shadow-md shadow-amber-500/20"
+                      : "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200"
+                  }`}
+                >
+                  <Award className="w-4 h-4" />
+                  <span>Certificate Studio & Templates</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setCertTab("logs")}
+                  className={`px-5 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer flex items-center gap-2 ${
+                    certTab === "logs"
+                      ? "bg-slate-900 text-white shadow-md"
+                      : "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200"
+                  }`}
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Issuance Logs</span>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-slate-200 text-slate-700">
+                    {flattenedCertRecipients.filter(r => r.certificateIssued).length}
+                  </span>
+                </button>
+              </div>
+
+              {/* Quick Preset Selector */}
+              <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
+                <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider hidden md:inline">Award Type:</span>
+                <select
+                  value={certType}
+                  onChange={(e) => setCertType(e.target.value)}
+                  className="px-3.5 py-2 rounded-xl bg-slate-50 border border-slate-200 text-xs font-black text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-2xs"
+                >
+                  <option value="Certificate of Participation">Certificate of Participation</option>
+                  <option value="Certificate of Merit">Certificate of Merit (Winners)</option>
+                  <option value="Certificate of Excellence">Certificate of Excellence</option>
+                  <option value="Certificate of Appreciation">Certificate of Appreciation</option>
+                </select>
+              </div>
+            </div>
+
+            {/* TAB 1: MAIL DISTRIBUTION ENGINE */}
+            {certTab === "distribution" && (
+              <div className="space-y-6 flex-1 flex flex-col">
+
+                {/* Filter Toolbar & Actions */}
+                <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col lg:flex-row items-center justify-between gap-4">
+                  {/* Audience Filter Select Option Dropdown */}
+                  <div className="flex items-center gap-2 w-full lg:w-auto">
+                    <div className="relative w-full sm:w-80">
+                      <select
+                        value={certAudienceFilter}
+                        onChange={(e) => setCertAudienceFilter(e.target.value)}
+                        className="w-full pl-4 pr-10 py-2.5 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-2xl text-xs font-black text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs cursor-pointer transition-all appearance-none"
+                      >
+                        <option value="all">
+                          👥 All Round 1 Participants ({flattenedCertRecipients.length})
+                        </option>
+                        <option value="promoted_r2">
+                          🏆 Promoted to Round 2 ({flattenedCertRecipients.filter(r => (r.currentRound || 1) >= 2 || r.isPromoted).length})
+                        </option>
+                        <option value="all_r2">
+                          👥 All Round 2 Participants ({flattenedCertRecipients.filter(r => (r.currentRound || 1) >= 2).length})
+                        </option>
+                        <option value="promoted_r3">
+                          🏆 Promoted to Round 3 ({flattenedCertRecipients.filter(r => (r.currentRound || 1) >= 3 || ((r.currentRound || 1) === 2 && r.roundStatus === "Qualified")).length})
+                        </option>
+                        <option value="all_r3">
+                          👥 All Round 3 Participants ({flattenedCertRecipients.filter(r => (r.currentRound || 1) >= 3).length})
+                        </option>
+                        <option value="winners">
+                          ✨ Winners / Finals ({flattenedCertRecipients.filter(r => r.isWinner).length})
+                        </option>
+                        <option value="attended">
+                          👤 Attended ({flattenedCertRecipients.filter(r => r.attendanceMarked).length})
+                        </option>
+                        <option value="submitted">
+                          📄 Submitted ({flattenedCertRecipients.filter(r => r.submissionStatus === "Submitted").length})
+                        </option>
+                        <option value="unsent">
+                          ⏳ Unsent Only ({flattenedCertRecipients.filter(r => !r.certificateIssued).length})
+                        </option>
+                      </select>
+                      <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+                    </div>
+                  </div>
+
+                  {/* Search and Bulk Dispatch CTA */}
+                  <div className="flex items-center gap-3 w-full lg:w-auto">
+                    <div className="relative flex-1 sm:w-64">
+                      <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={certSearchQuery}
+                        onChange={(e) => setCertSearchQuery(e.target.value)}
+                        placeholder="Search student, roll, team..."
+                        className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                      />
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleSendCertificatesBatch}
+                      disabled={selectedCertRecipients.length === 0 || isSendingCertificates}
+                      className="px-6 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 active:scale-95 text-white font-black text-xs sm:text-sm rounded-2xl transition-all shadow-md shadow-blue-500/20 flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed border border-blue-400/20 whitespace-nowrap shrink-0"
+                    >
+                      {isSendingCertificates ? (
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                      ) : (
+                        <Send className="w-4 h-4" />
+                      )}
+                      <span>
+                        {isSendingCertificates ? "Dispatching..." : `Send to Selected (${selectedCertRecipients.length})`}
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Live Dispatch Progress Banner */}
+                {isSendingCertificates && certSendingProgress && (
+                  <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-5 rounded-3xl shadow-xl border border-blue-700/50 space-y-3 animate-in slide-in-from-top-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center">
+                          <Loader2 className="w-5 h-5 text-blue-300 animate-spin" />
+                        </div>
+                        <div>
+                          <h4 className="text-sm font-black text-white">
+                            Dispatching Certificate {certSendingProgress.current} of {certSendingProgress.total}...
+                          </h4>
+                          <p className="text-xs text-blue-200">
+                            Recipient: <strong className="text-white">{certSendingProgress.currentName}</strong> ({certSendingProgress.currentEmail})
+                          </p>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-3 text-xs font-black">
+                        <span className="text-emerald-400">✓ {certSendingProgress.successCount} Success</span>
+                        {certSendingProgress.failCount > 0 && (
+                          <span className="text-red-400">✗ {certSendingProgress.failCount} Failed</span>
+                        )}
+                        <span className="text-blue-200">
+                          {Math.round((certSendingProgress.current / certSendingProgress.total) * 100)}%
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Progress Bar */}
+                    <div className="w-full bg-black/30 h-2.5 rounded-full overflow-hidden p-0.5">
+                      <div
+                        className="bg-gradient-to-r from-emerald-400 to-blue-400 h-full rounded-full transition-all duration-300"
+                        style={{ width: `${(certSendingProgress.current / certSendingProgress.total) * 100}%` }}
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {/* Recipients Table */}
+                <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden flex-1 flex flex-col">
+                  <div className="p-4 bg-slate-50/80 border-b border-slate-200 flex items-center justify-between gap-4">
+                    <div className="flex items-center gap-3">
+                      <button
+                        type="button"
+                        onClick={handleToggleSelectAllCertRecipients}
+                        className="px-3.5 py-1.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-2xs"
+                      >
+                        <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
+                        <span>
+                          {filteredCertRecipients.every(r => selectedCertRecipients.includes(r.key)) ? "Deselect Filtered" : "Select All Filtered"}
+                        </span>
+                      </button>
+                      <span className="text-xs font-bold text-slate-500">
+                        Showing {filteredCertRecipients.length} participants ({selectedCertRecipients.length} selected)
+                      </span>
+                    </div>
+
+                    <div className="text-xs font-bold text-slate-500 hidden sm:block">
+                      Email template: <span className="text-blue-600 font-extrabold">{certType}</span>
+                    </div>
+                  </div>
+
+                  <div className="overflow-x-auto flex-1 max-h-[600px]">
+                    <table className="w-full text-left text-xs text-slate-600 border-collapse">
+                      <thead className="bg-slate-50 text-[11px] font-black uppercase tracking-wider text-slate-500 sticky top-0 z-10 border-b border-slate-200">
+                        <tr>
+                          <th className="py-3.5 px-4 w-12 text-center">
+                            <input
+                              type="checkbox"
+                              checked={filteredCertRecipients.length > 0 && filteredCertRecipients.every(r => selectedCertRecipients.includes(r.key))}
+                              onChange={handleToggleSelectAllCertRecipients}
+                              className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                            />
+                          </th>
+                          <th className="py-3.5 px-4">Participant & ID</th>
+                          <th className="py-3.5 px-4">Team / Role</th>
+                          <th className="py-3.5 px-4">Email Address</th>
+                          <th className="py-3.5 px-4">Stage / Status</th>
+                          <th className="py-3.5 px-4">Certificate Status</th>
+                          <th className="py-3.5 px-4 text-right">Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100 font-medium">
+                        {filteredCertRecipients.length === 0 ? (
+                          <tr>
+                            <td colSpan={7} className="text-center py-12 text-slate-400">
+                              <Award className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+                              <p className="font-bold text-sm text-slate-600">No participants found</p>
+                              <p className="text-xs text-slate-400 mt-0.5">Try clearing filters or search queries.</p>
+                            </td>
+                          </tr>
+                        ) : (
+                          filteredCertRecipients.map((recipient) => {
+                            const isSelected = selectedCertRecipients.includes(recipient.key);
+                            return (
+                              <tr
+                                key={recipient.key}
+                                onClick={() => handleToggleSelectCertRecipient(recipient.key)}
+                                className={`hover:bg-blue-50/50 transition-colors cursor-pointer ${
+                                  isSelected ? "bg-blue-50/30" : ""
+                                }`}
+                              >
+                                <td className="py-4 px-4 text-center" onClick={(e) => e.stopPropagation()}>
+                                  <input
+                                    type="checkbox"
+                                    checked={isSelected}
+                                    onChange={() => handleToggleSelectCertRecipient(recipient.key)}
+                                    className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                                  />
+                                </td>
+
+                                <td className="py-4 px-4">
+                                  <div className="font-bold text-slate-900 text-sm">{recipient.name}</div>
+                                  <div className="text-[11px] font-mono text-slate-400">
+                                    {recipient.studentId || "Student"}
+                                  </div>
+                                </td>
+
+                                <td className="py-4 px-4">
+                                  <div className="font-bold text-slate-800">
+                                    {recipient.teamName || "Individual Entry"}
+                                  </div>
+                                  <span className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md ${
+                                    recipient.isLead ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-600"
+                                  }`}>
+                                    {recipient.isLead ? "Team Lead" : "Member"}
+                                  </span>
+                                </td>
+
+                                <td className="py-4 px-4 font-mono text-slate-700 text-xs">
+                                  {recipient.email}
+                                </td>
+
+                                <td className="py-4 px-4">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-slate-100 text-slate-700">
+                                      Round {recipient.currentRound}
+                                    </span>
+                                    {recipient.isPromoted && (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700">
+                                        Qualified
+                                      </span>
+                                    )}
+                                  </div>
+                                </td>
+
+                                <td className="py-4 px-4">
+                                  {recipient.certificateIssued ? (
+                                    <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 w-fit">
+                                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                      Issued & Sent
+                                    </span>
+                                  ) : (
+                                    <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200 flex items-center gap-1 w-fit">
+                                      <Clock className="w-3 h-3 text-slate-400" />
+                                      Pending
+                                    </span>
+                                  )}
+                                </td>
+
+                                <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
+                                  <div className="flex items-center justify-end gap-2">
+                                    <a
+                                      href={`/certificate/${recipient.certificateId}?name=${encodeURIComponent(recipient.name)}&event=${encodeURIComponent(eventAccessEvent?.title || "Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(recipient.studentId)}&team=${encodeURIComponent(recipient.teamName)}`}
+                                      target="_blank"
+                                      rel="noreferrer"
+                                      className="p-2 bg-slate-100 hover:bg-blue-100 text-slate-700 hover:text-blue-700 rounded-xl transition-all font-bold text-xs flex items-center gap-1"
+                                      title="Open verified certificate preview in new tab"
+                                    >
+                                      <Eye className="w-3.5 h-3.5" />
+                                      <span className="hidden sm:inline">Preview</span>
+                                    </a>
+                                  </div>
+                                </td>
+                              </tr>
+                            );
+                          })
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+
+              </div>
+            )}
+
+            {/* TAB 2: CERTIFICATE STUDIO & DESIGN CUSTOMIZER */}
+            {certTab === "studio" && (
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 text-left">
+
+                {/* Left Form: Certificate Parameters & Custom Template Uploader */}
+                <div className="lg:col-span-6 bg-white p-6 sm:p-7 rounded-3xl border border-slate-200/80 shadow-xs space-y-6 text-left overflow-y-auto max-h-[800px] relative">
+                  
+                  {/* Sticky Header & Save Action */}
+                  <div className="sticky top-0 bg-white/95 backdrop-blur-md z-20 pb-4 border-b border-slate-100 space-y-3 pt-1 -mx-2 px-2">
+                    <div className="flex items-center justify-between flex-wrap gap-2">
+                      <div>
+                        <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                          <Award className="w-5 h-5 text-blue-600" />
+                          <span>Certificate Studio & Templates</span>
+                        </h3>
+                        <p className="text-xs text-slate-500 mt-0.5">Upload custom Canva/Photoshop certificate templates & customize text positioning.</p>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleSaveCertificateTemplateConfig}
+                        disabled={isSavingCertTemplate}
+                        className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 shadow-md shadow-blue-500/20 cursor-pointer disabled:opacity-50 transition-all active:scale-95"
+                        title="Save template & text coordinates"
+                      >
+                        {isSavingCertTemplate ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-amber-300" />}
+                        <span>{isSavingCertTemplate ? "Saving..." : "Save Template"}</span>
+                      </button>
+                    </div>
+
+                    {certTemplateSaveSuccess && (
+                      <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>{certTemplateSaveSuccess}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 🖼️ TEMPLATE UPLOAD DROPZONE */}
+                  <div className="space-y-4 p-4 rounded-2xl bg-blue-50/40 border border-blue-100/80">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Upload className="w-4 h-4 text-blue-600" />
+                        <span className="font-extrabold text-slate-800 text-xs uppercase tracking-wider">
+                          Upload Certificate Template Image
+                        </span>
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={handleDownloadBlankTemplateGuide}
+                        className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 cursor-pointer"
+                        title="Download a 2000x1414 PNG canvas template guide"
+                      >
+                        <Download className="w-3 h-3" />
+                        <span>Download Canva Guide (PNG)</span>
+                      </button>
+                    </div>
+
+                    {/* Hidden file input */}
+                    <input
+                      ref={certFileInputRef}
+                      type="file"
+                      accept="image/png, image/jpeg, image/jpg, image/webp"
+                      onChange={handleCertTemplateUpload}
+                      className="hidden"
+                    />
+
+                    {certCustomTemplateUrl ? (
+                      <div className="bg-white p-3.5 rounded-2xl border border-blue-200/80 shadow-2xs flex items-center gap-4">
+                        <img
+                          src={certCustomTemplateUrl}
+                          alt="Uploaded Template Preview"
+                          className="w-20 h-14 object-cover rounded-xl border border-slate-200 shadow-inner shrink-0"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-xs font-extrabold text-slate-900 truncate">
+                            {certCustomTemplateFilename || "custom_certificate_template.png"}
+                          </p>
+                          <span className="inline-block mt-0.5 text-[10px] font-extrabold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-md border border-emerald-200">
+                            ✓ Template Active
+                          </span>
+                        </div>
+
+                        <div className="flex items-center gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => certFileInputRef.current?.click()}
+                            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                          >
+                            Replace
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleRemoveCertTemplate}
+                            className="p-1.5 bg-red-50 hover:bg-red-100 text-red-600 rounded-xl transition-all cursor-pointer"
+                            title="Remove uploaded template"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <div
+                        onClick={() => certFileInputRef.current?.click()}
+                        className="border-2 border-dashed border-blue-300 hover:border-blue-500 rounded-2xl p-6 text-center cursor-pointer bg-white hover:bg-blue-50/50 transition-all space-y-2 group shadow-2xs"
+                      >
+                        <div className="w-12 h-12 rounded-2xl bg-blue-50 group-hover:bg-blue-100 flex items-center justify-center mx-auto text-blue-600 transition-transform group-hover:scale-110 shadow-inner">
+                          <Upload className="w-6 h-6" />
+                        </div>
+                        <div>
+                          <p className="text-xs font-extrabold text-slate-800">
+                            Click to select or drag & drop certificate background template
+                          </p>
+                          <p className="text-[11px] text-slate-400 mt-0.5">
+                            Supports PNG, JPG, JPEG, WEBP • Recommended resolution: 2000 × 1414 px
+                          </p>
+                        </div>
+                        <span className="inline-block px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-100/70 text-blue-700">
+                          Browse Files
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 🎚️ 1. PARTICIPANT NAME PLACEHOLDER */}
+                  <div className="p-4 rounded-2xl bg-blue-50/50 border border-blue-200/80 space-y-3.5">
+                    <div className="flex items-center justify-between border-b border-blue-200/60 pb-2">
+                      <span className="font-extrabold text-blue-950 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                        <SlidersHorizontal className="w-3.5 h-3.5 text-blue-600" />
+                        <span>1. Participant Name Placeholder</span>
+                      </span>
+                      <span className="text-[10px] font-extrabold px-2 py-0.5 rounded-full bg-blue-600 text-white">
+                        Required
+                      </span>
+                    </div>
+
+                    <div className="space-y-3 text-xs">
+                      {/* Name Position Y Slider */}
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="font-bold text-slate-700">
+                            Vertical Position (Y-Axis)
+                          </label>
+                          <span className="font-mono font-black text-blue-700 bg-white border border-blue-200 px-2 py-0.5 rounded text-[11px]">
+                            {certNamePosY}%
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={15}
+                          max={85}
+                          value={certNamePosY}
+                          onChange={(e) => setCertNamePosY(Number(e.target.value))}
+                          className="w-full accent-blue-600 cursor-pointer"
+                        />
+                      </div>
+
+                      {/* Name Font Size Slider */}
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="font-bold text-slate-700">
+                            Font Size
+                          </label>
+                          <span className="font-mono font-black text-blue-700 bg-white border border-blue-200 px-2 py-0.5 rounded text-[11px]">
+                            {certNameFontSize}px
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={24}
+                          max={96}
+                          value={certNameFontSize}
+                          onChange={(e) => setCertNameFontSize(Number(e.target.value))}
+                          className="w-full accent-blue-600 cursor-pointer"
+                        />
+                      </div>
+
+                      {/* Name Color Swatches */}
+                      <div>
+                        <label className="font-bold text-slate-700 block mb-1.5">
+                          Font Color
+                        </label>
+                        <div className="flex items-center gap-2 flex-wrap">
+                          {[
+                            { label: "Navy Blue", value: "#1E3A8A" },
+                            { label: "Deep Black", value: "#000000" },
+                            { label: "Royal Gold", value: "#D97706" },
+                            { label: "Charcoal", value: "#1E293B" },
+                            { label: "Crimson", value: "#991B1B" },
+                            { label: "White", value: "#FFFFFF" },
+                          ].map((swatch) => (
+                            <button
+                              key={swatch.value}
+                              type="button"
+                              onClick={() => setCertNameColor(swatch.value)}
+                              className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                                certNameColor === swatch.value
+                                  ? "border-blue-600 bg-blue-100/70 text-blue-900 ring-1 ring-blue-500"
+                                  : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                              }`}
+                            >
+                              <span
+                                className="w-3 h-3 rounded-full border border-slate-300 shrink-0"
+                                style={{ backgroundColor: swatch.value }}
+                              />
+                              <span>{swatch.label}</span>
+                            </button>
+                          ))}
+                          <input
+                            type="color"
+                            value={certNameColor}
+                            onChange={(e) => setCertNameColor(e.target.value)}
+                            className="w-7 h-7 rounded-lg border border-slate-200 cursor-pointer p-0.5 bg-white"
+                            title="Custom Hex Color"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 🎚️ 2. TEAM NAME PLACEHOLDER */}
+                  <div className="p-4 rounded-2xl bg-indigo-50/40 border border-indigo-200/80 space-y-3.5">
+                    <div className="flex items-center justify-between border-b border-indigo-200/60 pb-2">
+                      <span className="font-extrabold text-indigo-950 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                        <Users className="w-3.5 h-3.5 text-indigo-600" />
+                        <span>2. Team Name Placeholder</span>
+                      </span>
+                      <label className="flex items-center gap-1.5 font-bold text-xs text-indigo-900 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={certShowTeamName}
+                          onChange={(e) => setCertShowTeamName(e.target.checked)}
+                          className="w-4 h-4 rounded text-indigo-600 focus:ring-indigo-500 cursor-pointer"
+                        />
+                        <span>Enable</span>
+                      </label>
+                    </div>
+
+                    {certShowTeamName && (
+                      <div className="space-y-3 text-xs">
+                        {/* Team Position Y Slider */}
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="font-bold text-slate-700">
+                              Vertical Position (Y-Axis)
+                            </label>
+                            <span className="font-mono font-black text-indigo-700 bg-white border border-indigo-200 px-2 py-0.5 rounded text-[11px]">
+                              {certTeamPosY}%
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={15}
+                            max={85}
+                            value={certTeamPosY}
+                            onChange={(e) => setCertTeamPosY(Number(e.target.value))}
+                            className="w-full accent-indigo-600 cursor-pointer"
+                          />
+                        </div>
+
+                        {/* Team Font Size Slider */}
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="font-bold text-slate-700">
+                              Font Size
+                            </label>
+                            <span className="font-mono font-black text-indigo-700 bg-white border border-indigo-200 px-2 py-0.5 rounded text-[11px]">
+                              {certTeamFontSize}px
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={16}
+                            max={64}
+                            value={certTeamFontSize}
+                            onChange={(e) => setCertTeamFontSize(Number(e.target.value))}
+                            className="w-full accent-indigo-600 cursor-pointer"
+                          />
+                        </div>
+
+                        {/* Team Color Swatches */}
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1.5">
+                            Font Color
+                          </label>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {[
+                              { label: "Navy Blue", value: "#1E3A8A" },
+                              { label: "Deep Black", value: "#000000" },
+                              { label: "Royal Gold", value: "#D97706" },
+                              { label: "Charcoal", value: "#1E293B" },
+                              { label: "Crimson", value: "#991B1B" },
+                              { label: "White", value: "#FFFFFF" },
+                            ].map((swatch) => (
+                              <button
+                                key={swatch.value}
+                                type="button"
+                                onClick={() => setCertTeamColor(swatch.value)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                                  certTeamColor === swatch.value
+                                    ? "border-indigo-600 bg-indigo-100 text-indigo-900 ring-1 ring-indigo-500"
+                                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                }`}
+                              >
+                                <span
+                                  className="w-3 h-3 rounded-full border border-slate-300 shrink-0"
+                                  style={{ backgroundColor: swatch.value }}
+                                />
+                                <span>{swatch.label}</span>
+                              </button>
+                            ))}
+                            <input
+                              type="color"
+                              value={certTeamColor}
+                              onChange={(e) => setCertTeamColor(e.target.value)}
+                              className="w-7 h-7 rounded-lg border border-slate-200 cursor-pointer p-0.5 bg-white"
+                              title="Custom Hex Color"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* 🎚️ 3. ROLL NO / STUDENT ID PLACEHOLDER */}
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/80 space-y-3.5">
+                    <div className="flex items-center justify-between border-b border-slate-200/60 pb-2">
+                      <span className="font-extrabold text-slate-800 text-xs uppercase tracking-wider flex items-center gap-1.5">
+                        <SlidersHorizontal className="w-3.5 h-3.5 text-slate-600" />
+                        <span>3. Roll No / Student ID Placeholder</span>
+                      </span>
+                      <label className="flex items-center gap-1.5 font-bold text-xs text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={certShowRollNo}
+                          onChange={(e) => setCertShowRollNo(e.target.checked)}
+                          className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
+                        />
+                        <span>Enable</span>
+                      </label>
+                    </div>
+
+                    {certShowRollNo && (
+                      <div className="space-y-3 text-xs">
+                        {/* Roll Position Y Slider */}
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="font-bold text-slate-700">
+                              Vertical Position (Y-Axis)
+                            </label>
+                            <span className="font-mono font-black text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded text-[11px]">
+                              {certRollPosY}%
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={15}
+                            max={85}
+                            value={certRollPosY}
+                            onChange={(e) => setCertRollPosY(Number(e.target.value))}
+                            className="w-full accent-slate-600 cursor-pointer"
+                          />
+                        </div>
+
+                        {/* Roll Font Size Slider */}
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="font-bold text-slate-700">
+                              Font Size
+                            </label>
+                            <span className="font-mono font-black text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded text-[11px]">
+                              {certRollFontSize}px
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={12}
+                            max={48}
+                            value={certRollFontSize}
+                            onChange={(e) => setCertRollFontSize(Number(e.target.value))}
+                            className="w-full accent-slate-600 cursor-pointer"
+                          />
+                        </div>
+
+                        {/* Roll Color Swatches */}
+                        <div>
+                          <label className="font-bold text-slate-700 block mb-1.5">
+                            Font Color
+                          </label>
+                          <div className="flex items-center gap-2 flex-wrap">
+                            {[
+                              { label: "Slate Gray", value: "#475569" },
+                              { label: "Deep Black", value: "#000000" },
+                              { label: "Navy Blue", value: "#1E3A8A" },
+                              { label: "Charcoal", value: "#1E293B" },
+                              { label: "White", value: "#FFFFFF" },
+                            ].map((swatch) => (
+                              <button
+                                key={swatch.value}
+                                type="button"
+                                onClick={() => setCertRollColor(swatch.value)}
+                                className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition-all flex items-center gap-1.5 cursor-pointer ${
+                                  certRollColor === swatch.value
+                                    ? "border-slate-700 bg-slate-200/70 text-slate-900 ring-1 ring-slate-600"
+                                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                                }`}
+                              >
+                                <span
+                                  className="w-3 h-3 rounded-full border border-slate-300 shrink-0"
+                                  style={{ backgroundColor: swatch.value }}
+                                />
+                                <span>{swatch.label}</span>
+                              </button>
+                            ))}
+                            <input
+                              type="color"
+                              value={certRollColor}
+                              onChange={(e) => setCertRollColor(e.target.value)}
+                              className="w-7 h-7 rounded-lg border border-slate-200 cursor-pointer p-0.5 bg-white"
+                              title="Custom Hex Color"
+                            />
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Certificate Information & Footer Option */}
+                  <div className="space-y-4 text-xs">
+                    {/* Award Title & Issue Date */}
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="font-extrabold text-slate-700 uppercase tracking-wider text-[11px] block mb-1.5">
+                          Award Title
+                        </label>
+                        <input
+                          type="text"
+                          value={certType}
+                          onChange={(e) => setCertType(e.target.value)}
+                          placeholder="Certificate of Participation"
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-2xs text-xs"
+                        />
+                      </div>
+                      <div>
+                        <label className="font-extrabold text-slate-700 uppercase tracking-wider text-[11px] block mb-1.5">
+                          Issue Date
+                        </label>
+                        <input
+                          type="text"
+                          value={certIssueDate}
+                          onChange={(e) => setCertIssueDate(e.target.value)}
+                          className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 font-bold text-slate-900 focus:ring-2 focus:ring-blue-500 focus:outline-none shadow-2xs text-xs"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Footer Verification Toggle */}
+                    <div className="p-3 bg-slate-50 border border-slate-200 rounded-xl">
+                      <label className="flex items-center gap-2 font-medium text-slate-700 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={certShowQrCode}
+                          onChange={(e) => setCertShowQrCode(e.target.checked)}
+                          className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500"
+                        />
+                        <span className="text-xs font-bold text-slate-800">Render Bottom Verification ID Bar</span>
+                      </label>
+                    </div>
+                  </div>
+
+                  {/* 💾 PRIMARY SAVE TEMPLATE ACTION CARD */}
+                  <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-blue-50 via-indigo-50/40 to-slate-50 border-2 border-blue-200/90 space-y-3 shadow-xs">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2 text-slate-900 font-extrabold text-xs">
+                        <Sparkles className="w-4 h-4 text-blue-600" />
+                        <span>Save Certificate Template & Layout</span>
+                      </div>
+                      <span className="text-[10px] font-black tracking-wider uppercase text-blue-700 bg-blue-100 px-2 py-0.5 rounded-full">
+                        Permanent Sync
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={handleSaveCertificateTemplateConfig}
+                      disabled={isSavingCertTemplate}
+                      className="w-full py-3 px-5 bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 hover:from-blue-700 hover:to-indigo-800 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-blue-500/25 transition-all cursor-pointer active:scale-[0.99] disabled:opacity-50"
+                    >
+                      {isSavingCertTemplate ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          <span>Saving Template Configuration...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Sparkles className="w-4 h-4 text-amber-300" />
+                          <span>Save Template & Position Settings</span>
+                        </>
+                      )}
+                    </button>
+
+                    {certTemplateSaveSuccess && (
+                      <div className="p-2.5 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>{certTemplateSaveSuccess}</span>
+                      </div>
+                    )}
+
+                    <p className="text-[11px] text-slate-500 text-center">
+                      Saves template image and all participant & team coordinates permanently for this event.
+                    </p>
+                  </div>
+
+                  {/* Test Email Dispatch Card */}
+                  <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200/90 space-y-3">
+                    <div className="flex items-center gap-2 text-slate-800 font-extrabold text-xs">
+                      <Mail className="w-4 h-4 text-blue-600" />
+                      <span>Send Test Certificate Email</span>
+                    </div>
+
+                    {testEmailFeedback && (
+                      <div className={`p-2.5 rounded-xl text-xs font-bold ${
+                        testEmailFeedback.type === "success" ? "bg-emerald-100 text-emerald-800" : "bg-red-100 text-red-800"
+                      }`}>
+                        {testEmailFeedback.message}
+                      </div>
+                    )}
+
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="email"
+                        value={testCertEmail}
+                        onChange={(e) => setTestCertEmail(e.target.value)}
+                        placeholder="your-email@vishnu.edu.in"
+                        className="flex-1 px-3 py-2 bg-white border border-slate-200 rounded-xl text-xs text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSendTestCertificate}
+                        disabled={isSendingTestEmail}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all cursor-pointer shadow-xs disabled:opacity-50"
+                      >
+                        {isSendingTestEmail ? "Sending..." : "Send Test"}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Right Column: Live Certificate Canvas Preview */}
+                <div className="lg:col-span-6 flex flex-col space-y-4">
+                  <div className="flex items-center justify-between flex-wrap gap-2">
+                    <div>
+                      <h3 className="text-base font-black text-slate-900">Live Certificate Preview</h3>
+                      <p className="text-xs text-slate-500">
+                        {certCustomTemplateUrl ? "Live text overlays rendered on your uploaded template" : "Upload a template image on the left to view preview"}
+                      </p>
+                    </div>
+
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSaveCertificateTemplateConfig}
+                        disabled={isSavingCertTemplate}
+                        className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 shadow-md shadow-blue-500/20 cursor-pointer disabled:opacity-50 transition-all active:scale-95"
+                      >
+                        {isSavingCertTemplate ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-amber-300" />}
+                        <span>{isSavingCertTemplate ? "Saving..." : "Save Template"}</span>
+                      </button>
+
+                      {certCustomTemplateUrl && (
+                        <button
+                          type="button"
+                          onClick={handleDownloadSampleCertificatePng}
+                          className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all cursor-pointer shadow-xs"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download Sample PNG</span>
+                        </button>
+                      )}
+                    </div>
+                  </div>
+
+                  {/* Empty State when no custom template is uploaded */}
+                  {!certCustomTemplateUrl ? (
+                    <div 
+                      onClick={() => certFileInputRef.current?.click()}
+                      className="w-full bg-slate-50/80 border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-3xl p-8 sm:p-14 text-center min-h-[460px] flex flex-col items-center justify-center space-y-4 transition-all cursor-pointer group shadow-2xs"
+                    >
+                      <div className="w-16 h-16 rounded-3xl bg-blue-100/80 group-hover:bg-blue-200 text-blue-700 flex items-center justify-center transition-all group-hover:scale-110 shadow-sm">
+                        <Upload className="w-8 h-8" />
+                      </div>
+                      <div className="space-y-1.5 max-w-md">
+                        <h4 className="text-base font-black text-slate-800 group-hover:text-blue-700 transition-colors">
+                          No Certificate Template Uploaded
+                        </h4>
+                        <p className="text-xs text-slate-500 leading-relaxed">
+                          Upload your event's Canva, Photoshop, or college template image on the left. The live participant name and team details will appear directly on top of your background.
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-3 pt-2">
+                        <span className="px-5 py-2.5 bg-blue-600 group-hover:bg-blue-700 text-white font-extrabold rounded-xl text-xs shadow-md shadow-blue-500/20">
+                          Select Template Image
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDownloadBlankTemplateGuide();
+                          }}
+                          className="px-4 py-2.5 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold rounded-xl text-xs shadow-2xs cursor-pointer"
+                        >
+                          Download Canva Guide
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* Real-Time Live Preview over Custom Template Background */
+                    <div 
+                      className="w-full bg-white text-slate-900 rounded-3xl shadow-xl relative overflow-hidden select-none border-2 border-slate-200/90 aspect-[2000/1414] min-h-[440px]"
+                      style={{
+                        backgroundImage: `url(${certCustomTemplateUrl})`,
+                        backgroundSize: "100% 100%",
+                        backgroundPosition: "center",
+                        backgroundRepeat: "no-repeat"
+                      }}
+                    >
+                      {/* Dynamic Participant Name Positioned by Slider */}
+                      <div 
+                        className="absolute left-1/2 -translate-x-1/2 text-center w-full px-6 pointer-events-none transition-all duration-75"
+                        style={{
+                          top: `${certNamePosY}%`,
+                          transform: "translate(-50%, -50%)"
+                        }}
+                      >
+                        <h3 
+                          className="font-black font-serif underline decoration-blue-600/60 underline-offset-6 transition-all inline-block"
+                          style={{
+                            color: certNameColor || "#0F172A",
+                            fontSize: `${Math.max(18, Math.min(42, certNameFontSize * 0.52))}px`
+                          }}
+                        >
+                          Sample Participant Name
+                        </h3>
+                      </div>
+
+                      {/* Optional Roll No / Student ID Positioned by Slider */}
+                      {certShowRollNo && (
+                        <div 
+                          className="absolute left-1/2 -translate-x-1/2 text-center w-full px-6 pointer-events-none transition-all duration-75"
+                          style={{
+                            top: `${certRollPosY}%`,
+                            transform: "translate(-50%, -50%)"
+                          }}
+                        >
+                          <p 
+                            className="font-mono font-bold transition-all inline-block tracking-wider"
+                            style={{
+                              color: certRollColor || "#475569",
+                              fontSize: `${Math.max(10, Math.min(22, certRollFontSize * 0.52))}px`
+                            }}
+                          >
+                            Roll: 23PA1A0501
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Optional Team Name Positioned by Slider */}
+                      {certShowTeamName && (
+                        <div 
+                          className="absolute left-1/2 -translate-x-1/2 text-center w-full px-6 pointer-events-none transition-all duration-75"
+                          style={{
+                            top: `${certTeamPosY}%`,
+                            transform: "translate(-50%, -50%)"
+                          }}
+                        >
+                          <h4 
+                            className="font-black font-sans tracking-wide transition-all inline-block"
+                            style={{
+                              color: certTeamColor || "#1E3A8A",
+                              fontSize: `${Math.max(12, Math.min(32, certTeamFontSize * 0.52))}px`
+                            }}
+                          >
+                            CodeCrafters
+                          </h4>
+                        </div>
+                      )}
+
+                      {/* Optional Verification Bar */}
+                      {certShowQrCode && (
+                        <div className="absolute bottom-2 left-0 right-0 text-center text-[8px] text-slate-400 font-mono pointer-events-none">
+                          Certificate ID: AIV-SAMPLE-2026 • Issue Date: {certIssueDate} • Verify at: aiversevitb.in/certificate
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+              </div>
+            )}
+
+            {/* TAB 3: ISSUED LOGS & VERIFICATION HISTORY */}
+            {certTab === "logs" && (
+              <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-xs space-y-6 flex-1 flex flex-col">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <h3 className="text-lg font-black text-slate-900">Certificate Issuance & Verification Logs</h3>
+                    <p className="text-xs text-slate-500">Live directory of all certificates dispatched for this event.</p>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={handleExportCertificateLogsCsv}
+                    className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all cursor-pointer shadow-xs"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Export CSV</span>
+                  </button>
+                </div>
+
+                <div className="overflow-x-auto flex-1 max-h-[550px] border border-slate-200 rounded-2xl">
+                  <table className="w-full text-left text-xs text-slate-600 border-collapse">
+                    <thead className="bg-slate-50 text-[11px] font-black uppercase tracking-wider text-slate-500 sticky top-0 z-10 border-b border-slate-200">
+                      <tr>
+                        <th className="py-3 px-4">#</th>
+                        <th className="py-3 px-4">Certificate ID</th>
+                        <th className="py-3 px-4">Participant Name</th>
+                        <th className="py-3 px-4">Email</th>
+                        <th className="py-3 px-4">Award Title</th>
+                        <th className="py-3 px-4">Issued Timestamp</th>
+                        <th className="py-3 px-4 text-right">Verification Link</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 font-medium">
+                      {flattenedCertRecipients.filter(r => r.certificateIssued).length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="text-center py-12 text-slate-400">
+                            <Clock className="w-10 h-10 mx-auto mb-2 text-slate-300" />
+                            <p className="font-bold text-sm text-slate-600">No certificates issued yet</p>
+                            <p className="text-xs text-slate-400 mt-0.5">Switch to "Email Distribution Engine" to dispatch certificates.</p>
+                          </td>
+                        </tr>
+                      ) : (
+                        flattenedCertRecipients.filter(r => r.certificateIssued).map((r, idx) => (
+                          <tr key={r.key} className="hover:bg-slate-50 transition-colors">
+                            <td className="py-3.5 px-4 text-slate-400">{idx + 1}</td>
+                            <td className="py-3.5 px-4 font-mono font-bold text-blue-700">{r.certificateId}</td>
+                            <td className="py-3.5 px-4 font-bold text-slate-900">{r.name}</td>
+                            <td className="py-3.5 px-4 font-mono text-slate-600">{r.email}</td>
+                            <td className="py-3.5 px-4 font-bold text-indigo-700">{r.certificateType || certType}</td>
+                            <td className="py-3.5 px-4 text-slate-500">
+                              {r.certificateSentAt ? new Date(r.certificateSentAt).toLocaleString() : "Issued"}
+                            </td>
+                            <td className="py-3.5 px-4 text-right">
+                              <a
+                                href={`/certificate/${r.certificateId}?name=${encodeURIComponent(r.name)}&event=${encodeURIComponent(eventAccessEvent?.title || "Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(r.studentId)}`}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 font-bold rounded-lg text-xs transition-all inline-flex items-center gap-1"
+                              >
+                                <span>Verify Online</span>
+                                <ExternalLink className="w-3 h-3" />
+                              </a>
+                            </td>
+                          </tr>
+                        ))
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
+
           </div>
         </div>,
         document.body

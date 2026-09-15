@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { db } from "../../config/firebase";
-import { collection, getDocs, addDoc, updateDoc, doc, query, orderBy } from "firebase/firestore";
+import { db, collection, getDocs, addDoc, updateDoc, doc, query, orderBy } from "../../config/firebase";
 import SEO from "../../components/layout/SEO";
 import { useAuth } from "../../context/AuthContext";
 import { 

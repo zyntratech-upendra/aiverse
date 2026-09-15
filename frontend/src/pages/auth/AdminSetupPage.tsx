@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { useAuth } from "../../context/AuthContext";
-import { doc, updateDoc } from "firebase/firestore";
-import { db } from "../../config/firebase";
+import { db, doc, updateDoc } from "../../config/firebase";
 import { useNavigate } from "react-router-dom";
 import { Shield, CheckCircle, AlertTriangle } from "lucide-react";
 import SEO from "../../components/layout/SEO";
@@ -73,7 +72,7 @@ const AdminSetupPage: React.FC = () => {
 
   return (
     <div className="min-h-[85vh] flex items-center justify-center px-4 py-16 bg-[#F8FAFC]">
-      <SEO title="Admin Setup" description="Set up admin role for AI Verse portal access." />
+      <SEO title="Admin Setup - AI Verse VITB" description="Set up admin role for AI Verse portal access." noIndex={true} />
       
       <div className="bg-white rounded-[32px] border border-slate-100/60 max-w-lg w-full p-8 md:p-10 shadow-[0_24px_50px_rgba(0,0,0,0.03)]">
         <div className="text-center mb-6">

@@ -35,7 +35,7 @@ const smtpTransporter = createSmtpTransporter();
  */
 const sendMail = async ({ to, subject, html, text, from, replyTo, reply_to, attachments, headers }) => {
   const RESEND_API_KEY = process.env.RESEND_API_KEY;
-  const defaultFrom = process.env.RESEND_FROM_EMAIL || process.env.EMAIL_FROM || 'AI Verse <events@aiversevitb.dpdns.org>';
+  const defaultFrom = process.env.RESEND_FROM_EMAIL || process.env.EMAIL_FROM || 'AI Verse <events@aiversevitb.in>';
   const defaultReplyTo = process.env.RESEND_REPLY_TO || process.env.EMAIL_REPLY_TO || 'aiverse@vishnu.edu.in';
 
   const recipients = Array.isArray(to) ? to : [to];

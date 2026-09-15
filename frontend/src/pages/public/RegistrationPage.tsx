@@ -617,7 +617,7 @@ const RegistrationPage: React.FC = () => {
                   <p style="margin: 4px 0;"><strong>Time:</strong> ${event.time}</p>
                   <p style="margin: 4px 0;"><strong>Location:</strong> ${event.location}</p>
                 </div>
-                <p style="margin-top: 20px;">View and download your digital pass ticket: <a href="http://localhost:5173/ticket/${finalRegId}" style="color: #2563eb; font-weight: bold;">View Ticket</a></p>
+                <p style="margin-top: 20px;">View and download your digital pass ticket: <a href="https://aiversevitb.in/ticket/${finalRegId}" style="color: #2563eb; font-weight: bold;">View Ticket</a></p>
                 <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
                 <p style="font-size: 12px; color: #64748b;">AI Verse Club &bull; Vishnu Institute of Technology, Bhimavaram</p>
               </div>
@@ -706,8 +706,9 @@ const RegistrationPage: React.FC = () => {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center font-sans text-center px-4 py-16">
         <SEO 
-          title={isQuiz ? "Quiz Registration Confirmed" : "Registration Completed - Under Review"} 
+          title={isQuiz ? "Quiz Registration Confirmed - AI Verse VITB" : "Registration Completed - Under Review - AI Verse VITB"} 
           description={isQuiz ? "Your quiz registration has been confirmed." : "Your registration was completed and is under review to confirm."} 
+          noIndex={true}
         />
 
         {/* Success Checkmark Badge */}
@@ -950,8 +951,10 @@ const RegistrationPage: React.FC = () => {
   return (
     <div className="bg-[#F8FAFC] pb-24 text-left font-sans pt-24 min-h-screen">
       <SEO
-        title={`Register for ${event.title} - AI Verse`}
-        description={`Complete registration details to secure your spot for ${event.title}.`}
+        title={`Register for ${event.title} - AI Verse VITB`}
+        description={`Complete registration details to secure your spot for ${event.title} organized by AI Verse at Vishnu Institute of Technology, Bhimavaram.`}
+        url={`/register/${eventId}`}
+        keywords={`Register ${event.title}, AI Verse VITB, VIT Bhimavaram, Event Registration`}
       />
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">

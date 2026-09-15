@@ -88,6 +88,10 @@ interface DetailedEvent {
   agendaTitle3?: string;
   agendaDesc3?: string;
   agendaItems?: Array<{ time: string, title: string, description: string }>;
+  regDeadline?: string;
+  regDeadlineTime?: string;
+  registrationDeadline?: string;
+  registrationDeadlineTime?: string;
   allowRegistrations?: boolean;
   rounds?: Array<{
     roundNumber: number;
@@ -335,6 +339,10 @@ const EventDetailsPage: React.FC = () => {
             agendaTitle3: data.agendaTitle3 || "Panel: Ethical Scaling",
             agendaDesc3: data.agendaDesc3 || "A roundtable discussion with industry leaders on the societal implications of massive model deployment.",
             agendaItems: data.agendaItems || [],
+            regDeadline: data.regDeadline || data.registrationDeadline || "",
+            regDeadlineTime: data.regDeadlineTime || data.registrationDeadlineTime || "",
+            registrationDeadline: data.regDeadline || data.registrationDeadline || "",
+            registrationDeadlineTime: data.regDeadlineTime || data.registrationDeadlineTime || "",
             allowRegistrations: data.allowRegistrations !== undefined ? data.allowRegistrations : true,
             rounds: data.rounds || []
           };
@@ -406,93 +414,204 @@ const EventDetailsPage: React.FC = () => {
     );
   }
 
+  const parseTimeString = (timeStr?: string): { hours: number; minutes: number } | null => {
+    if (!timeStr) return null;
+    const parts = timeStr.split("-");
+    const target = (parts[parts.length - 1] || "").trim();
+    const match = target.match(/(\d{1,2}):(\d{2})(?:\s*([ap]m))?/i);
+    if (!match) return null;
+    let hours = parseInt(match[1], 10);
+    const minutes = parseInt(match[2], 10);
+    const meridian = match[3]?.toLowerCase();
+    if (meridian === "pm" && hours < 12) hours += 12;
+    if (meridian === "am" && hours === 12) hours = 0;
+    return { hours, minutes };
+  };
+
+  const parseEventDate = (dateStr?: string, defaultYear = new Date().getFullYear()): Date | null => {
+    if (!dateStr) return null;
+    const trimmed = dateStr.trim();
+    if (!trimmed || trimmed === "TBD") return null;
+
+    // 1. Check ISO YYYY-MM-DD
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+      const year = parseInt(isoMatch[1], 10);
+      const month = parseInt(isoMatch[2], 10) - 1;
+      const day = parseInt(isoMatch[3], 10);
+      return new Date(year, month, day);
+    }
+
+    // 2. Check DD-MM-YYYY or DD/MM/YYYY
+    const dmyMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+    if (dmyMatch) {
+      const day = parseInt(dmyMatch[1], 10);
+      const month = parseInt(dmyMatch[2], 10) - 1;
+      const year = parseInt(dmyMatch[3], 10);
+      return new Date(year, month, day);
+    }
+
+    const yearMatch = trimmed.match(/\b(20\d\d)\b/);
+    const year = yearMatch ? parseInt(yearMatch[1], 10) : defaultYear;
+
+    const monthMap: Record<string, number> = {
+      jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2,
+      apr: 3, april: 3, may: 4, jun: 5, june: 5, jul: 6, july: 6,
+      aug: 7, august: 7, sep: 8, sept: 8, september: 8, oct: 9, october: 9,
+      nov: 10, november: 10, dec: 11, december: 11
+    };
+
+    const tokens = trimmed.toLowerCase().replace(/[^a-z0-9]/g, " ").split(/\s+/).filter(Boolean);
+    let month = -1;
+    let day = -1;
+
+    for (const t of tokens) {
+      if (monthMap[t] !== undefined) {
+        month = monthMap[t];
+      } else {
+        const n = parseInt(t, 10);
+        if (!isNaN(n) && n >= 1 && n <= 31 && day === -1) {
+          day = n;
+        }
+      }
+    }
+
+    if (month !== -1 && day !== -1) {
+      return new Date(year, month, day);
+    }
+
+    const direct = Date.parse(`${trimmed}, ${year}`);
+    if (!isNaN(direct)) {
+      return new Date(direct);
+    }
+
+    return null;
+  };
+
   const isPastEvent = (): boolean => {
     if (!event) return false;
     if (event.status === "Completed") return true;
     if ((event as any).isPastEvent) return true;
 
-    // Check endDate or startDate
-    if (event.endDate) {
-      const parsedEnd = Date.parse(event.endDate);
-      if (!isNaN(parsedEnd)) {
-        const endOfDay = new Date(parsedEnd).setHours(23, 59, 59, 999);
-        if (Date.now() > endOfDay) return true;
-      }
-    }
-    if (event.startDate) {
-      const parsedStart = Date.parse(event.startDate);
-      if (!isNaN(parsedStart)) {
-        const endOfDay = new Date(parsedStart).setHours(23, 59, 59, 999);
-        if (Date.now() > endOfDay) return true;
-      }
-    }
+    const now = Date.now();
+    const eventDateStr = event.endDate || event.startDate || event.date;
+    const eventTimeStr = event.endTime || event.time;
 
-    // Check event.date string
-    if (event.date) {
-      const dStr = event.date.trim();
-      const direct = Date.parse(dStr);
-      if (!isNaN(direct)) {
-        const endOfDay = new Date(direct).setHours(23, 59, 59, 999);
-        if (Date.now() > endOfDay) return true;
-      }
-
-      const currentYear = new Date().getFullYear();
-      const withYear = Date.parse(`${dStr}, ${currentYear}`);
-      if (!isNaN(withYear)) {
-        const endOfDay = new Date(withYear).setHours(23, 59, 59, 999);
-        if (Date.now() > endOfDay) return true;
-      }
-
-      const monthNames: Record<string, number> = {
-        jan: 0, january: 0,
-        feb: 1, february: 1,
-        mar: 2, march: 2,
-        apr: 3, april: 3,
-        may: 4,
-        jun: 5, june: 5,
-        jul: 6, july: 6,
-        aug: 7, august: 7,
-        sep: 8, sept: 8, september: 8,
-        oct: 9, october: 9,
-        nov: 10, november: 10,
-        dec: 11, december: 11
-      };
-
-      const tokens = dStr.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
-      let foundMonth = -1;
-      let foundDay = -1;
-      let foundYear = currentYear;
-
-      for (const t of tokens) {
-        if (monthNames[t] !== undefined) {
-          foundMonth = monthNames[t];
-        } else {
-          const n = parseInt(t, 10);
-          if (!isNaN(n)) {
-            if (n > 1900 && n < 2100) foundYear = n;
-            else if (n >= 1 && n <= 31 && foundDay === -1) foundDay = n;
+    if (eventDateStr) {
+      const d = parseEventDate(eventDateStr);
+      if (d) {
+        if (eventTimeStr) {
+          const t = parseTimeString(eventTimeStr);
+          if (t) {
+            d.setHours(t.hours, t.minutes, 59, 999);
+          } else {
+            d.setHours(23, 59, 59, 999);
           }
+        } else {
+          d.setHours(23, 59, 59, 999);
         }
-      }
-
-      if (foundMonth !== -1 && foundDay !== -1) {
-        const eventTime = new Date(foundYear, foundMonth, foundDay).getTime();
-        const endOfDay = new Date(eventTime).setHours(23, 59, 59, 999);
-        if (Date.now() > endOfDay) return true;
+        if (now > d.getTime()) return true;
       }
     }
 
     return false;
   };
 
+  const isRegistrationOpen = (): { isOpen: boolean; reason?: string; deadlineLabel?: string } => {
+    if (!event) return { isOpen: false };
+    if (event.status === "Completed" || (event as any).isPastEvent) {
+      return { isOpen: false, reason: "Event Completed" };
+    }
+    if (event.allowRegistrations === false) {
+      return { isOpen: false, reason: "Registration Closed" };
+    }
+
+    const now = Date.now();
+    const deadlineDateStr = (event as any).regDeadline || (event as any).registrationDeadline;
+    const deadlineTimeStr = (event as any).regDeadlineTime || (event as any).registrationDeadlineTime || event.endTime;
+
+    if (deadlineDateStr) {
+      const d = parseEventDate(deadlineDateStr);
+      if (d) {
+        if (deadlineTimeStr) {
+          const t = parseTimeString(deadlineTimeStr);
+          if (t) {
+            d.setHours(t.hours, t.minutes, 59, 999);
+          } else {
+            d.setHours(23, 59, 59, 999);
+          }
+        } else {
+          d.setHours(23, 59, 59, 999);
+        }
+
+        if (now > d.getTime()) {
+          return { isOpen: false, reason: "Registration Closed" };
+        } else {
+          return { 
+            isOpen: true, 
+            deadlineLabel: `Registration open till ${deadlineDateStr}${deadlineTimeStr ? ` at ${deadlineTimeStr}` : " (11:59 PM)"}` 
+          };
+        }
+      }
+    }
+
+    // If no explicit registration deadline date is set, check event end date/time
+    if (isPastEvent()) {
+      return { isOpen: false, reason: "Event Completed" };
+    }
+
+    return { isOpen: true };
+  };
+
   const isPast = isPastEvent();
+  const regStatus = isRegistrationOpen();
 
   return (
     <div className="bg-[#F8FAFC] pb-24 text-left font-sans animate-in fade-in duration-200">
       <SEO 
-        title={`${event.title} - AI Verse`} 
-        description={event.description.substring(0, 150)}
-        keywords={`${event.type}, ${event.title}, AI Verse`}
+        title={`${event.title} | AI Verse VITB Hackathons`} 
+        description={event.description?.substring(0, 160) || `Register for ${event.title} organized by AI Verse VITB at Vishnu Institute of Technology.`}
+        keywords={`${event.type || "Hackathon"}, ${event.title}, AI Verse VITB, VIT Bhimavaram, Coding Hackathon, Tech Event`}
+        url={`/events/${event.id}`}
+        image={event.image || "/event-banner.png"}
+        type="article"
+        schema={{
+          "@context": "https://schema.org",
+          "@type": "Event",
+          "name": event.title,
+          "description": event.description || `Hackathon & Workshop event by AI Verse VITB`,
+          "image": event.image || "https://aiversevitb.in/event-banner.png",
+          "startDate": event.startDate || event.date || "2026-09-01",
+          "endDate": event.endDate || event.date || "2026-09-02",
+          "eventStatus": isPast ? "https://schema.org/EventCompleted" : "https://schema.org/EventScheduled",
+          "eventAttendanceMode": (event.location || "").toLowerCase().includes("online") 
+            ? "https://schema.org/OnlineEventAttendanceMode" 
+            : "https://schema.org/OfflineEventAttendanceMode",
+          "location": {
+            "@type": "Place",
+            "name": event.location || "Vishnu Institute of Technology",
+            "address": {
+              "@type": "PostalAddress",
+              "streetAddress": "Vishnupur",
+              "addressLocality": "Bhimavaram",
+              "addressRegion": "Andhra Pradesh",
+              "postalCode": "534202",
+              "addressCountry": "IN"
+            }
+          },
+          "organizer": {
+            "@type": "EducationalOrganization",
+            "name": "AI Verse VITB",
+            "url": "https://aiversevitb.in"
+          },
+          "offers": {
+            "@type": "Offer",
+            "price": event.registrationFee || 0,
+            "priceCurrency": "INR",
+            "availability": regStatus.isOpen ? "https://schema.org/InStock" : "https://schema.org/SoldOut",
+            "url": `https://aiversevitb.in/events/${event.id}`
+          }
+        }}
       />
 
       {/* ================= HERO BANNER ================= */}
@@ -595,32 +714,44 @@ const EventDetailsPage: React.FC = () => {
                 )}
 
                 {(event.type === "Hackathon" || (event as any).category === "HACKATHONS" || (event as any).category === "Hackathon" || (event as any).category?.toLowerCase()?.includes("hackathon")) ? (
-                  isPast ? (
+                  !regStatus.isOpen ? (
                     <Button variant="secondary" disabled className="w-full font-bold rounded-2xl py-3 text-xs flex items-center justify-center gap-2 text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed">
-                      Event Completed
-                    </Button>
-                  ) : event.allowRegistrations === false ? (
-                    <Button variant="secondary" disabled className="w-full font-bold rounded-2xl py-3 text-xs flex items-center justify-center gap-2 text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed">
-                      Registration Closed
+                      {regStatus.reason || "Registration Closed"}
                     </Button>
                   ) : (
-                    <Link to={`/events/${event.id}/register`} className="w-full">
-                      <Button variant="gradient" className="w-full font-bold rounded-2xl py-3 text-xs flex items-center justify-center gap-2">
-                        Register Now
-                        <ArrowRight className="h-4 w-4" />
-                      </Button>
-                    </Link>
+                    <div className="space-y-2 w-full">
+                      <Link to={`/events/${event.id}/register`} className="w-full block">
+                        <Button variant="gradient" className="w-full font-bold rounded-2xl py-3.5 text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 hover:scale-[1.01] transition-all">
+                          Register Now
+                          <ArrowRight className="h-4 w-4" />
+                        </Button>
+                      </Link>
+                      {regStatus.deadlineLabel && (
+                        <p className="text-[10px] font-bold text-center text-blue-600 bg-blue-50/70 py-1 px-2 rounded-lg border border-blue-100/60">
+                          ⏳ {regStatus.deadlineLabel}
+                        </p>
+                      )}
+                    </div>
                   )
                 ) : (
-                  isPast ? (
+                  !regStatus.isOpen ? (
                     <div className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-2xl text-center">
-                      <span className="text-xs font-bold text-slate-500 block">Event Completed</span>
-                      <span className="text-[10px] font-medium text-slate-400 block mt-0.5">This event has already concluded</span>
+                      <span className="text-xs font-bold text-slate-500 block">{regStatus.reason || "Event Completed"}</span>
+                      <span className="text-[10px] font-medium text-slate-400 block mt-0.5">This event is no longer accepting entries</span>
                     </div>
                   ) : (
-                    <div className="bg-slate-50 border border-slate-200/80 p-3.5 rounded-2xl text-center">
-                      <span className="text-xs font-bold text-slate-700 block">Open Public Event</span>
-                      <span className="text-[10px] font-medium text-slate-400 block mt-0.5">No registration required for this event</span>
+                    <div className="space-y-2 w-full">
+                      <Link to={`/events/${event.id}/register`} className="w-full block">
+                        <Button variant="gradient" className="w-full font-bold rounded-2xl py-3.5 text-xs flex items-center justify-center gap-2 shadow-lg shadow-blue-500/20 hover:scale-[1.01] transition-all">
+                          Register Now
+                          <ArrowRight className="h-4 w-4" />
+                        </Button>
+                      </Link>
+                      {regStatus.deadlineLabel && (
+                        <p className="text-[10px] font-bold text-center text-blue-600 bg-blue-50/70 py-1 px-2 rounded-lg border border-blue-100/60">
+                          ⏳ {regStatus.deadlineLabel}
+                        </p>
+                      )}
                     </div>
                   )
                 )}

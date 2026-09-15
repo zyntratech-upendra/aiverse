@@ -6,8 +6,9 @@ const NotFoundPage: React.FC = () => {
   return (
     <div className="min-h-[85vh] flex flex-col items-center justify-center px-4 text-center">
       <SEO 
-        title="404 - Page Not Found" 
+        title="404 - Page Not Found | AI Verse VITB" 
         description="The page you are looking for does not exist on AI Verse."
+        noIndex={true}
       />
       <div className="relative mb-6">
         <h1 className="text-9xl font-black text-slate-100 select-none">404</h1>

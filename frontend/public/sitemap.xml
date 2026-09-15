@@ -1,39 +1,49 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9"
+        xmlns:image="http://www.google.com/schemas/sitemap-image/1.1">
   <url>
-    <loc>https://aiversevitb.dpdns.org/</loc>
-    <lastmod>2026-09-01</lastmod>
-    <changefreq>weekly</changefreq>
+    <loc>https://aiversevitb.in/</loc>
+    <lastmod>2026-09-15</lastmod>
+    <changefreq>daily</changefreq>
     <priority>1.0</priority>
+    <image:image>
+      <image:loc>https://aiversevitb.in/event-banner.png</image:loc>
+      <image:title>AI Verse VITB — Technical Club &amp; Innovation Hub</image:title>
+      <image:caption>AI Verse student technical community at Vishnu Institute of Technology, Bhimavaram</image:caption>
+    </image:image>
+    <image:image>
+      <image:loc>https://aiversevitb.in/ai_verse.png</image:loc>
+      <image:title>AI Verse Club Emblem Logo</image:title>
+    </image:image>
   </url>
   <url>
-    <loc>https://aiversevitb.dpdns.org/about</loc>
-    <lastmod>2026-09-01</lastmod>
+    <loc>https://aiversevitb.in/events</loc>
+    <lastmod>2026-09-15</lastmod>
+    <changefreq>daily</changefreq>
+    <priority>0.9</priority>
+  </url>
+  <url>
+    <loc>https://aiversevitb.in/gallery</loc>
+    <lastmod>2026-09-15</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.8</priority>
+  </url>
+  <url>
+    <loc>https://aiversevitb.in/team</loc>
+    <lastmod>2026-09-15</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.8</priority>
   </url>
   <url>
-    <loc>https://aiversevitb.dpdns.org/events</loc>
-    <lastmod>2026-09-01</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.9</priority>
-  </url>
-  <url>
-    <loc>https://aiversevitb.dpdns.org/gallery</loc>
-    <lastmod>2026-09-01</lastmod>
-    <changefreq>weekly</changefreq>
-    <priority>0.7</priority>
-  </url>
-  <url>
-    <loc>https://aiversevitb.dpdns.org/team</loc>
-    <lastmod>2026-09-01</lastmod>
+    <loc>https://aiversevitb.in/contact</loc>
+    <lastmod>2026-09-15</lastmod>
     <changefreq>monthly</changefreq>
     <priority>0.7</priority>
   </url>
   <url>
-    <loc>https://aiversevitb.dpdns.org/contact</loc>
-    <lastmod>2026-09-01</lastmod>
-    <changefreq>monthly</changefreq>
-    <priority>0.6</priority>
+    <loc>https://aiversevitb.in/certificate</loc>
+    <lastmod>2026-09-15</lastmod>
+    <changefreq>weekly</changefreq>
+    <priority>0.7</priority>
   </url>
 </urlset>

@@ -31,6 +31,7 @@ const TeamPage = React.lazy(() => import("../pages/public/TeamPage"));
 const ContactPage = React.lazy(() => import("../pages/public/ContactPage"));
 const RegistrationPage = React.lazy(() => import("../pages/public/RegistrationPage"));
 const TicketPage = React.lazy(() => import("../pages/public/TicketPage"));
+const CertificateViewPage = React.lazy(() => import("../pages/public/CertificateViewPage"));
 const JuryPage = React.lazy(() => import("../pages/public/JuryPage"));
 const AdminSetupPage = React.lazy(() => import("../pages/auth/AdminSetupPage"));
 
@@ -77,6 +78,9 @@ const AppRoutes: React.FC = () => {
         </Route>
 
         <Route path="/ticket/:registrationId" element={<TicketPage />} />
+        <Route path="/certificate/:certificateId" element={<CertificateViewPage />} />
+        <Route path="/verify-certificate/:certificateId" element={<CertificateViewPage />} />
+        <Route path="/certificate" element={<CertificateViewPage />} />
         <Route
           path="/jury"
           element={

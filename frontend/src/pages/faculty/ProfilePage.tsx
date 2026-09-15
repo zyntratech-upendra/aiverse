@@ -2,8 +2,7 @@ import React, { useState, useEffect, useRef } from "react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
 import { useAuth } from "../../context/AuthContext";
-import { db } from "../../config/firebase";
-import { doc, getDoc, setDoc } from "firebase/firestore";
+import { db, doc, getDoc, setDoc } from "../../config/firebase";
 import { motion, AnimatePresence } from "framer-motion";
 import { 
   MapPin, 

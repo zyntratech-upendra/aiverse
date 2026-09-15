@@ -601,7 +601,7 @@ export function buildWelcomeMemberEmail(data: WelcomeMemberEmailData): {
     role,
     collegeEmail,
     personalEmail,
-    portalUrl = "https://aiversevitb.dpdns.org/login"
+    portalUrl = "https://aiversevitb.in/login"
   } = data;
 
   const subject = `Welcome to AI Verse, ${name}`;
@@ -720,5 +720,231 @@ export function buildWelcomeMemberEmail(data: WelcomeMemberEmailData): {
 
   return { subject, html, text };
 }
+
+export interface CertificateEmailData {
+  recipientName: string;
+  eventTitle: string;
+  certificateType?: string;
+  groupName?: string;
+  studentId?: string;
+  certificateId: string;
+  issueDate?: string;
+  customMessage?: string;
+  signatory1Name?: string;
+  signatory1Title?: string;
+  signatory2Name?: string;
+  signatory2Title?: string;
+  collegeName?: string;
+  certificateUrl: string;
+}
+
+/**
+ * Builds a prestigious, high-deliverability Certificate Issuance & Distribution Email
+ */
+export function buildCertificateEmail(data: CertificateEmailData): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const {
+    recipientName,
+    eventTitle,
+    certificateType = "Certificate of Participation",
+    groupName,
+    studentId,
+    certificateId,
+    issueDate = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }),
+    customMessage,
+    signatory1Name = "Faculty Coordinator",
+    signatory1Title = "Convener, AI Verse",
+    signatory2Name = "Head of Department",
+    signatory2Title = "Department of CSE",
+    collegeName = "Vishnu Institute of Technology (Autonomous), Bhimavaram",
+    certificateUrl,
+  } = data;
+
+  const displayTeam = groupName && groupName !== "Individual RSVP" ? groupName : "";
+  const subject = `🎓 ${certificateType}: ${eventTitle} — ${recipientName} | AI Verse`;
+
+  const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <meta name="color-scheme" content="light" />
+  <meta name="supported-color-schemes" content="light" />
+  <title>${subject}</title>
+  <style type="text/css">
+    body { margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; }
+    table { border-collapse: collapse; }
+    .btn:hover { background-color: #1e40af !important; }
+  </style>
+</head>
+<body style="margin: 0; padding: 32px 16px; background-color: #f1f5f9;">
+  <div style="display: none; font-size: 1px; color: #f1f5f9; line-height: 1px; max-height: 0px; max-width: 0px; opacity: 0; overflow: hidden;">
+    Congratulations ${recipientName}! Your official ${certificateType} for ${eventTitle} has been awarded and is ready for download.
+  </div>
+
+  <table width="100%" border="0" cellspacing="0" cellpadding="0">
+    <tr>
+      <td align="center">
+        <table width="100%" style="max-width: 620px; background-color: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.08); border: 1px solid #e2e8f0;">
+          
+          <!-- Top Royal Gradient Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 55%, #1e40af 100%); padding: 40px 32px; text-align: center;">
+              <div style="font-size: 11px; font-weight: 800; letter-spacing: 2.5px; color: #93c5fd; text-transform: uppercase; margin-bottom: 8px;">
+                ✦ AI VERSE • OFFICIAL DIGITAL CREDENTIAL ✦
+              </div>
+              <div style="font-size: 36px; margin-bottom: 4px;">🎓 ✨</div>
+              <h1 style="margin: 0; color: #ffffff; font-size: 26px; font-weight: 900; line-height: 1.25;">
+                Congratulations!
+              </h1>
+              <p style="margin: 8px 0 0 0; font-size: 15px; color: #dbeafe; font-weight: 600;">
+                Your official certificate is ready
+              </p>
+              <div style="margin-top: 14px; display: inline-block; background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255,255,255,0.25); border-radius: 20px; padding: 5px 16px; color: #ffffff; font-size: 12px; font-weight: 800; letter-spacing: 0.5px;">
+                ✓ VERIFIED & DIGITALLY SIGNED
+              </div>
+            </td>
+          </tr>
+
+          <!-- Main Body -->
+          <tr>
+            <td style="padding: 36px 32px 28px 32px;">
+              <p style="font-size: 16px; line-height: 1.6; color: #0f172a; margin: 0 0 16px 0;">
+                Dear <strong>${recipientName}</strong>,
+              </p>
+              <p style="font-size: 14px; line-height: 1.65; color: #334155; margin: 0 0 24px 0;">
+                ${customMessage || `We take immense pride in presenting you with this <strong>${certificateType}</strong> in recognition of your dedicated participation, technical innovation, and exceptional contributions in <strong>${eventTitle}</strong>.`}
+              </p>
+
+              <!-- Luxury Embedded Certificate Preview Card -->
+              <table width="100%" style="background: linear-gradient(135deg, #fbfcfe 0%, #f8fafc 100%); border: 2px solid #dbeafe; border-radius: 18px; margin-bottom: 24px; overflow: hidden; box-shadow: 0 4px 16px rgba(37,99,235,0.06);">
+                <tr>
+                  <td style="padding: 24px; text-align: center; border-bottom: 1px dashed #cbd5e1; background: linear-gradient(180deg, rgba(239,246,255,0.6) 0%, rgba(255,255,255,0) 100%);">
+                    <div style="font-size: 10px; font-weight: 800; color: #3b82f6; text-transform: uppercase; letter-spacing: 1.5px; margin-bottom: 4px;">
+                      ${collegeName}
+                    </div>
+                    <div style="font-size: 20px; font-weight: 900; color: #1e3a8a; margin: 6px 0; font-family: Georgia, serif; letter-spacing: 0.5px;">
+                      ${certificateType}
+                    </div>
+                    <div style="font-size: 12px; color: #64748b; font-style: italic; margin-bottom: 12px;">
+                      This is proudly presented to
+                    </div>
+                    <div style="font-size: 22px; font-weight: 900; color: #0f172a; font-family: Georgia, serif; text-decoration: underline; text-decoration-color: #3b82f6; text-underline-offset: 6px; margin-bottom: 10px;">
+                      ${recipientName}
+                    </div>
+                    ${displayTeam ? `<div style="font-size: 12px; font-weight: 700; color: #475569; margin-bottom: 4px;">Team: ${displayTeam}</div>` : ""}
+                    ${studentId ? `<div style="font-size: 11px; font-family: monospace; color: #64748b; margin-bottom: 10px;">Roll / Student ID: ${studentId}</div>` : ""}
+                    <div style="font-size: 13px; color: #334155; line-height: 1.5; max-width: 480px; margin: 0 auto;">
+                      for successful participation in <strong>${eventTitle}</strong> organized by AI Verse.
+                    </div>
+                  </td>
+                </tr>
+
+                <!-- Credential Metadata Footer -->
+                <tr>
+                  <td style="padding: 14px 20px; background-color: #f1f5f9;">
+                    <table width="100%">
+                      <tr>
+                        <td width="50%">
+                          <div style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase;">Certificate ID</div>
+                          <div style="font-size: 12px; font-weight: 800; font-family: monospace; color: #1e3a8a; margin-top: 2px;">
+                            ${certificateId}
+                          </div>
+                        </td>
+                        <td width="50%" align="right">
+                          <div style="font-size: 10px; font-weight: 700; color: #64748b; text-transform: uppercase;">Issue Date</div>
+                          <div style="font-size: 12px; font-weight: 700; color: #1e293b; margin-top: 2px;">
+                            ${issueDate}
+                          </div>
+                        </td>
+                      </tr>
+                    </table>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Action Button -->
+              <div style="text-align: center; margin: 32px 0 16px 0;">
+                <a href="${certificateUrl}" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff; font-size: 15px; font-weight: 800; text-decoration: none; padding: 15px 36px; border-radius: 14px; box-shadow: 0 4px 16px rgba(37,99,235,0.3);">
+                  🎓 View & Download Digital Certificate &rarr;
+                </a>
+              </div>
+              <p style="font-size: 12px; color: #94a3b8; text-align: center; margin: 8px 0 0 0;">
+                You can save high-resolution PNG or PDF, share on LinkedIn, and verify anytime online.
+              </p>
+
+              <!-- Signatories Summary -->
+              <div style="margin-top: 28px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
+                <table width="100%">
+                  <tr>
+                    <td width="50%" align="left" style="font-size: 12px; color: #475569;">
+                      <strong>${signatory1Name}</strong><br>
+                      <span style="font-size: 11px; color: #64748b;">${signatory1Title}</span>
+                    </td>
+                    <td width="50%" align="right" style="font-size: 12px; color: #475569;">
+                      <strong>${signatory2Name}</strong><br>
+                      <span style="font-size: 11px; color: #64748b;">${signatory2Title}</span>
+                    </td>
+                  </tr>
+                </table>
+              </div>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 24px 32px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="font-size: 12px; color: #64748b; margin: 0 0 6px 0;">
+                <strong>AI Verse Club</strong> • Vishnu Institute of Technology
+              </p>
+              <p style="font-size: 11px; color: #94a3b8; margin: 0; line-height: 1.5;">
+                This verifiable digital certificate was issued automatically for ${eventTitle}.<br>
+                Verification URL: <a href="${certificateUrl}" style="color: #3b82f6; text-decoration: none;">${certificateUrl}</a>
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const text = [
+    `🎓 ${certificateType.toUpperCase()} - ${eventTitle.toUpperCase()}`,
+    `============================================================`,
+    ``,
+    `Dear ${recipientName},`,
+    ``,
+    `Congratulations! Your official ${certificateType} for ${eventTitle} has been awarded.`,
+    ``,
+    `CERTIFICATE DETAILS:`,
+    `- Recipient: ${recipientName}`,
+    displayTeam ? `- Team: ${displayTeam}` : "",
+    studentId ? `- Roll / Student ID: ${studentId}` : "",
+    `- Certificate ID: ${certificateId}`,
+    `- Issue Date: ${issueDate}`,
+    `- Institution: ${collegeName}`,
+    ``,
+    `VIEW & DOWNLOAD YOUR VERIFIABLE CERTIFICATE:`,
+    `${certificateUrl}`,
+    ``,
+    `Signatories:`,
+    `- ${signatory1Name} (${signatory1Title})`,
+    `- ${signatory2Name} (${signatory2Title})`,
+    ``,
+    `Warm regards,`,
+    `AI Verse Team • Vishnu Institute of Technology`,
+  ].filter(Boolean).join("\n");
+
+  return { subject, html, text };
+}
+
 
 

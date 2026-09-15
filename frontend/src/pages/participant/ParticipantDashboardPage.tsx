@@ -21,6 +21,7 @@ import {
   BarChart3,
   ChevronDown,
   ChevronUp,
+  Award,
   X
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
@@ -75,6 +76,12 @@ export const ParticipantDashboardPage: React.FC = () => {
   const [quizScore, setQuizScore] = useState<number | null>(null);
   const [quizPercentage, setQuizPercentage] = useState<number | null>(null);
   const [quizMaxScore, setQuizMaxScore] = useState<number | null>(null);
+
+  // Certificate State
+  const [certificateIssued, setCertificateIssued] = useState<boolean>(false);
+  const [certificateId, setCertificateId] = useState<string>("");
+  const [certificateType, setCertificateType] = useState<string>("");
+  const [certificateIssuedAt, setCertificateIssuedAt] = useState<number | null>(null);
 
   // Team review confirmed state
   const [teamReviewConfirmed, setTeamReviewConfirmed] = useState(false);
@@ -166,6 +173,16 @@ export const ParticipantDashboardPage: React.FC = () => {
     }
     if (targetReg.quizMaxScore) {
       setQuizMaxScore(targetReg.quizMaxScore);
+    }
+
+    // Official Certificate State
+    if (targetReg.certificateIssued === true || targetReg.certificateId) {
+      setCertificateIssued(true);
+      setCertificateId(targetReg.certificateId || `CERT-${(targetReg.id || "AI").substring(0, 8).toUpperCase()}`);
+      setCertificateType(targetReg.certificateType || "Certificate of Participation");
+      if (targetReg.certificateSentAt) {
+        setCertificateIssuedAt(targetReg.certificateSentAt);
+      }
     }
   };
 
@@ -843,6 +860,47 @@ export const ParticipantDashboardPage: React.FC = () => {
                 </div>
               )}
 
+              {/* 🎖️ CERTIFICATE ISSUED CELEBRATION BANNER */}
+              {certificateIssued && (
+                <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-amber-600 p-0.5 rounded-3xl shadow-lg shadow-indigo-600/15 animate-in fade-in slide-in-from-top-2 duration-300">
+                  <div className="bg-[#0B1120] rounded-[22px] p-5 sm:p-6 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-13 h-13 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-amber-500/30 shrink-0">
+                        <Award className="w-7 h-7 text-slate-950" />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                            OFFICIAL CERTIFICATE READY
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
+                            <Sparkles className="w-3 h-3 text-emerald-300" /> VERIFIED CREDENTIAL
+                          </span>
+                        </div>
+                        <h3 className="text-lg sm:text-xl font-black text-white tracking-tight">
+                          🎖️ Your Official {certificateType || "Certificate of Excellence"} is Available!
+                        </h3>
+                        <p className="text-xs text-slate-300 font-medium">
+                          Issued by the organizing faculty for your participation in <strong className="text-white">{eventTitle}</strong>. You can view online, download high-res PNG, or print the certified PDF.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+                      <Link
+                        to={`/certificate/${certificateId}?name=${encodeURIComponent(leaderName || user?.name || "Participant")}&event=${encodeURIComponent(eventTitle)}&type=${encodeURIComponent(certificateType || "Certificate of Participation")}`}
+                        target="_blank"
+                        className="px-5 py-2.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black rounded-xl text-xs transition-all shadow-md shadow-amber-500/20 active:scale-95 flex items-center gap-2 cursor-pointer"
+                      >
+                        <Award className="w-4 h-4" />
+                        <span>View & Download Certificate</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </Link>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* 3. FOUR ESSENTIAL LIVE METRIC TILES */}
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
                 
@@ -1239,6 +1297,47 @@ export const ParticipantDashboardPage: React.FC = () => {
                     <p className="text-xs sm:text-sm text-slate-500 font-medium">
                       All quizzes and assessments assigned to you are listed below. Click Start / Take Exam when the test goes live.
                     </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Quiz Participant Certificate Banner */}
+              {certificateIssued && (
+                <div className="bg-gradient-to-r from-blue-700 via-indigo-700 to-amber-600 p-0.5 rounded-3xl shadow-lg shadow-indigo-600/15 animate-in fade-in slide-in-from-top-2 duration-300 text-left">
+                  <div className="bg-[#0B1120] rounded-[22px] p-5 sm:p-6 text-white flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                    <div className="flex items-center gap-4">
+                      <div className="w-13 h-13 rounded-2xl bg-gradient-to-br from-amber-400 to-amber-600 flex items-center justify-center text-slate-950 font-black shadow-lg shadow-amber-500/30 shrink-0">
+                        <Award className="w-7 h-7 text-slate-950" />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-amber-400/20 text-amber-300 border border-amber-400/30">
+                            CERTIFICATE ISSUED
+                          </span>
+                          <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-widest bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 flex items-center gap-1">
+                            <Sparkles className="w-3 h-3 text-emerald-300" /> VERIFIED CREDENTIAL
+                          </span>
+                        </div>
+                        <h3 className="text-lg sm:text-xl font-black text-white tracking-tight">
+                          🎖️ Your Official {certificateType || "Certificate of Excellence"} is Ready!
+                        </h3>
+                        <p className="text-xs text-slate-300 font-medium">
+                          Issued for your performance in <strong className="text-white">{eventTitle}</strong>.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2.5 shrink-0 flex-wrap">
+                      <Link
+                        to={`/certificate/${certificateId}?name=${encodeURIComponent(leaderName || user?.name || "Participant")}&event=${encodeURIComponent(eventTitle)}&type=${encodeURIComponent(certificateType || "Certificate of Participation")}`}
+                        target="_blank"
+                        className="px-5 py-2.5 bg-gradient-to-r from-amber-400 to-amber-500 hover:from-amber-300 hover:to-amber-400 text-slate-950 font-black rounded-xl text-xs transition-all shadow-md shadow-amber-500/20 active:scale-95 flex items-center gap-2 cursor-pointer"
+                      >
+                        <Award className="w-4 h-4" />
+                        <span>View Certificate</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </Link>
+                    </div>
                   </div>
                 </div>
               )}

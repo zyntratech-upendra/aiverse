@@ -78,9 +78,9 @@ const LoginPage: React.FC = () => {
   return (
     <div className="relative min-h-[85vh] flex items-center justify-center px-4 py-16 bg-[#F8FAFC] overflow-hidden">
       <SEO 
-        title="Login - Portal Access" 
-        description="Sign in to the AI Verse administrative portal to manage events, bulletins, and user memberships." 
-        keywords="AI Verse Login, Admin Portal Login, Faculty Login"
+        title="Login - Portal Access | AI Verse VITB" 
+        description="Sign in to the AI Verse administrative and participant portal." 
+        noIndex={true}
       />
       
       {/* Decorative Background Floating Outline Icons */}

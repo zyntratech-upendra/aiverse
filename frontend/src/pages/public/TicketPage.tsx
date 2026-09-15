@@ -1,7 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { db } from "../../config/firebase";
-import { doc, getDoc, updateDoc, onSnapshot } from "firebase/firestore";
 import { fetchRegistrations, fetchEvents } from "../../services/apiClient";
 import SEO from "../../components/layout/SEO";
 import { 
@@ -177,7 +175,11 @@ const TicketPage: React.FC = () => {
   };
 
   const handleCopyLink = () => {
-    navigator.clipboard.writeText(window.location.href);
+    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
+    const linkToCopy = isLocal
+      ? `https://aiversevitb.in/ticket/${registrationId || ""}`
+      : window.location.href;
+    navigator.clipboard.writeText(linkToCopy);
     setCopiedLink(true);
     setTimeout(() => setCopiedLink(false), 2500);
   };
@@ -185,7 +187,8 @@ const TicketPage: React.FC = () => {
   const handleDownloadTicketImage = async () => {
     setIsExporting(true);
     try {
-      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${registrationId || "mock_reg_123"}`;
+      const ticketFullUrl = `https://aiversevitb.in/ticket/${registrationId || "PASS"}`;
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(ticketFullUrl)}`;
       
       const logoImage = new Image();
       logoImage.crossOrigin = "anonymous";
@@ -429,8 +432,9 @@ const TicketPage: React.FC = () => {
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans text-left selection:bg-blue-600 selection:text-white pb-20 print:bg-white print:p-0">
       <SEO 
-        title={`Event Ticket • ${displayTitle} • AI Verse`}
+        title={`Event Ticket • ${displayTitle} • AI Verse VITB`}
         description={`Your official event ticket pass for ${displayTitle}.`}
+        noIndex={true}
       />
 
       <style>{`
@@ -571,7 +575,7 @@ const TicketPage: React.FC = () => {
                   }`}
                 >
                   <img 
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${registrationId || "mock_reg_123"}`} 
+                    src={`https://api.qrserver.com/v1/create-qr-code/?size=350x350&data=${encodeURIComponent(`https://aiversevitb.in/ticket/${registrationId || "PASS"}`)}`} 
                     alt="Attendance QR Code"
                     className="w-full h-full object-contain block"
                   />
@@ -713,7 +717,7 @@ const TicketPage: React.FC = () => {
                 <div className="md:col-span-3 bg-slate-50/70 p-6 flex flex-col items-center justify-center text-center space-y-3.5 border-t md:border-t-0 border-slate-100">
                   <div className="p-2.5 bg-white rounded-2xl border border-slate-200 shadow-xs">
                     <img 
-                      src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${registrationId || "mock_reg_123"}`} 
+                      src={`https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(`https://aiversevitb.in/ticket/${registrationId || "PASS"}`)}`} 
                       alt="Attendance QR" 
                       className="w-32 h-32 object-contain block"
                     />

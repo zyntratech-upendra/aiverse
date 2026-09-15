@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from "react";
-import { db } from "../../config/firebase";
-  import {
+import {
+  db,
   collection,
   query,
   orderBy,
@@ -9,7 +9,7 @@ import { db } from "../../config/firebase";
   updateDoc,
   deleteDoc,
   writeBatch
-} from "firebase/firestore";
+} from "../../config/firebase";
 import { sendResendEmail } from "../../utils/resendEmailService";
 import { fetchContacts, updateContact, deleteContact as apiDeleteContact } from "../../services/apiClient";
 import {

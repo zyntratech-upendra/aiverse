@@ -192,7 +192,9 @@ const HomePage: React.FC = () => {
       <SEO
         title="AI Verse VITB | AI & Data Science Student Community - VIT Bhimavaram"
         description="Welcome to AI Verse VITB (aiversevitb) — the premier Artificial Intelligence & Data Science student community at Vishnu Institute of Technology, Bhimavaram (VIT Bhimavaram). Collaborate on AI projects, hackathons, workshops, and student innovation."
-        keywords="AI Verse, aiversevitb, AI Verse VITB, VIT Bhimavaram, Vishnu Institute of Technology, AI & Data Science, Data Science, Student AI Community, VITB AI"
+        keywords="AI Verse, aiversevitb, AI Verse VITB, VIT Bhimavaram, Vishnu Institute of Technology, AI & Data Science, Data Science, Student AI Community, VITB AI, AI Hackathons Bhimavaram"
+        url="/"
+        type="website"
       />
       {/* ================= HERO SECTION ================= */}
       <section className="relative min-h-[90vh] flex items-center pt-8 pb-16 lg:py-24">

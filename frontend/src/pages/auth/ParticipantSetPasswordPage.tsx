@@ -53,6 +53,7 @@ export const ParticipantSetPasswordPage: React.FC = () => {
       <SEO 
         title="Set New Password - AI Verse Participant Portal"
         description="Create a password to access your AI Verse participant portal."
+        noIndex={true}
       />
 
       <div className="bg-white rounded-[32px] border border-slate-100/70 max-w-[460px] w-full p-8 sm:p-10 shadow-[0_24px_50px_rgba(0,0,0,0.03)] text-center relative z-10">

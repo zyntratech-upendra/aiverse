@@ -1,8 +1,7 @@
 import React, { useState } from "react";
 import SEO from "../../components/layout/SEO";
 import { Mail, Phone, MapPin, Send, Loader2, CheckCircle2, MessageSquare, AlertCircle } from "lucide-react";
-import { db } from "../../config/firebase";
-import { collection, addDoc } from "firebase/firestore";
+import { db, collection, addDoc } from "../../config/firebase";
 
 import { createContact } from "../../services/apiClient";
 
@@ -62,8 +61,31 @@ const ContactPage: React.FC = () => {
     <div className="overflow-hidden bg-[#FAFBFC] pb-24 pt-28 min-h-screen font-sans">
       <SEO 
         title="Contact AI Verse VITB | Vishnu Institute of Technology, Bhimavaram" 
-        description="Get in touch with the AI Verse VITB team at Vishnu Institute of Technology, Bhimavaram for project partnerships, event queries, and student inquiries."
-        keywords="Contact AI Verse, aiversevitb, AI Verse VITB, VIT Bhimavaram, Vishnu Institute of Technology, Collaboration"
+        description="Get in touch with the AI Verse VITB team at Vishnu Institute of Technology, Bhimavaram for project partnerships, event queries, student hackathons, and community membership."
+        keywords="Contact AI Verse, aiversevitb, AI Verse VITB, VIT Bhimavaram, Vishnu Institute of Technology, AI Student Club Contact, Bhimavaram"
+        url="/contact"
+        schema={{
+          "@context": "https://schema.org",
+          "@type": "ContactPage",
+          "name": "Contact AI Verse VITB",
+          "url": "https://aiversevitb.in/contact",
+          "description": "Get in touch with AI Verse at Vishnu Institute of Technology, Bhimavaram.",
+          "mainEntity": {
+            "@type": "EducationalOrganization",
+            "name": "AI Verse VITB",
+            "alternateName": "Aiverse VITB",
+            "url": "https://aiversevitb.in",
+            "email": "aiversevitb@gmail.com",
+            "address": {
+              "@type": "PostalAddress",
+              "streetAddress": "Vishnu Institute of Technology, Vishnupur",
+              "addressLocality": "Bhimavaram",
+              "addressRegion": "Andhra Pradesh",
+              "postalCode": "534202",
+              "addressCountry": "IN"
+            }
+          }
+        }}
       />
       
       {/* Background glow elements */}

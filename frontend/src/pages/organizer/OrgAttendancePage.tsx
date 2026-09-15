@@ -440,6 +440,11 @@ export const OrgAttendancePage: React.FC = () => {
         // ignore parse error
       }
 
+      // If full ticket URL is scanned (e.g. https://aiversevitb.in/ticket/REG_ID), extract the ID
+      if (cleanText.includes("/ticket/")) {
+        cleanText = cleanText.split("/ticket/").pop()?.split("?")[0]?.split("#")[0]?.trim() || cleanText;
+      }
+
       let reg = registrations.find(r => 
         (r.id && r.id === cleanText) || 
         (r._id && r._id === cleanText) || 

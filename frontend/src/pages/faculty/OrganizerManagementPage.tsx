@@ -15,8 +15,7 @@ import {
   MoreVertical,
   Trash2
 } from "lucide-react";
-import { db } from "../../config/firebase";
-import { collection, getDocs, addDoc, doc, setDoc, deleteDoc } from "firebase/firestore";
+import { db, collection, getDocs, addDoc, doc, setDoc, deleteDoc } from "../../config/firebase";
 import { fetchEvents as apiFetchEvents, fetchUsers as apiFetchUsers, fetchOrganizers } from "../../services/apiClient";
 import { userService } from "../../services/userService";
 
@@ -414,27 +413,7 @@ const OrganizerManagementPage: React.FC = () => {
       };
       await addDoc(collection(db, "organizers"), payload);
 
-      if (newUid) {
-        // Create user document at the new Supabase Auth UID
-        const newUserRef = doc(db, "users", newUid);
-        await setDoc(newUserRef, {
-          name: selectedUser.name,
-          email: selectedUser.email,
-          role: "student Organizer",
-          status: "Active",
-          image: selectedUser.image || ""
-        });
-
-        // Delete the old user document at the temporary random ID if they are different
-        if (selectedUserId !== newUid) {
-          try {
-            await deleteDoc(doc(db, "users", selectedUserId));
-          } catch (delErr) {
-            console.error("Error deleting old temp user document:", delErr);
-          }
-        }
-      } else {
-        // They already had an auth account, so selectedUserId is their real UID. Update it.
+      if (selectedUserId) {
         const userRef = doc(db, "users", selectedUserId);
         await setDoc(userRef, { role: "student Organizer" }, { merge: true });
       }

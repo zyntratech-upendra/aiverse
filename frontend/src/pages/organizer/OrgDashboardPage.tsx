@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { db } from "../../config/firebase";
-import { collection, getDocs } from "firebase/firestore";
+import { db, collection, getDocs } from "../../config/firebase";
 import SEO from "../../components/layout/SEO";
 import { useAuth } from "../../context/AuthContext";
 import { 

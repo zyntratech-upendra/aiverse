@@ -263,7 +263,20 @@ const GalleryPage: React.FC = () => {
       <SEO 
         title="Gallery - Visual Moments | AI Verse VITB - VIT Bhimavaram" 
         description="Explore the visual legacy of AI Verse VITB — hackathons, AI & Data Science workshops, project expos, and student achievements at Vishnu Institute of Technology, Bhimavaram." 
-        keywords="AI Verse Gallery, aiversevitb, AI Verse VITB, VIT Bhimavaram, Vishnu Institute of Technology, AI Workshops Gallery"
+        keywords="AI Verse Gallery, aiversevitb, AI Verse VITB, VIT Bhimavaram, Vishnu Institute of Technology, AI Workshops Gallery, Student Tech Photos"
+        url="/gallery"
+        schema={{
+          "@context": "https://schema.org",
+          "@type": "ImageGallery",
+          "name": "AI Verse VITB Photo Gallery",
+          "url": "https://aiversevitb.in/gallery",
+          "description": "Visual highlights of technical workshops, hackathons, and AI projects at Vishnu Institute of Technology, Bhimavaram.",
+          "publisher": {
+            "@type": "EducationalOrganization",
+            "name": "AI Verse VITB",
+            "url": "https://aiversevitb.in"
+          }
+        }}
       />
       
       {/* ================= HERO / HEADER SECTION ================= */}
