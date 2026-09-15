@@ -96,6 +96,7 @@ router.post(
             name: regDoc.fullName || regDoc.teamLeadName || regDoc.name || 'Participant',
             role,
             displayRole: 'Participant',
+            requiresPasswordChange: true,
             registration_id: regDoc._id,
             teamName: regDoc.groupName || regDoc.teamName || '',
             eventTitle: regDoc.eventTitle || '',
@@ -137,12 +138,17 @@ router.post(
           }
         }
 
+        const requiresPwChange = userDoc.requiresPasswordChange !== undefined
+          ? Boolean(userDoc.requiresPasswordChange)
+          : (role === 'participant' && !userDoc.hasCustomPassword);
+
         const payload = {
           uid: userDoc.uid || userDoc._id,
           email: userDoc.email,
           name: userDoc.name || userDoc.display_name || 'Participant',
           role,
           displayRole: userDoc.displayRole || userDoc.position || 'Participant',
+          requiresPasswordChange: requiresPwChange,
           registration_id: userDoc.registration_id || '',
           teamName: userDoc.team_name || userDoc.teamName || '',
           eventTitle: userDoc.event_title || userDoc.eventTitle || '',
@@ -215,12 +221,17 @@ router.post(
         }
       }
 
+      const requiresPwChange = userDoc.requiresPasswordChange !== undefined
+        ? Boolean(userDoc.requiresPasswordChange)
+        : (role === 'participant' && !userDoc.hasCustomPassword && !PREDEFINED_EMAILS.includes(cleanEmail));
+
       const payload = {
         uid: userDoc.uid || userDoc._id,
         email: userDoc.email,
         name: userDoc.name || userDoc.display_name || cleanEmail.split('@')[0],
         role,
         displayRole: userDoc.displayRole || userDoc.position || (role === 'faculty' ? 'Super Admin' : (role === 'organizer' ? 'Student Organizer' : (role === 'jury' ? 'Jury Evaluator' : 'Participant'))),
+        requiresPasswordChange: requiresPwChange,
         registration_id: userDoc.registration_id || '',
         teamName: userDoc.team_name || userDoc.teamName || '',
         eventTitle: userDoc.event_title || userDoc.eventTitle || '',
@@ -276,6 +287,7 @@ router.post(
         name,
         role,
         displayRole,
+        requiresPasswordChange: false,
         registration_id: '',
       };
 
@@ -314,6 +326,7 @@ router.post(
         name: reg.fullName || reg.teamLeadName || reg.name || 'Participant',
         role: 'participant',
         displayRole: 'Participant',
+        requiresPasswordChange: true,
         registration_id: reg._id,
         teamName: reg.groupName || reg.teamName || '',
         eventTitle: reg.eventTitle || '',
@@ -350,6 +363,7 @@ router.post(
       email,
       name: name || (userDoc && userDoc.name) || '',
       role,
+      requiresPasswordChange: Boolean(userDoc && userDoc.requiresPasswordChange),
       registration_id: user.registration_id || (userDoc && userDoc.registration_id) || '',
     };
 
@@ -397,6 +411,7 @@ router.post(
       role: normalized,
       displayRole,
       password: cleanPassword,
+      requiresPasswordChange: normalized === 'participant',
       status: 'Active',
       created_at: Date.now(),
       updated_at: Date.now(),
@@ -410,6 +425,7 @@ router.post(
       name: newUser.name,
       role: normalized,
       displayRole,
+      requiresPasswordChange: normalized === 'participant',
       registration_id: '',
     };
 
@@ -438,6 +454,7 @@ router.put(
         $set: {
           password: cleanPassword,
           requiresPasswordChange: false,
+          hasCustomPassword: true,
           updated_at: Date.now(),
         },
         $setOnInsert: {

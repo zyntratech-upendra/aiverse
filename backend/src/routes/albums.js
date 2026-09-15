@@ -2,8 +2,9 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Album = require('../models/Album');
-const { optionalAuth, requireAuth } = require('../middleware/auth');
+const { optionalAuth, requireAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { pick } = require('../utils/sanitize');
 
 // GET /api/albums - List albums
 router.get(
@@ -35,7 +36,7 @@ router.get(
 // POST /api/albums/bulk - Create multiple single images in batch
 router.post(
   '/bulk',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const items = req.body?.items || req.body || [];
     if (!Array.isArray(items) || items.length === 0) {
@@ -43,8 +44,10 @@ router.post(
     }
 
     const now = Date.now();
-    const docsToInsert = items.map((item, idx) => {
-      const id = item._id || item.id || new mongoose.Types.ObjectId().toString();
+    const allowedFields = ['title', 'description', 'coverImage', 'eventId', 'date', 'tags', 'images'];
+    const docsToInsert = items.map((rawItem, idx) => {
+      const item = pick(rawItem, allowedFields);
+      const id = rawItem._id || rawItem.id || new mongoose.Types.ObjectId().toString();
       return {
         ...item,
         _id: id,
@@ -67,10 +70,12 @@ router.post(
 // POST /api/albums - Create album or single photo
 router.post(
   '/',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
-    const payload = req.body || {};
-    const id = payload._id || payload.id || new mongoose.Types.ObjectId().toString();
+    const rawPayload = req.body || {};
+    const allowedFields = ['title', 'description', 'coverImage', 'eventId', 'date', 'tags', 'images'];
+    const payload = pick(rawPayload, allowedFields);
+    const id = rawPayload._id || rawPayload.id || new mongoose.Types.ObjectId().toString();
     const now = Date.now();
 
     const newAlbum = new Album({
@@ -90,10 +95,12 @@ router.post(
 // PUT /api/albums/:id - Update album
 router.put(
   '/:id',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
-    const payload = req.body || {};
+    const rawPayload = req.body || {};
+    const allowedFields = ['title', 'description', 'coverImage', 'eventId', 'date', 'tags', 'images', 'photosCount'];
+    const payload = pick(rawPayload, allowedFields);
     payload.updatedAt = Date.now();
 
     const updated = await Album.findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true }).lean();
@@ -108,7 +115,7 @@ router.put(
 // DELETE /api/albums/:id - Delete album
 router.delete(
   '/:id',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
     const deleted = await Album.findByIdAndDelete(id);

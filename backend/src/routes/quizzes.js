@@ -5,8 +5,9 @@ const Quiz = require('../models/Quiz');
 const QuizSession = require('../models/QuizSession');
 const QuizAnswer = require('../models/QuizAnswer');
 const QuizSubmission = require('../models/QuizSubmission');
-const { optionalAuth, requireAuth } = require('../middleware/auth');
+const { optionalAuth, requireAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { pick } = require('../utils/sanitize');
 
 // GET /api/quizzes - List quizzes
 router.get(
@@ -20,6 +21,22 @@ router.get(
 
     const quizzes = await Quiz.find(filter).sort({ createdAt: -1 }).lean();
     res.json(quizzes.map((q) => ({ ...q, id: q._id })));
+  })
+);
+
+// GET /api/quizzes/submissions - Query all submissions globally
+router.get(
+  '/submissions',
+  optionalAuth,
+  asyncHandler(async (req, res) => {
+    const { userId, userEmail, teamId } = req.query;
+    const filter = {};
+    if (userId) filter.userId = userId;
+    if (userEmail) filter.userEmail = userEmail;
+    if (teamId) filter.teamId = teamId;
+
+    const submissions = await QuizSubmission.find(filter).lean();
+    res.json(submissions.map(s => ({ ...s, id: s._id })));
   })
 );
 
@@ -50,7 +67,7 @@ router.get(
 // PUT /api/quizzes/:quizId/submissions-batch - Batch update/override multiple participant scores
 router.put(
   '/:quizId/submissions-batch',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { quizId } = req.params;
     const { updates } = req.body || {};
@@ -91,7 +108,7 @@ router.put(
 // PUT /api/quizzes/:quizId/submissions/:submissionId - Update/override a participant's score
 router.put(
   '/:quizId/submissions/:submissionId',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { quizId, submissionId } = req.params;
     const { score, percentage, correctCount, incorrectCount, passed, maxScore, remarks, originalScore, answers } = req.body || {};
@@ -128,7 +145,7 @@ router.put(
 // GET /api/quizzes/:quizId/sessions - List all sessions for a quiz
 router.get(
   '/:quizId/sessions',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { quizId } = req.params;
     const sessions = await QuizSession.find({ quizId }).sort({ updatedAt: -1 }).lean();
@@ -139,10 +156,12 @@ router.get(
 // POST /api/quizzes - Create quiz
 router.post(
   '/',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
-    const payload = req.body || {};
-    const id = payload._id || payload.id || new mongoose.Types.ObjectId().toString();
+    const rawPayload = req.body || {};
+    const allowedFields = ['eventId', 'eventTitle', 'title', 'description', 'durationMinutes', 'startTime', 'endTime', 'passingPercentage', 'status', 'track', 'randomizeQuestions', 'showResultsImmediately', 'maxAttempts', 'questions'];
+    const payload = pick(rawPayload, allowedFields);
+    const id = rawPayload._id || rawPayload.id || new mongoose.Types.ObjectId().toString();
     const now = Date.now();
 
     const questions = Array.isArray(payload.questions) ? payload.questions : [];
@@ -166,10 +185,12 @@ router.post(
 // PUT /api/quizzes/:id - Update quiz
 router.put(
   '/:id',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
-    const payload = req.body || {};
+    const rawPayload = req.body || {};
+    const allowedFields = ['eventId', 'eventTitle', 'title', 'description', 'durationMinutes', 'startTime', 'endTime', 'passingPercentage', 'status', 'track', 'randomizeQuestions', 'showResultsImmediately', 'maxAttempts', 'questions'];
+    const payload = pick(rawPayload, allowedFields);
     const now = Date.now();
 
     if (payload.questions && Array.isArray(payload.questions)) {
@@ -189,7 +210,7 @@ router.put(
 // DELETE /api/quizzes/:id - Delete quiz cascading
 router.delete(
   '/:id',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const quizId = req.params.id;
 
@@ -205,7 +226,7 @@ router.delete(
 // POST /api/quizzes/:quizId/reset-participant - Reset a single participant's session and submission
 router.post(
   '/:quizId/reset-participant',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { quizId } = req.params;
     const { userId } = req.body;
@@ -228,7 +249,7 @@ router.post(
 // POST /api/quizzes/:quizId/reset-all - Reset all submissions and sessions for a quiz
 router.post(
   '/:quizId/reset-all',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { quizId } = req.params;
 
@@ -251,7 +272,7 @@ router.post(
 // POST /api/quizzes/delete-by-event - Delete all quizzes and associated data for a specific event
 router.post(
   '/delete-by-event',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { eventId, eventTitle } = req.body || {};
     if (!eventId && !eventTitle) {

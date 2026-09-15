@@ -559,43 +559,44 @@ const RegistrationPage: React.FC = () => {
 
       setCreatedRegId(finalRegId);
 
-      // Auto-provision login credentials for Quiz registrations with common password Aiverse@vitb
-      if (isQuiz) {
-        const personalEmail = leadPersonalEmail.trim().toLowerCase();
-        const displayName = leadName.trim() || "Participant";
-        const userPhone = leadPhone.trim();
-        try {
-          const allEmails = Array.from(new Set([personalEmail].filter(e => e && e.includes("@"))));
-          // 4. Supabase public.users Profile Upsert
-          const supaUsers = allEmails.map(em => ({
-            email: em,
-            personal_email: personalEmail || em,
-            phone: userPhone || null,
-            name: displayName,
-            display_name: displayName,
-            role: "participant",
-            status: "Active",
-            event_title: event.title || "",
-            registration_id: finalRegId,
-            team_name: displayName,
-          }));
-          await userService.bulkUpsertUsers(supaUsers).catch(() => {});
+      // Auto-provision login credentials for participant registrations with initial default password Aiverse@vitb
+      const personalEmail = (leadPersonalEmail.trim() || leadCollegeEmail.trim() || "").toLowerCase();
+      const displayName = leadName.trim() || "Participant";
+      const userPhone = leadPhone.trim();
+      try {
+        const leadEmails = [personalEmail, leadCollegeEmail.trim().toLowerCase()].filter(e => e && e.includes("@"));
+        const memberEmails = (cleanMembers || []).map(m => (m.email || "").trim().toLowerCase()).filter(e => e && e.includes("@"));
+        const allEmails = Array.from(new Set([...leadEmails, ...memberEmails]));
 
-          // 5. Supabase Auth Account Creation (Password: Aiverse@vitb)
-          const authAccounts = allEmails.map(em => ({
-            email: em,
-            password: commonQuizPassword,
-            name: displayName,
-            phone: userPhone,
-            role: "participant",
-            isQuiz: true,
-            eventTitle: event.title || "",
-            registrationId: finalRegId,
-          }));
-          await userService.bulkCreateAuthUsers(authAccounts).catch(() => {});
-        } catch (credErr) {
-          console.warn("[Registration] Non-critical error auto-provisioning quiz credentials:", credErr);
-        }
+        const userProfiles = allEmails.map(em => ({
+          email: em,
+          personal_email: em,
+          phone: userPhone || null,
+          name: em === personalEmail ? displayName : (cleanMembers.find(m => m.email === em)?.name || displayName),
+          display_name: em === personalEmail ? displayName : (cleanMembers.find(m => m.email === em)?.name || displayName),
+          role: "participant",
+          status: "Active",
+          requiresPasswordChange: true,
+          event_title: event.title || "",
+          registration_id: finalRegId,
+          team_name: isQuiz ? displayName : (groupName || displayName),
+        }));
+        await userService.bulkUpsertUsers(userProfiles).catch(() => {});
+
+        const authAccounts = allEmails.map(em => ({
+          email: em,
+          password: commonQuizPassword,
+          name: em === personalEmail ? displayName : (cleanMembers.find(m => m.email === em)?.name || displayName),
+          phone: userPhone,
+          role: "participant",
+          requiresPasswordChange: true,
+          isQuiz: Boolean(isQuiz),
+          eventTitle: event.title || "",
+          registrationId: finalRegId,
+        }));
+        await userService.bulkCreateAuthUsers(authAccounts).catch(() => {});
+      } catch (credErr) {
+        console.warn("[Registration] Non-critical notice auto-provisioning credentials:", credErr);
       }
 
       // Send registration confirmation email via Nodemailer SMTP
@@ -953,7 +954,7 @@ const RegistrationPage: React.FC = () => {
       <SEO
         title={`Register for ${event.title} - AI Verse VITB`}
         description={`Complete registration details to secure your spot for ${event.title} organized by AI Verse at Vishnu Institute of Technology, Bhimavaram.`}
-        url={`/register/${eventId}`}
+        url={`/register/${id || event.id}`}
         keywords={`Register ${event.title}, AI Verse VITB, VIT Bhimavaram, Event Registration`}
       />
 

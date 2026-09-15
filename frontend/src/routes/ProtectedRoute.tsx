@@ -59,6 +59,11 @@ export const ProtectedRoute: React.FC<ProtectedRouteProps> = ({
     return <Navigate to="/404" replace />;
   }
 
+  // Force participants to set new password if required before accessing portal features
+  if (normalizedRole === "participant" && user.requiresPasswordChange) {
+    return <Navigate to="/participant/set-password" replace />;
+  }
+
   return children;
 };
 export default ProtectedRoute;

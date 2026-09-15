@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const Setting = require('../models/Setting');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { requireAdmin } = require('../middleware/auth');
 
 // GET /api/settings - List all settings
 router.get(
@@ -88,8 +89,8 @@ const upsertSetting = asyncHandler(async (req, res) => {
   });
 });
 
-router.put('/:key', upsertSetting);
-router.post('/:key', upsertSetting);
-router.post('/', upsertSetting);
+router.put('/:key', requireAdmin, upsertSetting);
+router.post('/:key', requireAdmin, upsertSetting);
+router.post('/', requireAdmin, upsertSetting);
 
 module.exports = router;

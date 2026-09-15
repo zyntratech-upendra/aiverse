@@ -2,10 +2,13 @@ const express = require('express');
 const router = express.Router();
 const JuryEvaluation = require('../models/JuryEvaluation');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { optionalAuth, requireAdmin } = require('../middleware/auth');
+const { pick } = require('../utils/sanitize');
 
 // GET /api/jury_evaluations - Query jury evaluations
 router.get(
   '/',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const { eventId, registrationId, juryId, round } = req.query;
     const filter = {};
@@ -27,6 +30,7 @@ router.get(
 // GET /api/jury_evaluations/:id - Get single evaluation
 router.get(
   '/:id',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     let doc = null;
@@ -53,8 +57,11 @@ router.get(
 // POST /api/jury_evaluations - Create evaluation
 router.post(
   '/',
+  optionalAuth,
   asyncHandler(async (req, res) => {
-    const payload = req.body || {};
+    const rawPayload = req.body || {};
+    const allowedFields = ['eventId', 'registrationId', 'teamName', 'juryId', 'juryName', 'round', 'scores', 'totalScore', 'feedback', 'notes'];
+    const payload = pick(rawPayload, allowedFields);
     const created = await JuryEvaluation.create(payload);
     res.status(201).json({
       success: true,
@@ -67,9 +74,12 @@ router.post(
 // PUT /api/jury_evaluations/:id - Update evaluation (or upsert)
 router.put(
   '/:id',
+  optionalAuth,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
-    const payload = req.body || {};
+    const rawPayload = req.body || {};
+    const allowedFields = ['eventId', 'registrationId', 'teamName', 'juryId', 'juryName', 'round', 'scores', 'totalScore', 'feedback', 'notes'];
+    const payload = pick(rawPayload, allowedFields);
 
     let filter = { _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null };
     if (!filter._id) {
@@ -93,6 +103,7 @@ router.put(
 // DELETE /api/jury_evaluations/:id - Delete evaluation
 router.delete(
   '/:id',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     await JuryEvaluation.deleteMany({

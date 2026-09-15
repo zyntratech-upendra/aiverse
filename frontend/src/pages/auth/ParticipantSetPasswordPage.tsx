@@ -39,8 +39,8 @@ export const ParticipantSetPasswordPage: React.FC = () => {
       }
       setIsSuccess(true);
       setTimeout(() => {
-        navigate("/participant/review-team", { replace: true });
-      }, 500);
+        navigate("/participant/dashboard", { replace: true });
+      }, 700);
     } catch (err: any) {
       setError(err?.message || "Failed to update password. Please try again.");
     } finally {

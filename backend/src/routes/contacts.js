@@ -2,8 +2,9 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Contact = require('../models/Contact');
-const { optionalAuth, requireAuth } = require('../middleware/auth');
+const { optionalAuth, requireAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { pick } = require('../utils/sanitize');
 
 // GET /api/contacts - List contact inquiries
 router.get(
@@ -62,10 +63,12 @@ router.post(
 // PUT /api/contacts/:id - Update status or notes
 router.put(
   '/:id',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
-    const payload = req.body || {};
+    const rawPayload = req.body || {};
+    const allowedFields = ['status', 'notes', 'priority'];
+    const payload = pick(rawPayload, allowedFields);
     payload.updatedAt = Date.now();
 
     const updated = await Contact.findByIdAndUpdate(id, { $set: payload }, { new: true }).lean();
@@ -80,7 +83,7 @@ router.put(
 // DELETE /api/contacts/:id - Delete inquiry
 router.delete(
   '/:id',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
     const deleted = await Contact.findByIdAndDelete(id);

@@ -7,8 +7,9 @@ const User = require('../models/User');
 const QuizSubmission = require('../models/QuizSubmission');
 const QuizSession = require('../models/QuizSession');
 const QuizAnswer = require('../models/QuizAnswer');
-const { optionalAuth, requireAuth } = require('../middleware/auth');
+const { optionalAuth, requireAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { pick } = require('../utils/sanitize');
 
 // GET /api/registrations - List registrations
 router.get(
@@ -45,7 +46,19 @@ router.post(
   '/',
   optionalAuth,
   asyncHandler(async (req, res) => {
-    const payload = req.body || {};
+    const rawPayload = req.body || {};
+    const allowedFields = [
+      'eventId', 'eventTitle', 'category', 'isQuiz', 'groupName', 'fullName',
+      'teamLeadName', 'teamLeadEmail', 'teamLeadCollegeEmail', 'teamLeadPersonalEmail',
+      'collegeEmail', 'personalEmail', 'email', 'teamLeadStudentId', 'studentId', 'rollNo',
+      'teamLeadPhone', 'phoneNumber', 'phone', 'collegeName', 'collegePlace', 'teamPassword',
+      'accessGranted', 'loginAccessGranted', 'members', 'teamSize', 'isVishnuStudent',
+      'needsFood', 'foodOption', 'foodPreference', 'isPaidEvent', 'pricingType',
+      'registrationFee', 'totalFeePaid', 'paymentProofPreview', 'paymentProofFilename',
+      'paymentProof', 'transactionId', 'paymentStatus', 'status', 'confirmedAt',
+      'sendEmail', 'sendConfirmationEmail', 'createdAt'
+    ];
+    const payload = pick(rawPayload, allowedFields);
     const eventId = payload.eventId;
 
     if (!eventId) {
@@ -181,10 +194,24 @@ router.post(
 // PUT /api/registrations/:id - Update registration
 router.put(
   '/:id',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
-    const payload = req.body || {};
+    const rawPayload = req.body || {};
+    
+    // Admins can update any field in registration, but we still pick to avoid complete arbitrary pollution
+    const allowedFields = [
+      'eventId', 'eventTitle', 'category', 'isQuiz', 'groupName', 'fullName',
+      'teamLeadName', 'teamLeadEmail', 'teamLeadCollegeEmail', 'teamLeadPersonalEmail',
+      'collegeEmail', 'personalEmail', 'email', 'teamLeadStudentId', 'studentId', 'rollNo',
+      'teamLeadPhone', 'phoneNumber', 'phone', 'collegeName', 'collegePlace', 'teamPassword',
+      'accessGranted', 'loginAccessGranted', 'members', 'teamSize', 'isVishnuStudent',
+      'needsFood', 'foodOption', 'foodPreference', 'isPaidEvent', 'pricingType',
+      'registrationFee', 'totalFeePaid', 'paymentProofPreview', 'paymentProofFilename',
+      'paymentProof', 'transactionId', 'paymentStatus', 'status', 'confirmedAt',
+      'sendEmail', 'sendConfirmationEmail', 'createdAt', 'qrCodeData', 'backendId'
+    ];
+    const payload = pick(rawPayload, allowedFields);
     payload.updatedAt = Date.now();
 
     const updated = await Registration.findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true }).lean();
@@ -199,7 +226,7 @@ router.put(
 // DELETE /api/registrations/:id - Delete registration
 router.delete(
   '/:id',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
     const doc = await Registration.findByIdAndDelete(id).lean();
@@ -220,7 +247,7 @@ router.delete(
 // Body: { emailList: string[], teamSize?: number, eventId?: string }
 router.post(
   '/:id/cascade-delete',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const regId = req.params.id;
     const { emailList = [], teamSize = 1, eventId } = req.body || {};

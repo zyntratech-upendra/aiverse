@@ -2,8 +2,9 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Organizer = require('../models/Organizer');
-const { optionalAuth, requireAuth } = require('../middleware/auth');
+const { optionalAuth, requireAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { pick } = require('../utils/sanitize');
 
 // GET /api/organizers - List organizers sorted by order
 router.get(
@@ -31,10 +32,12 @@ router.get(
 // POST /api/organizers - Create organizer
 router.post(
   '/',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
-    const payload = req.body || {};
-    const id = payload._id || payload.id || new mongoose.Types.ObjectId().toString();
+    const rawPayload = req.body || {};
+    const allowedFields = ['name', 'role', 'organization', 'image', 'linkedin', 'twitter', 'github', 'order'];
+    const payload = pick(rawPayload, allowedFields);
+    const id = rawPayload._id || rawPayload.id || new mongoose.Types.ObjectId().toString();
     const now = Date.now();
 
     const newOrganizer = new Organizer({
@@ -52,10 +55,12 @@ router.post(
 // PUT /api/organizers/:id - Update organizer
 router.put(
   '/:id',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
-    const payload = req.body || {};
+    const rawPayload = req.body || {};
+    const allowedFields = ['name', 'role', 'organization', 'image', 'linkedin', 'twitter', 'github', 'order'];
+    const payload = pick(rawPayload, allowedFields);
     payload.updatedAt = Date.now();
 
     const updated = await Organizer.findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true }).lean();
@@ -70,7 +75,7 @@ router.put(
 // DELETE /api/organizers/:id - Delete organizer
 router.delete(
   '/:id',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
     const deleted = await Organizer.findByIdAndDelete(id);

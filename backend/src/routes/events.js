@@ -2,8 +2,9 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Event = require('../models/Event');
-const { optionalAuth, requireAuth } = require('../middleware/auth');
+const { optionalAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { pick } = require('../utils/sanitize');
 
 // GET /api/events - List events
 router.get(
@@ -37,10 +38,13 @@ router.get(
 // POST /api/events - Create event
 router.post(
   '/',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
-    const payload = req.body || {};
-    const id = payload._id || payload.id || new mongoose.Types.ObjectId().toString();
+    const rawPayload = req.body || {};
+    const allowedFields = ['title', 'description', 'shortDescription', 'category', 'track', 'date', 'time', 'venue', 'location', 'banner', 'bannerImage', 'coverImage', 'rules', 'prizes', 'tags', 'maxParticipants', 'maxReg', 'currentReg', 'teamSizeMin', 'teamSizeMax', 'minTeamSize', 'maxTeamSize', 'fee', 'isLive', 'registrationOpen', 'status', 'coordinators'];
+    const payload = pick(rawPayload, allowedFields);
+    
+    const id = rawPayload._id || rawPayload.id || new mongoose.Types.ObjectId().toString();
     const now = Date.now();
 
     const newEvent = new Event({
@@ -58,10 +62,12 @@ router.post(
 // PUT /api/events/:id - Update event
 router.put(
   '/:id',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
-    const payload = req.body || {};
+    const rawPayload = req.body || {};
+    const allowedFields = ['title', 'description', 'shortDescription', 'category', 'track', 'date', 'time', 'venue', 'location', 'banner', 'bannerImage', 'coverImage', 'rules', 'prizes', 'tags', 'maxParticipants', 'maxReg', 'currentReg', 'teamSizeMin', 'teamSizeMax', 'minTeamSize', 'maxTeamSize', 'fee', 'isLive', 'registrationOpen', 'status', 'coordinators'];
+    const payload = pick(rawPayload, allowedFields);
     payload.updatedAt = Date.now();
 
     const updated = await Event.findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true }).lean();
@@ -76,7 +82,7 @@ router.put(
 // DELETE /api/events/:id - Delete event
 router.delete(
   '/:id',
-  optionalAuth,
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
     const deleted = await Event.findByIdAndDelete(id);

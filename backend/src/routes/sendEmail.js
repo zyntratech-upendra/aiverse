@@ -2,10 +2,12 @@ const express = require('express');
 const router = express.Router();
 const { sendMail } = require('../config/mailer');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { requireAdmin } = require('../middleware/auth');
 
 // POST /api/send-email - Send transactional email via Resend
 router.post(
   '/',
+  requireAdmin,
   asyncHandler(async (req, res) => {
     const { to, subject, html, text, from, reply_to, replyTo, headers, attachments } = req.body || {};
 

@@ -275,7 +275,7 @@ router.get(
     const { sessionId } = req.params;
     const submission = await QuizSubmission.findById(sessionId).lean();
     if (!submission) {
-      return res.status(404).json({ success: false, error: 'Submission not found' });
+      return res.json(null); // Prevent 404 console error on frontend
     }
     res.json({ ...submission, id: submission._id });
   })

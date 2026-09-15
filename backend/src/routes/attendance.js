@@ -5,6 +5,7 @@ const Attendance = require('../models/Attendance');
 const Registration = require('../models/Registration');
 const { optionalAuth, requireAuth } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
+const { pick } = require('../utils/sanitize');
 
 // GET /api/attendance - List attendance records
 router.get(
@@ -30,7 +31,10 @@ router.post(
   '/',
   optionalAuth,
   asyncHandler(async (req, res) => {
-    const payload = req.body || {};
+    const rawPayload = req.body || {};
+    const allowedFields = ['eventId', 'registrationId', 'participantId', 'userEmail', 'session', 'status', 'markedBy', 'checkInTime'];
+    const payload = pick(rawPayload, allowedFields);
+    
     const eventId = payload.eventId;
     const registrationId = payload.registrationId || '';
     const participantId = payload.participantId || '';
@@ -85,7 +89,9 @@ router.post(
     }
 
     const now = Date.now();
-    const ops = records.map((r) => {
+    const ops = records.map((rawR) => {
+      const allowedFields = ['eventId', 'registrationId', 'participantId', 'userEmail', 'session', 'status', 'markedBy', 'checkInTime', '_id', 'id'];
+      const r = pick(rawR, allowedFields);
       const email = (r.userEmail || '').toLowerCase().trim();
       const regId = r.registrationId || '';
       const evId = r.eventId || eventId;

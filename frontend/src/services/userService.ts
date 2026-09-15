@@ -187,10 +187,11 @@ export const userService = {
     try {
       const usersToInsert = uniqueAccounts.map((acc) => ({
         email: acc.email,
-        password: acc.password || "Password123!",
+        password: acc.password || "Aiverse@vitb",
         name: acc.name || acc.email.split("@")[0],
         phone: acc.phone || "",
         role: acc.role || "participant",
+        requiresPasswordChange: (acc as any).requiresPasswordChange !== undefined ? Boolean((acc as any).requiresPasswordChange) : true,
         registration_id: acc.registrationId || "",
         event_title: acc.eventTitle || "",
         status: "Active",

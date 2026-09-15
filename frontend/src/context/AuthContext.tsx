@@ -167,7 +167,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           name: u.name || u.displayName || u.display_name || emailOrPhone.split("@")[0] || "User",
           role,
           displayRole: u.displayRole || (role === "faculty" ? "Super Admin" : role === "organizer" ? "Student Organizer" : role === "jury" ? "Jury Evaluator" : "Participant"),
-          requiresPasswordChange: false,
+          requiresPasswordChange: Boolean(u.requiresPasswordChange),
           teamName: u.teamName || u.team_name || undefined,
           eventTitle: u.eventTitle || u.event_title || undefined,
           registrationId: u.registration_id || u.registrationId || undefined,
@@ -215,6 +215,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           name: u.name || name,
           role: normalizedRole,
           displayRole: u.displayRole || "Participant",
+          requiresPasswordChange: Boolean(u.requiresPasswordChange ?? (normalizedRole === "participant")),
         };
         setUser(profile);
         localStorage.setItem("aether_mock_user", JSON.stringify(profile));
