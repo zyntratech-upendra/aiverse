@@ -946,5 +946,219 @@ export function buildCertificateEmail(data: CertificateEmailData): {
   return { subject, html, text };
 }
 
+export interface TeamMemberCertItem {
+  name: string;
+  studentId?: string;
+  role?: string;
+  isLead?: boolean;
+  certificateId: string;
+  certificateUrl: string;
+}
+
+export interface TeamCertificateEmailData {
+  teamLeadName: string;
+  teamLeadEmail?: string;
+  eventTitle: string;
+  groupName: string;
+  certificateType?: string;
+  issueDate?: string;
+  collegeName?: string;
+  teamHubUrl: string;
+  members: TeamMemberCertItem[];
+  customMessage?: string;
+  signatory1Name?: string;
+  signatory1Title?: string;
+  signatory2Name?: string;
+  signatory2Title?: string;
+}
+
+/**
+ * Builds an all-in-one Team Certificate email sent directly to the Team Leader
+ * allowing them to view and download certificates for all registered team members.
+ */
+export function buildTeamCertificateEmail(data: TeamCertificateEmailData): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const {
+    teamLeadName,
+    eventTitle,
+    groupName,
+    certificateType = "Certificate of Participation",
+    issueDate = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }),
+    collegeName = "Vishnu Institute of Technology (Autonomous), Bhimavaram",
+    teamHubUrl,
+    members = [],
+    customMessage,
+    signatory1Name = "Faculty Coordinator",
+    signatory1Title = "Convener, AI Verse",
+    signatory2Name = "Head of Department",
+    signatory2Title = "Department of CSE",
+  } = data;
+
+  const subject = `🎓 Official Team Certificates: ${eventTitle} — Team ${groupName} | AI Verse`;
+
+  const memberRows = members.map((m, idx) => `
+    <tr style="border-bottom: 1px solid #e2e8f0; background-color: ${m.isLead ? '#f0fdf4' : (idx % 2 === 0 ? '#ffffff' : '#f8fafc')};">
+      <td style="padding: 14px 16px;">
+        <div style="font-size: 14px; font-weight: 800; color: #0f172a;">
+          ${m.name} ${m.isLead ? '<span style="font-size: 10px; font-weight: 800; background-color: #dcfce7; color: #166534; padding: 2px 8px; border-radius: 10px; text-transform: uppercase; margin-left: 6px;">⭐ Team Leader</span>' : '<span style="font-size: 10px; font-weight: 700; color: #64748b; margin-left: 6px;">(Member)</span>'}
+        </div>
+        ${m.studentId ? `<div style="font-size: 12px; font-family: monospace; color: #64748b; margin-top: 2px;">Roll / ID: ${m.studentId}</div>` : ''}
+        <div style="font-size: 11px; font-family: monospace; color: #94a3b8; margin-top: 2px;">Cert ID: ${m.certificateId}</div>
+      </td>
+      <td align="right" style="padding: 14px 16px; white-space: nowrap;">
+        <a href="${m.certificateUrl}" target="_blank" style="display: inline-block; background-color: #2563eb; color: #ffffff; font-size: 12px; font-weight: 800; text-decoration: none; padding: 8px 16px; border-radius: 8px;">
+          🎓 Download &rarr;
+        </a>
+      </td>
+    </tr>
+  `).join("");
+
+  const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="x-apple-disable-message-reformatting" />
+  <meta name="color-scheme" content="light" />
+  <meta name="supported-color-schemes" content="light" />
+  <title>${subject}</title>
+  <style type="text/css">
+    body { margin: 0; padding: 0; background-color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; }
+    table { border-collapse: collapse; }
+    .btn:hover { background-color: #1e40af !important; }
+  </style>
+</head>
+<body style="margin: 0; padding: 32px 16px; background-color: #f1f5f9;">
+  <div style="display: none; font-size: 1px; color: #f1f5f9; line-height: 1px; max-height: 0px; max-width: 0px; opacity: 0; overflow: hidden;">
+    Team Certificates for ${groupName} - ${eventTitle}. All registered member certificates are ready for download.
+  </div>
+
+  <table width="100%" border="0" cellspacing="0" cellpadding="0">
+    <tr>
+      <td align="center">
+        <table width="100%" style="max-width: 640px; background-color: #ffffff; border-radius: 24px; overflow: hidden; box-shadow: 0 8px 32px rgba(0,0,0,0.08); border: 1px solid #e2e8f0;">
+          
+          <!-- Top Royal Gradient Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #0f172a 0%, #1e3a8a 55%, #1e40af 100%); padding: 40px 32px; text-align: center;">
+              <div style="font-size: 11px; font-weight: 800; letter-spacing: 2.5px; color: #93c5fd; text-transform: uppercase; margin-bottom: 8px;">
+                ✦ AI VERSE • OFFICIAL DIGITAL CREDENTIALS ✦
+              </div>
+              <div style="font-size: 36px; margin-bottom: 4px;">🏆 🎓</div>
+              <h1 style="margin: 0; color: #ffffff; font-size: 24px; font-weight: 900; line-height: 1.3;">
+                Team Certificates Issued!
+              </h1>
+              <p style="margin: 8px 0 0 0; font-size: 15px; color: #dbeafe; font-weight: 700;">
+                Team "${groupName}" • ${eventTitle}
+              </p>
+              <div style="margin-top: 14px; display: inline-block; background: rgba(255, 255, 255, 0.15); border: 1px solid rgba(255,255,255,0.25); border-radius: 20px; padding: 5px 16px; color: #ffffff; font-size: 12px; font-weight: 800; letter-spacing: 0.5px;">
+                ✓ ALL TEAM CERTIFICATES READY (${members.length} RECIPIENTS)
+              </div>
+            </td>
+          </tr>
+
+          <!-- Main Body -->
+          <tr>
+            <td style="padding: 36px 32px 28px 32px;">
+              <p style="font-size: 16px; line-height: 1.6; color: #0f172a; margin: 0 0 16px 0;">
+                Dear <strong>${teamLeadName}</strong> (Team Leader),
+              </p>
+              <p style="font-size: 14px; line-height: 1.65; color: #334155; margin: 0 0 24px 0;">
+                ${customMessage || `Congratulations to you and all members of <strong>Team "${groupName}"</strong>! The official <strong>${certificateType}</strong> certificates have been issued in recognition of your technical excellence and active participation in <strong>${eventTitle}</strong>.`}
+              </p>
+              <p style="font-size: 14px; line-height: 1.65; color: #334155; margin: 0 0 24px 0;">
+                As the Team Leader, you have received the official certificates for all members of your team. You can download each member's certificate individually below or use the unified Team Certificate Hub button.
+              </p>
+
+              <!-- Team Members Roster Card -->
+              <div style="margin-bottom: 28px;">
+                <div style="font-size: 12px; font-weight: 800; color: #334155; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 10px;">
+                  📋 Team Member Certificates (${members.length})
+                </div>
+                <table width="100%" style="border: 1px solid #e2e8f0; border-radius: 14px; overflow: hidden;">
+                  ${memberRows}
+                </table>
+              </div>
+
+              <!-- Primary Action CTA -->
+              <div style="text-align: center; margin: 32px 0 16px 0;">
+                <a href="${teamHubUrl}" target="_blank" style="display: inline-block; background: linear-gradient(135deg, #2563eb 0%, #1d4ed8 100%); color: #ffffff; font-size: 15px; font-weight: 800; text-decoration: none; padding: 15px 36px; border-radius: 14px; box-shadow: 0 4px 16px rgba(37,99,235,0.3);">
+                  🎓 Open Team Certificate Hub & Download All &rarr;
+                </a>
+              </div>
+              <p style="font-size: 12px; color: #94a3b8; text-align: center; margin: 8px 0 0 0;">
+                You can download high-resolution PNG / PDF certificates for all team members, share on LinkedIn, and verify credentials online.
+              </p>
+
+              <!-- Signatories Summary -->
+              <div style="margin-top: 28px; padding-top: 20px; border-top: 1px solid #e2e8f0;">
+                <table width="100%">
+                  <tr>
+                    <td width="50%" align="left" style="font-size: 12px; color: #475569;">
+                      <strong>${signatory1Name}</strong><br>
+                      <span style="font-size: 11px; color: #64748b;">${signatory1Title}</span>
+                    </td>
+                    <td width="50%" align="right" style="font-size: 12px; color: #475569;">
+                      <strong>${signatory2Name}</strong><br>
+                      <span style="font-size: 11px; color: #64748b;">${signatory2Title}</span>
+                    </td>
+                  </tr>
+                </table>
+              </div>
+
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 24px 32px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="font-size: 12px; color: #64748b; margin: 0 0 6px 0;">
+                <strong>AI Verse Club</strong> • ${collegeName}
+              </p>
+              <p style="font-size: 11px; color: #94a3b8; margin: 0; line-height: 1.5;">
+                Issued on ${issueDate} for ${eventTitle}. Sent to you as the registered Team Leader for ${groupName}.<br>
+                For questions or support, reply directly to this email.
+              </p>
+            </td>
+          </tr>
+
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const text = [
+    `🎓 TEAM CERTIFICATES: ${groupName.toUpperCase()} - ${eventTitle.toUpperCase()}`,
+    `========================================================================`,
+    ``,
+    `Dear ${teamLeadName} (Team Leader),`,
+    ``,
+    `Congratulations to you and all members of Team "${groupName}"! Official ${certificateType} certificates have been awarded for ${eventTitle}.`,
+    ``,
+    `Issue Date: ${issueDate}`,
+    `Institution: ${collegeName}`,
+    ``,
+    `TEAM MEMBER CERTIFICATES:`,
+    ...members.map((m, i) => `${i + 1}. ${m.name} ${m.isLead ? '(Lead)' : ''} [Roll: ${m.studentId || 'N/A'}]\n   Cert ID: ${m.certificateId}\n   Download Link: ${m.certificateUrl}\n`),
+    ``,
+    `ACCESS ALL TEAM CERTIFICATES ONLINE:`,
+    `${teamHubUrl}`,
+    ``,
+    `Signatories:`,
+    `- ${signatory1Name} (${signatory1Title})`,
+    `- ${signatory2Name} (${signatory2Title})`,
+    ``,
+    `Warm regards,`,
+    `AI Verse Team • ${collegeName}`,
+  ].filter(Boolean).join("\n");
+
+  return { subject, html, text };
+}
+
 
 

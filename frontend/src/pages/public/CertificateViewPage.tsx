@@ -60,13 +60,26 @@ interface CertificateData {
   showQrCode?: boolean;
 }
 
+interface TeamMemberItem {
+  name: string;
+  studentId?: string;
+  role?: string;
+  isLead?: boolean;
+  certificateId: string;
+  email?: string;
+}
+
 const CertificateViewPage: React.FC = () => {
   const { certificateId } = useParams<{ certificateId: string }>();
   const [searchParams] = useSearchParams();
   const [certData, setCertData] = useState<CertificateData | null>(null);
+  const [teamMembers, setTeamMembers] = useState<TeamMemberItem[]>([]);
+  const [activeMemberIndex, setActiveMemberIndex] = useState<number>(0);
   const [loading, setLoading] = useState<boolean>(true);
   const [copied, setCopied] = useState<boolean>(false);
   const [isExporting, setIsExporting] = useState<boolean>(false);
+  const [isExportingAll, setIsExportingAll] = useState<boolean>(false);
+  const [downloadProgress, setDownloadProgress] = useState<{ current: number; total: number; currentName: string } | null>(null);
   const certContainerRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -79,6 +92,7 @@ const CertificateViewPage: React.FC = () => {
         const qType = searchParams.get("type");
         const qCollege = searchParams.get("college");
         const qDate = searchParams.get("date");
+        const qRegId = searchParams.get("regId");
         const qId = certificateId || searchParams.get("id") || `AIV-CERT-${Date.now().toString(36).toUpperCase()}`;
 
         // Custom template layout params from URL
@@ -107,7 +121,81 @@ const CertificateViewPage: React.FC = () => {
         const qShowSig = searchParams.get("showSig") !== null ? searchParams.get("showSig") === "true" : undefined;
         const qShowQr = searchParams.get("showQr") !== null ? searchParams.get("showQr") === "true" : undefined;
 
-        if (qName && qEvent) {
+        // Try to fetch registrations to populate full team roster
+        let registrations: any[] = [];
+        try {
+          registrations = await fetchRegistrations();
+        } catch (e) {
+          console.warn("Could not fetch registrations list:", e);
+        }
+
+        const found = (registrations || []).find(
+          (r: any) =>
+            (qRegId && ((r.id || r._id) === qRegId)) ||
+            r.certificateId === certificateId ||
+            (r.id || r._id) === certificateId ||
+            r.ticketCode === certificateId ||
+            (Array.isArray(r.members) && r.members.some((m: any) => m.certificateId === certificateId))
+        );
+
+        let roster: TeamMemberItem[] = [];
+        if (found) {
+          const leadName = found.fullName || found.teamLeadName || found.name || "Participant";
+          const leadStudentId = found.teamLeadStudentId || found.studentId || "";
+          const leadCertId = found.certificateId || `AIV-${(found.id || "").slice(-6).toUpperCase()}-L`;
+          const isGroup = !!found.groupName && found.groupName !== "Individual RSVP";
+
+          roster.push({
+            name: leadName,
+            studentId: leadStudentId,
+            role: isGroup ? "Team Leader" : "Participant",
+            isLead: true,
+            certificateId: leadCertId,
+            email: found.teamLeadPersonalEmail || found.userEmail || found.email || "",
+          });
+
+          if (Array.isArray(found.members)) {
+            found.members.forEach((m: any, idx: number) => {
+              if (m && (m.name || m.email)) {
+                roster.push({
+                  name: m.name,
+                  studentId: m.studentId || m.rollNo || "",
+                  role: m.role || "Member",
+                  isLead: false,
+                  certificateId: m.certificateId || `AIV-${(found.id || "").slice(-4).toUpperCase()}-M${idx + 1}`,
+                  email: m.email || "",
+                });
+              }
+            });
+          }
+        } else if (qName) {
+          roster = [{
+            name: qName,
+            studentId: searchParams.get("studentId") || "",
+            role: searchParams.get("role") || "Participant",
+            isLead: true,
+            certificateId: qId,
+            email: searchParams.get("email") || "",
+          }];
+        }
+
+        setTeamMembers(roster);
+
+        // Find active index
+        let matchedIdx = 0;
+        if (roster.length > 0) {
+          const idxByCert = roster.findIndex(m => m.certificateId === certificateId);
+          if (idxByCert >= 0) {
+            matchedIdx = idxByCert;
+          } else if (qName) {
+            const idxByName = roster.findIndex(m => m.name.toLowerCase() === qName.toLowerCase());
+            if (idxByName >= 0) matchedIdx = idxByName;
+          }
+        }
+        setActiveMemberIndex(matchedIdx);
+        const activeMember = roster[matchedIdx] || roster[0];
+
+        if (qName && qEvent && !found) {
           // If we have event info in URL, also check if event doc has saved custom template
           let resolvedTemplateUrl = qTemplateUrl;
           let eventCustomCfg: any = null;
@@ -128,13 +216,13 @@ const CertificateViewPage: React.FC = () => {
           }
 
           setCertData({
-            id: qId,
-            recipientName: qName,
-            studentId: searchParams.get("studentId") || "",
-            email: searchParams.get("email") || "",
+            id: activeMember ? activeMember.certificateId : qId,
+            recipientName: activeMember ? activeMember.name : qName,
+            studentId: activeMember?.studentId || searchParams.get("studentId") || "",
+            email: activeMember?.email || searchParams.get("email") || "",
             eventTitle: qEvent,
             groupName: searchParams.get("team") || "",
-            role: searchParams.get("role") || "Participant",
+            role: activeMember?.role || searchParams.get("role") || "Participant",
             certificateType: qType || "Certificate of Participation",
             issueDate: qDate || new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }),
             signatory1Name: searchParams.get("sig1Name") || "Dr. Faculty Coordinator",
@@ -171,32 +259,20 @@ const CertificateViewPage: React.FC = () => {
           return;
         }
 
-        // 2. Fetch from registrations
-        const registrations = await fetchRegistrations();
-        const found = (registrations || []).find(
-          (r: any) =>
-            r.certificateId === certificateId ||
-            (r.id || r._id) === certificateId ||
-            r.ticketCode === certificateId
-        );
-
         if (found) {
-          const matchedMember = (found.members || []).find(
-            (m: any) => m.certificateId === certificateId || (m.studentId && m.studentId === searchParams.get("roll"))
-          );
+          const currentPerson = activeMember || roster[0];
+          const recipientName = currentPerson ? currentPerson.name : (found.fullName || found.teamLeadName || found.name || "Participant");
+          const studentId = currentPerson ? currentPerson.studentId : (found.teamLeadStudentId || found.studentId || "");
+          const email = currentPerson ? currentPerson.email : (found.teamLeadPersonalEmail || found.userEmail || found.email || "");
 
-          const recipientName = matchedMember ? matchedMember.name : (found.fullName || found.teamLeadName || found.name || "Participant");
-          const studentId = matchedMember ? matchedMember.studentId : (found.teamLeadStudentId || found.studentId || "");
-          const email = matchedMember ? matchedMember.email : (found.teamLeadPersonalEmail || found.userEmail || found.email || "");
-
-          // Attempt to fetch event details for exact title/date & certificateConfig
-          let eventTitle = found.eventTitle || "AI Verse Technical Event";
+          let eventTitle = found.eventTitle || qEvent || "AI Verse Technical Event";
           let eventDate = "";
           let eventCustomCfg: any = null;
-          if (found.eventId) {
+          const targetEvId = found.eventId || searchParams.get("eventId");
+          if (targetEvId) {
             try {
               const events = await fetchEvents();
-              const ev = (events || []).find((e: any) => (e.id || e._id) === found.eventId);
+              const ev = (events || []).find((e: any) => (e.id || e._id) === targetEvId);
               if (ev) {
                 eventTitle = ev.title || eventTitle;
                 eventDate = ev.date || "";
@@ -210,27 +286,27 @@ const CertificateViewPage: React.FC = () => {
           }
 
           setCertData({
-            id: found.certificateId || certificateId || `AIV-${found.id?.slice(-8).toUpperCase()}`,
+            id: currentPerson?.certificateId || found.certificateId || certificateId || `AIV-${found.id?.slice(-8).toUpperCase()}`,
             recipientName,
-            studentId,
-            email,
+            studentId: studentId || "",
+            email: email || "",
             eventTitle,
             eventId: found.eventId,
-            groupName: found.groupName && found.groupName !== "Individual RSVP" ? found.groupName : "",
-            role: matchedMember ? (matchedMember.role || "Member") : "Team Lead",
-            certificateType: found.certificateType || "Certificate of Participation",
+            groupName: found.groupName && found.groupName !== "Individual RSVP" ? found.groupName : (searchParams.get("team") || ""),
+            role: currentPerson?.role || (currentPerson?.isLead ? "Team Lead" : "Member"),
+            certificateType: found.certificateType || qType || "Certificate of Participation",
             issueDate: found.certificateIssuedAt
               ? new Date(found.certificateIssuedAt).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })
-              : (eventDate || new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })),
-            signatory1Name: found.certificateSig1Name || eventCustomCfg?.signatory1Name || "Dr. Faculty Coordinator",
-            signatory1Title: found.certificateSig1Title || eventCustomCfg?.signatory1Title || "Convener, AI Verse",
-            signatory2Name: found.certificateSig2Name || eventCustomCfg?.signatory2Name || "Head of Department",
-            signatory2Title: found.certificateSig2Title || eventCustomCfg?.signatory2Title || "Department of CSE",
-            collegeName: found.college || eventCustomCfg?.collegeName || "Vishnu Institute of Technology (Autonomous), Bhimavaram",
-            departmentName: eventCustomCfg?.departmentName || "Department of Computer Science & Engineering",
-            citationText: found.certificateCitation || eventCustomCfg?.customMessage || "",
+              : (qDate || eventDate || new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" })),
+            signatory1Name: found.certificateSig1Name || eventCustomCfg?.signatory1Name || searchParams.get("sig1Name") || "Dr. Faculty Coordinator",
+            signatory1Title: found.certificateSig1Title || eventCustomCfg?.signatory1Title || searchParams.get("sig1Title") || "Convener, AI Verse",
+            signatory2Name: found.certificateSig2Name || eventCustomCfg?.signatory2Name || searchParams.get("sig2Name") || "Head of Department",
+            signatory2Title: found.certificateSig2Title || eventCustomCfg?.signatory2Title || searchParams.get("sig2Title") || "Department of CSE",
+            collegeName: found.college || eventCustomCfg?.collegeName || qCollege || "Vishnu Institute of Technology (Autonomous), Bhimavaram",
+            departmentName: eventCustomCfg?.departmentName || searchParams.get("dept") || "Department of Computer Science & Engineering",
+            citationText: found.certificateCitation || eventCustomCfg?.customMessage || searchParams.get("citation") || "",
             isValid: true,
-            templateMode: found.certificateTemplateMode || eventCustomCfg?.templateMode || qMode || "builtin",
+            templateMode: found.certificateTemplateMode || eventCustomCfg?.templateMode || qMode || (eventCustomCfg?.customTemplateUrl || qTemplateUrl ? "custom" : "builtin"),
             customTemplateUrl: eventCustomCfg?.customTemplateUrl || qTemplateUrl,
             namePosY: found.certificateNamePosY ?? eventCustomCfg?.namePosY ?? qNameY ?? 38,
             nameFontSize: found.certificateNameFontSize ?? eventCustomCfg?.nameFontSize ?? qNameSize ?? 64,
@@ -256,22 +332,22 @@ const CertificateViewPage: React.FC = () => {
           // If not found in DB, provide fallback verified credential record based on the ID
           setCertData({
             id: certificateId || "AIV-CERT-VERIFIED",
-            recipientName: "Distinguished Participant",
-            studentId: "",
-            email: "",
-            eventTitle: "AI Verse Hackathon 2026",
-            groupName: "",
-            role: "Participant",
-            certificateType: "Certificate of Participation",
-            issueDate: new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }),
-            signatory1Name: "Faculty Coordinator",
-            signatory1Title: "Convener, AI Verse",
-            signatory2Name: "Head of Department",
-            signatory2Title: "Department of CSE",
-            collegeName: "Vishnu Institute of Technology (Autonomous), Bhimavaram",
-            departmentName: "Department of Computer Science & Engineering",
+            recipientName: qName || "Distinguished Participant",
+            studentId: searchParams.get("studentId") || "",
+            email: searchParams.get("email") || "",
+            eventTitle: qEvent || "AI Verse Hackathon 2026",
+            groupName: searchParams.get("team") || "",
+            role: searchParams.get("role") || "Participant",
+            certificateType: qType || "Certificate of Participation",
+            issueDate: qDate || new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" }),
+            signatory1Name: searchParams.get("sig1Name") || "Faculty Coordinator",
+            signatory1Title: searchParams.get("sig1Title") || "Convener, AI Verse",
+            signatory2Name: searchParams.get("sig2Name") || "Head of Department",
+            signatory2Title: searchParams.get("sig2Title") || "Department of CSE",
+            collegeName: qCollege || "Vishnu Institute of Technology (Autonomous), Bhimavaram",
+            departmentName: searchParams.get("dept") || "Department of Computer Science & Engineering",
             isValid: true,
-            templateMode: "builtin",
+            templateMode: qMode || "builtin",
             namePosY: 38,
             nameFontSize: 64,
             nameColor: "#1E3A8A",
@@ -303,10 +379,27 @@ const CertificateViewPage: React.FC = () => {
     loadCertificate();
   }, [certificateId, searchParams]);
 
+  const handleSelectTeamMember = (index: number) => {
+    if (!teamMembers[index] || !certData) return;
+    setActiveMemberIndex(index);
+    const member = teamMembers[index];
+    setCertData(prev => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        id: member.certificateId,
+        recipientName: member.name,
+        studentId: member.studentId || "",
+        role: member.role || (member.isLead ? "Team Lead" : "Member"),
+        email: member.email || prev.email,
+      };
+    });
+  };
+
   const handleCopyLink = () => {
     const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
     const linkToCopy = isLocal
-      ? `https://aiversevitb.in/certificate/${certificateId || ""}${window.location.search}`
+      ? `https://aiversevitb.in/certificate/${certData?.id || certificateId || ""}${window.location.search}`
       : window.location.href;
     navigator.clipboard.writeText(linkToCopy);
     setCopied(true);
@@ -317,295 +410,300 @@ const CertificateViewPage: React.FC = () => {
     window.print();
   };
 
+  // Shared Canvas Renderer for high-DPI export
+  const renderCertificateCanvas = async (data: CertificateData): Promise<HTMLCanvasElement | null> => {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return null;
+
+    const W = 2000;
+    const H = 1414;
+    canvas.width = W;
+    canvas.height = H;
+
+    if (data.templateMode === "custom" && data.customTemplateUrl) {
+      try {
+        const bgImg = new Image();
+        bgImg.crossOrigin = "anonymous";
+        await new Promise((resolve, reject) => {
+          bgImg.onload = resolve;
+          bgImg.onerror = reject;
+          bgImg.src = data.customTemplateUrl!;
+        });
+        ctx.drawImage(bgImg, 0, 0, W, H);
+      } catch (imgErr) {
+        console.warn("Could not load custom template background, rendering fallback:", imgErr);
+        ctx.fillStyle = "#FFFFFF";
+        ctx.fillRect(0, 0, W, H);
+      }
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      // Draw Participant Name
+      const nameY = (H * (data.namePosY ?? 38)) / 100;
+      const nameSize = data.nameFontSize ?? 64;
+      ctx.fillStyle = data.nameColor || "#1E3A8A";
+      ctx.font = `bold ${nameSize}px Georgia, Cambria, 'Times New Roman', serif`;
+      ctx.fillText(data.recipientName, W / 2, nameY);
+
+      // Draw Roll No / Student ID
+      if (data.showRollNo !== false && data.studentId) {
+        const rollY = (H * (data.rollPosY ?? 45)) / 100;
+        const rollSize = data.rollFontSize ?? 20;
+        ctx.fillStyle = data.rollColor || "#475569";
+        ctx.font = `bold ${rollSize}px -apple-system, BlinkMacSystemFont, monospace`;
+        ctx.fillText(`Roll: ${data.studentId}`, W / 2, rollY);
+      }
+
+      // Draw Team Name
+      if (data.showTeamName !== false && data.groupName) {
+        const teamY = (H * (data.teamPosY ?? 53)) / 100;
+        const teamSize = data.teamFontSize ?? 32;
+        ctx.fillStyle = data.teamColor || "#1E3A8A";
+        ctx.font = `bold ${teamSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
+        ctx.fillText(data.groupName, W / 2, teamY);
+      }
+
+      // Verification Footer
+      if (data.showQrCode) {
+        ctx.fillStyle = "#64748B";
+        ctx.font = "bold 16px monospace";
+        ctx.fillText(`Certificate ID: ${data.id}   •   Issue Date: ${data.issueDate}   •   Verify at: aiversevitb.in/certificate/${data.id}`, W / 2, H - 35);
+      }
+    } else {
+      ctx.fillStyle = "#FFFFFF";
+      ctx.fillRect(0, 0, W, H);
+
+      const bgGrad = ctx.createRadialGradient(W / 2, H / 2, 50, W / 2, H / 2, W / 1.2);
+      bgGrad.addColorStop(0, "#FFFFFF");
+      bgGrad.addColorStop(0.7, "#FAFCFF");
+      bgGrad.addColorStop(1, "#EFF6FF");
+      ctx.fillStyle = bgGrad;
+      ctx.fillRect(0, 0, W, H);
+
+      // Borders & Corner Ornaments
+      if (data.showBorders !== false) {
+        ctx.strokeStyle = "#1E3A8A";
+        ctx.lineWidth = 14;
+        ctx.strokeRect(40, 40, W - 80, H - 80);
+
+        ctx.strokeStyle = "#D97706";
+        ctx.lineWidth = 4;
+        ctx.strokeRect(60, 60, W - 120, H - 120);
+
+        ctx.strokeStyle = "#E2E8F0";
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(70, 70, W - 140, H - 140);
+
+        const drawCorner = (x: number, y: number, angle: number) => {
+          ctx.save();
+          ctx.translate(x, y);
+          ctx.rotate((angle * Math.PI) / 180);
+          ctx.fillStyle = "#D97706";
+          ctx.fillRect(0, 0, 36, 6);
+          ctx.fillRect(0, 0, 6, 36);
+          ctx.beginPath();
+          ctx.arc(8, 8, 4, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.restore();
+        };
+        drawCorner(75, 75, 0);
+        drawCorner(W - 75, 75, 90);
+        drawCorner(W - 75, H - 75, 180);
+        drawCorner(75, H - 75, 270);
+      }
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      // College Header
+      if (data.showCollegeHeader !== false) {
+        ctx.fillStyle = "#3B82F6";
+        ctx.font = "bold 24px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        ctx.fillText("✦ AI VERSE • VISHNU INSTITUTE OF TECHNOLOGY ✦", W / 2, 140);
+
+        ctx.fillStyle = "#475569";
+        ctx.font = "600 20px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        ctx.fillText(data.collegeName || "Vishnu Institute of Technology (Autonomous), Bhimavaram", W / 2, 180);
+
+        ctx.fillStyle = "#64748B";
+        ctx.font = "500 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        ctx.fillText(data.departmentName || "Department of Computer Science & Engineering", W / 2, 215);
+
+        ctx.strokeStyle = "#CBD5E1";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(W / 2 - 240, 255);
+        ctx.lineTo(W / 2 - 30, 255);
+        ctx.moveTo(W / 2 + 30, 255);
+        ctx.lineTo(W / 2 + 240, 255);
+        ctx.stroke();
+
+        ctx.fillStyle = "#D97706";
+        ctx.beginPath();
+        ctx.moveTo(W / 2, 245);
+        ctx.lineTo(W / 2 + 10, 255);
+        ctx.lineTo(W / 2, 265);
+        ctx.lineTo(W / 2 - 10, 255);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      // Title
+      if (data.certificateType) {
+        ctx.fillStyle = "#1E3A8A";
+        ctx.font = "bold 56px Georgia, Cambria, 'Times New Roman', serif";
+        ctx.fillText(data.certificateType || "Certificate of Participation", W / 2, 335);
+
+        ctx.fillStyle = "#64748B";
+        ctx.font = "italic 26px Georgia, Cambria, serif";
+        ctx.fillText("This is proudly presented to", W / 2, 415);
+      }
+
+      // Recipient Name
+      const namePxY = ((data.namePosY ?? 50) / 100) * H;
+      const nameFontSize = data.nameFontSize ?? 64;
+      ctx.fillStyle = data.nameColor || "#0F172A";
+      ctx.font = `bold ${nameFontSize}px Georgia, Cambria, 'Times New Roman', serif`;
+      ctx.fillText(data.recipientName, W / 2, namePxY);
+
+      // Name Underline Accent
+      const nameWidth = ctx.measureText(data.recipientName).width;
+      ctx.strokeStyle = "#3B82F6";
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(W / 2 - nameWidth / 2 - 20, namePxY + nameFontSize * 0.62);
+      ctx.lineTo(W / 2 + nameWidth / 2 + 20, namePxY + nameFontSize * 0.62);
+      ctx.stroke();
+
+      // Student ID / Roll / Team
+      let subDetail = "";
+      if (data.studentId) subDetail += `Roll / Student ID: ${data.studentId}`;
+      if (data.groupName) subDetail += (subDetail ? "  •  " : "") + `Team: ${data.groupName}`;
+      if (subDetail) {
+        ctx.fillStyle = "#475569";
+        ctx.font = "bold 22px -apple-system, BlinkMacSystemFont, monospace";
+        ctx.fillText(subDetail, W / 2, namePxY + nameFontSize * 0.62 + 38);
+      }
+
+      // Citation / Body Text
+      const defaultCitation = `for outstanding and active participation in "${data.eventTitle}" organized by AI Verse Club, demonstrating commendable innovation, engineering creativity, and problem-solving excellence.`;
+      const citationText = data.citationText || defaultCitation;
+      const citationPxY = ((data.citationPosY ?? 62) / 100) * H;
+      const citationFontSize = data.citationFontSize ?? 24;
+
+      ctx.fillStyle = data.citationColor || "#334155";
+      ctx.font = `500 ${citationFontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
+      const maxTextWidth = 1350;
+      const words = citationText.split(" ");
+      let currentLine = "";
+      const lines = [];
+      for (let i = 0; i < words.length; i++) {
+        const testLine = currentLine + words[i] + " ";
+        const testWidth = ctx.measureText(testLine).width;
+        if (testWidth > maxTextWidth && i > 0) {
+          lines.push(currentLine.trim());
+          currentLine = words[i] + " ";
+        } else {
+          currentLine = testLine;
+        }
+      }
+      lines.push(currentLine.trim());
+
+      const lineHeight = citationFontSize * 1.55;
+      lines.forEach((l, idx) => {
+        ctx.fillText(l, W / 2, citationPxY + idx * lineHeight);
+      });
+
+      // Seal Badge
+      if (data.showSeal !== false) {
+        const sealX = 320;
+        const sealY = 1100;
+        ctx.save();
+        ctx.fillStyle = "#F59E0B";
+        ctx.beginPath();
+        ctx.arc(sealX, sealY, 65, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.strokeStyle = "#B45309";
+        ctx.lineWidth = 4;
+        ctx.stroke();
+
+        ctx.fillStyle = "#D97706";
+        ctx.beginPath();
+        ctx.arc(sealX, sealY, 52, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.fillStyle = "#FFFFFF";
+        ctx.font = "bold 13px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText("AI VERSE", sealX, sealY - 14);
+        ctx.font = "bold 16px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText("★ OFFICIAL ★", sealX, sealY + 6);
+        ctx.font = "bold 11px -apple-system, BlinkMacSystemFont, sans-serif";
+        ctx.fillText("VERIFIED", sealX, sealY + 24);
+        ctx.restore();
+      }
+
+      // Signatures
+      if (data.showSignatures !== false) {
+        const sig1X = W / 2 - 120;
+        const sigY = 1120;
+        ctx.strokeStyle = "#475569";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(sig1X - 160, sigY);
+        ctx.lineTo(sig1X + 160, sigY);
+        ctx.stroke();
+
+        ctx.fillStyle = "#0F172A";
+        ctx.font = "bold 24px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        ctx.fillText(data.signatory1Name, sig1X, sigY + 36);
+
+        ctx.fillStyle = "#64748B";
+        ctx.font = "500 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        ctx.fillText(data.signatory1Title, sig1X, sigY + 68);
+
+        const sig2X = W - 380;
+        ctx.strokeStyle = "#475569";
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(sig2X - 160, sigY);
+        ctx.lineTo(sig2X + 160, sigY);
+        ctx.stroke();
+
+        ctx.fillStyle = "#0F172A";
+        ctx.font = "bold 24px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        ctx.fillText(data.signatory2Name, sig2X, sigY + 36);
+
+        ctx.fillStyle = "#64748B";
+        ctx.font = "500 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
+        ctx.fillText(data.signatory2Title, sig2X, sigY + 68);
+      }
+
+      // Footer
+      if (data.showQrCode !== false) {
+        ctx.textAlign = "center";
+        ctx.fillStyle = "#64748B";
+        ctx.font = "bold 16px -apple-system, BlinkMacSystemFont, monospace";
+        ctx.fillText(`Certificate ID: ${data.id}   •   Issue Date: ${data.issueDate}   •   Verify at: aiversevitb.in/certificate/${data.id}`, W / 2, H - 75);
+      }
+    }
+
+    return canvas;
+  };
+
   const handleDownloadPNG = async () => {
     if (!certData) return;
     setIsExporting(true);
 
     try {
-      const canvas = document.createElement("canvas");
-      const ctx = canvas.getContext("2d");
-      if (!ctx) {
+      const canvas = await renderCertificateCanvas(certData);
+      if (!canvas) {
         setIsExporting(false);
         return;
       }
 
-      // High-DPI Canvas Setup (2000 x 1414 standard A4 landscape)
-      const W = 2000;
-      const H = 1414;
-      canvas.width = W;
-      canvas.height = H;
-
-      // 1. Background (Custom image or built-in vector gradient)
-      if (certData.templateMode === "custom" && certData.customTemplateUrl) {
-        try {
-          const bgImg = new Image();
-          bgImg.crossOrigin = "anonymous";
-          await new Promise((resolve, reject) => {
-            bgImg.onload = resolve;
-            bgImg.onerror = reject;
-            bgImg.src = certData.customTemplateUrl!;
-          });
-          ctx.drawImage(bgImg, 0, 0, W, H);
-        } catch (imgErr) {
-          console.warn("Could not load custom template background, rendering vector fallback:", imgErr);
-          ctx.fillStyle = "#FFFFFF";
-          ctx.fillRect(0, 0, W, H);
-        }
-
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-
-        // Draw Participant Name
-        const nameY = (H * (certData.namePosY ?? 38)) / 100;
-        const nameSize = certData.nameFontSize ?? 64;
-        ctx.fillStyle = certData.nameColor || "#1E3A8A";
-        ctx.font = `bold ${nameSize}px Georgia, Cambria, 'Times New Roman', serif`;
-        ctx.fillText(certData.recipientName, W / 2, nameY);
-
-        // Draw Roll No / Student ID (if enabled)
-        if (certData.showRollNo !== false && certData.studentId) {
-          const rollY = (H * (certData.rollPosY ?? 45)) / 100;
-          const rollSize = certData.rollFontSize ?? 20;
-          ctx.fillStyle = certData.rollColor || "#475569";
-          ctx.font = `bold ${rollSize}px -apple-system, BlinkMacSystemFont, monospace`;
-          ctx.fillText(`Roll: ${certData.studentId}`, W / 2, rollY);
-        }
-
-        // Draw Team Name (if enabled)
-        if (certData.showTeamName !== false && certData.groupName) {
-          const teamY = (H * (certData.teamPosY ?? 53)) / 100;
-          const teamSize = certData.teamFontSize ?? 32;
-          ctx.fillStyle = certData.teamColor || "#1E3A8A";
-          ctx.font = `bold ${teamSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
-          ctx.fillText(certData.groupName, W / 2, teamY);
-        }
-
-        // Optional Verification Footer
-        if (certData.showQrCode) {
-          ctx.fillStyle = "#64748B";
-          ctx.font = "bold 16px monospace";
-          ctx.fillText(`Certificate ID: ${certData.id}   •   Issue Date: ${certData.issueDate}   •   Verify at: aiversevitb.in/certificate/${certData.id}`, W / 2, H - 35);
-        }
-      } else {
-        ctx.fillStyle = "#FFFFFF";
-        ctx.fillRect(0, 0, W, H);
-
-        const bgGrad = ctx.createRadialGradient(W / 2, H / 2, 50, W / 2, H / 2, W / 1.2);
-        bgGrad.addColorStop(0, "#FFFFFF");
-        bgGrad.addColorStop(0.7, "#FAFCFF");
-        bgGrad.addColorStop(1, "#EFF6FF");
-        ctx.fillStyle = bgGrad;
-        ctx.fillRect(0, 0, W, H);
-
-        // 2. Borders & Corner Ornaments
-        if (certData.showBorders !== false) {
-          ctx.strokeStyle = "#1E3A8A";
-          ctx.lineWidth = 14;
-          ctx.strokeRect(40, 40, W - 80, H - 80);
-
-          ctx.strokeStyle = "#D97706";
-          ctx.lineWidth = 4;
-          ctx.strokeRect(60, 60, W - 120, H - 120);
-
-          ctx.strokeStyle = "#E2E8F0";
-          ctx.lineWidth = 1.5;
-          ctx.strokeRect(70, 70, W - 140, H - 140);
-
-          const drawCorner = (x: number, y: number, angle: number) => {
-            ctx.save();
-            ctx.translate(x, y);
-            ctx.rotate((angle * Math.PI) / 180);
-            ctx.fillStyle = "#D97706";
-            ctx.fillRect(0, 0, 36, 6);
-            ctx.fillRect(0, 0, 6, 36);
-            ctx.beginPath();
-            ctx.arc(8, 8, 4, 0, Math.PI * 2);
-            ctx.fill();
-            ctx.restore();
-          };
-          drawCorner(75, 75, 0);
-          drawCorner(W - 75, 75, 90);
-          drawCorner(W - 75, H - 75, 180);
-          drawCorner(75, H - 75, 270);
-        }
-
-        ctx.textAlign = "center";
-        ctx.textBaseline = "middle";
-
-        // 3. College Header
-        if (certData.showCollegeHeader !== false) {
-          ctx.fillStyle = "#3B82F6";
-          ctx.font = "bold 24px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-          ctx.fillText("✦ AI VERSE • VISHNU INSTITUTE OF TECHNOLOGY ✦", W / 2, 140);
-
-          ctx.fillStyle = "#475569";
-          ctx.font = "600 20px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-          ctx.fillText(certData.collegeName || "Vishnu Institute of Technology (Autonomous), Bhimavaram", W / 2, 180);
-
-          ctx.fillStyle = "#64748B";
-          ctx.font = "500 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-          ctx.fillText(certData.departmentName || "Department of Computer Science & Engineering", W / 2, 215);
-
-          ctx.strokeStyle = "#CBD5E1";
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(W / 2 - 240, 255);
-          ctx.lineTo(W / 2 - 30, 255);
-          ctx.moveTo(W / 2 + 30, 255);
-          ctx.lineTo(W / 2 + 240, 255);
-          ctx.stroke();
-
-          ctx.fillStyle = "#D97706";
-          ctx.beginPath();
-          ctx.moveTo(W / 2, 245);
-          ctx.lineTo(W / 2 + 10, 255);
-          ctx.lineTo(W / 2, 265);
-          ctx.lineTo(W / 2 - 10, 255);
-          ctx.closePath();
-          ctx.fill();
-        }
-
-        // 4. Main Certificate Title
-        if (certData.certificateType) {
-          ctx.fillStyle = "#1E3A8A";
-          ctx.font = "bold 56px Georgia, Cambria, 'Times New Roman', serif";
-          ctx.fillText(certData.certificateType || "Certificate of Participation", W / 2, 335);
-
-          ctx.fillStyle = "#64748B";
-          ctx.font = "italic 26px Georgia, Cambria, serif";
-          ctx.fillText("This is proudly presented to", W / 2, 415);
-        }
-
-        // 5. Recipient Name
-        const namePxY = ((certData.namePosY ?? 50) / 100) * H;
-        const nameFontSize = certData.nameFontSize ?? 64;
-        ctx.fillStyle = certData.nameColor || "#0F172A";
-        ctx.font = `bold ${nameFontSize}px Georgia, Cambria, 'Times New Roman', serif`;
-        ctx.fillText(certData.recipientName, W / 2, namePxY);
-
-        // Name Underline Accent
-        const nameWidth = ctx.measureText(certData.recipientName).width;
-        ctx.strokeStyle = "#3B82F6";
-        ctx.lineWidth = 4;
-        ctx.beginPath();
-        ctx.moveTo(W / 2 - nameWidth / 2 - 20, namePxY + nameFontSize * 0.62);
-        ctx.lineTo(W / 2 + nameWidth / 2 + 20, namePxY + nameFontSize * 0.62);
-        ctx.stroke();
-
-        // Student ID / Roll / Team
-        let subDetail = "";
-        if (certData.studentId) subDetail += `Roll / Student ID: ${certData.studentId}`;
-        if (certData.groupName) subDetail += (subDetail ? "  •  " : "") + `Team: ${certData.groupName}`;
-        if (subDetail) {
-          ctx.fillStyle = "#475569";
-          ctx.font = "bold 22px -apple-system, BlinkMacSystemFont, monospace";
-          ctx.fillText(subDetail, W / 2, namePxY + nameFontSize * 0.62 + 38);
-        }
-
-        // 6. Citation / Body Text
-        const defaultCitation = `for outstanding and active participation in "${certData.eventTitle}" organized by AI Verse Club, demonstrating commendable innovation, engineering creativity, and problem-solving excellence.`;
-        const citationText = certData.citationText || defaultCitation;
-        const citationPxY = ((certData.citationPosY ?? 62) / 100) * H;
-        const citationFontSize = certData.citationFontSize ?? 24;
-
-        ctx.fillStyle = certData.citationColor || "#334155";
-        ctx.font = `500 ${citationFontSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
-        const maxTextWidth = 1350;
-        const words = citationText.split(" ");
-        let currentLine = "";
-        const lines = [];
-        for (let i = 0; i < words.length; i++) {
-          const testLine = currentLine + words[i] + " ";
-          const testWidth = ctx.measureText(testLine).width;
-          if (testWidth > maxTextWidth && i > 0) {
-            lines.push(currentLine.trim());
-            currentLine = words[i] + " ";
-          } else {
-            currentLine = testLine;
-          }
-        }
-        lines.push(currentLine.trim());
-
-        const lineHeight = citationFontSize * 1.55;
-        lines.forEach((l, idx) => {
-          ctx.fillText(l, W / 2, citationPxY + idx * lineHeight);
-        });
-
-        // 7. Official Seal Badge
-        if (certData.showSeal !== false) {
-          const sealX = 320;
-          const sealY = 1100;
-          ctx.save();
-          ctx.fillStyle = "#F59E0B";
-          ctx.beginPath();
-          ctx.arc(sealX, sealY, 65, 0, Math.PI * 2);
-          ctx.fill();
-
-          ctx.strokeStyle = "#B45309";
-          ctx.lineWidth = 4;
-          ctx.stroke();
-
-          ctx.fillStyle = "#D97706";
-          ctx.beginPath();
-          ctx.arc(sealX, sealY, 52, 0, Math.PI * 2);
-          ctx.fill();
-
-          ctx.fillStyle = "#FFFFFF";
-          ctx.font = "bold 13px -apple-system, BlinkMacSystemFont, sans-serif";
-          ctx.fillText("AI VERSE", sealX, sealY - 14);
-          ctx.font = "bold 16px -apple-system, BlinkMacSystemFont, sans-serif";
-          ctx.fillText("★ OFFICIAL ★", sealX, sealY + 6);
-          ctx.font = "bold 11px -apple-system, BlinkMacSystemFont, sans-serif";
-          ctx.fillText("VERIFIED", sealX, sealY + 24);
-          ctx.restore();
-        }
-
-        // 8. Signatures
-        if (certData.showSignatures !== false) {
-          const sig1X = W / 2 - 120;
-          const sigY = 1120;
-          ctx.strokeStyle = "#475569";
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(sig1X - 160, sigY);
-          ctx.lineTo(sig1X + 160, sigY);
-          ctx.stroke();
-
-          ctx.fillStyle = "#0F172A";
-          ctx.font = "bold 24px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-          ctx.fillText(certData.signatory1Name, sig1X, sigY + 36);
-
-          ctx.fillStyle = "#64748B";
-          ctx.font = "500 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-          ctx.fillText(certData.signatory1Title, sig1X, sigY + 68);
-
-          const sig2X = W - 380;
-          ctx.strokeStyle = "#475569";
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.moveTo(sig2X - 160, sigY);
-          ctx.lineTo(sig2X + 160, sigY);
-          ctx.stroke();
-
-          ctx.fillStyle = "#0F172A";
-          ctx.font = "bold 24px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-          ctx.fillText(certData.signatory2Name, sig2X, sigY + 36);
-
-          ctx.fillStyle = "#64748B";
-          ctx.font = "500 18px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif";
-          ctx.fillText(certData.signatory2Title, sig2X, sigY + 68);
-        }
-
-        // 9. Footer & Verification Code
-        if (certData.showQrCode !== false) {
-          ctx.textAlign = "center";
-          ctx.fillStyle = "#64748B";
-          ctx.font = "bold 16px -apple-system, BlinkMacSystemFont, monospace";
-          ctx.fillText(`Certificate ID: ${certData.id}   •   Issue Date: ${certData.issueDate}   •   Verify at: aiversevitb.in/certificate/${certData.id}`, W / 2, H - 75);
-        }
-      }
-
-      // Trigger Download
       const link = document.createElement("a");
       link.download = `Certificate_${(certData.recipientName || "Participant").replace(/[^a-zA-Z0-9]/g, "_")}_${certData.id}.png`;
       link.href = canvas.toDataURL("image/png");
@@ -617,6 +715,54 @@ const CertificateViewPage: React.FC = () => {
       alert("Failed to export certificate image.");
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  const handleDownloadAllTeamCertificates = async () => {
+    if (!certData || teamMembers.length === 0) return;
+    setIsExportingAll(true);
+    setDownloadProgress({ current: 0, total: teamMembers.length, currentName: "" });
+
+    try {
+      for (let i = 0; i < teamMembers.length; i++) {
+        const member = teamMembers[i];
+        setDownloadProgress({
+          current: i + 1,
+          total: teamMembers.length,
+          currentName: member.name,
+        });
+
+        // Clone cert data with this member's specific details
+        const memberCertData: CertificateData = {
+          ...certData,
+          id: member.certificateId,
+          recipientName: member.name,
+          studentId: member.studentId || "",
+          role: member.role || (member.isLead ? "Team Lead" : "Member"),
+          email: member.email || certData.email,
+        };
+
+        const canvas = await renderCertificateCanvas(memberCertData);
+        if (canvas) {
+          const link = document.createElement("a");
+          link.download = `Certificate_${(member.name || "Member").replace(/[^a-zA-Z0-9]/g, "_")}_${member.certificateId}.png`;
+          link.href = canvas.toDataURL("image/png");
+          document.body.appendChild(link);
+          link.click();
+          document.body.removeChild(link);
+        }
+
+        // Delay between consecutive downloads so browser doesn't block multi-downloads
+        if (i < teamMembers.length - 1) {
+          await new Promise(r => setTimeout(r, 400));
+        }
+      }
+    } catch (err) {
+      console.error("Error batch downloading team certificates:", err);
+      alert("Encountered an issue during batch download.");
+    } finally {
+      setIsExportingAll(false);
+      setDownloadProgress(null);
     }
   };
 
@@ -693,6 +839,20 @@ const CertificateViewPage: React.FC = () => {
 
         {/* Action Buttons */}
         <div className="flex items-center gap-2.5">
+          {teamMembers.length > 1 && (
+            <button
+              onClick={handleDownloadAllTeamCertificates}
+              disabled={isExportingAll}
+              className="px-3.5 py-2 bg-gradient-to-r from-amber-500 via-amber-600 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 active:scale-95 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-amber-500/20 cursor-pointer border border-amber-400/30 disabled:opacity-50"
+              title="Download all certificates for this team"
+            >
+              {isExportingAll ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Award className="w-3.5 h-3.5 text-amber-200" />}
+              <span className="hidden md:inline">
+                {isExportingAll ? `Downloading (${downloadProgress?.current}/${downloadProgress?.total})...` : `Download All (${teamMembers.length})`}
+              </span>
+            </button>
+          )}
+
           <button
             onClick={handleCopyLink}
             className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 active:scale-95 text-slate-200 font-bold rounded-xl text-xs flex items-center gap-2 transition-all border border-slate-700/80 cursor-pointer"
@@ -713,7 +873,7 @@ const CertificateViewPage: React.FC = () => {
 
           <button
             onClick={handleDownloadPNG}
-            disabled={isExporting}
+            disabled={isExporting || isExportingAll}
             className="px-4 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 active:scale-95 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all shadow-md shadow-blue-500/20 cursor-pointer border border-blue-400/20 disabled:opacity-50"
           >
             {isExporting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Download className="w-3.5 h-3.5" />}
@@ -723,7 +883,105 @@ const CertificateViewPage: React.FC = () => {
       </header>
 
       {/* Main Content Area */}
-      <main className="flex-1 w-full max-w-6xl mx-auto p-4 sm:p-8 space-y-8 flex flex-col items-center">
+      <main className="flex-1 w-full max-w-6xl mx-auto p-4 sm:p-8 space-y-6 flex flex-col items-center">
+
+        {/* 👥 TEAM CERTIFICATE HUB & MEMBER SWITCHER BANNER */}
+        {teamMembers.length > 1 && (
+          <div className="w-full bg-slate-900/90 border border-slate-800 rounded-3xl p-5 sm:p-6 shadow-xl space-y-4 print:hidden backdrop-blur-md text-left">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                    TEAM CERTIFICATE HUB
+                  </span>
+                  <span className="text-xs text-slate-400 font-bold">
+                    {teamMembers.length} Certificates Available
+                  </span>
+                </div>
+                <h3 className="text-base sm:text-lg font-black text-white mt-1">
+                  Team "{certData.groupName || "Roster"}"
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Select any team member below to preview their official certificate, or download all certificates in one click.
+                </p>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleDownloadAllTeamCertificates}
+                disabled={isExportingAll}
+                className="px-5 py-2.5 bg-gradient-to-r from-amber-500 via-amber-600 to-indigo-600 hover:from-amber-400 hover:to-indigo-500 active:scale-95 text-white font-black rounded-2xl text-xs flex items-center gap-2 shadow-lg shadow-amber-500/20 cursor-pointer disabled:opacity-50 transition-all border border-amber-400/30 shrink-0"
+              >
+                {isExportingAll ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Download className="w-4 h-4 text-amber-200" />
+                )}
+                <span>
+                  {isExportingAll
+                    ? `Downloading ${downloadProgress?.current} of ${downloadProgress?.total}...`
+                    : `Download All Team Certificates (${teamMembers.length})`}
+                </span>
+              </button>
+            </div>
+
+            {/* Member Selector Chips */}
+            <div className="flex items-center gap-2.5 overflow-x-auto pb-1 pt-1">
+              {teamMembers.map((member, idx) => {
+                const isActive = activeMemberIndex === idx;
+                return (
+                  <button
+                    key={member.certificateId || idx}
+                    type="button"
+                    onClick={() => handleSelectTeamMember(idx)}
+                    className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer flex items-center gap-2.5 shrink-0 border ${
+                      isActive
+                        ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white border-blue-400 shadow-md shadow-blue-500/30 scale-[1.02]"
+                        : "bg-slate-800/80 hover:bg-slate-700/80 text-slate-300 border-slate-700/70"
+                    }`}
+                  >
+                    <div className={`w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-black ${
+                      isActive ? "bg-white text-blue-700" : "bg-slate-700 text-slate-300"
+                    }`}>
+                      {idx + 1}
+                    </div>
+                    <div className="text-left">
+                      <div className="leading-tight flex items-center gap-1.5">
+                        <span>{member.name}</span>
+                        {member.isLead && (
+                          <span className={`text-[9px] px-1.5 py-0.5 rounded-full font-black uppercase tracking-wider ${
+                            isActive ? "bg-amber-400 text-slate-950" : "bg-amber-400/20 text-amber-300"
+                          }`}>
+                            LEAD
+                          </span>
+                        )}
+                      </div>
+                      {member.studentId && (
+                        <span className="text-[10px] font-mono text-slate-400 block mt-0.5">
+                          {member.studentId}
+                        </span>
+                      )}
+                    </div>
+                    {isActive && <Check className="w-3.5 h-3.5 text-white ml-1" />}
+                  </button>
+                );
+              })}
+            </div>
+
+            {/* Live Progress Banner */}
+            {isExportingAll && downloadProgress && (
+              <div className="p-3.5 bg-blue-950/90 border border-blue-800/60 rounded-2xl text-xs text-blue-200 flex items-center justify-between animate-in fade-in">
+                <div className="flex items-center gap-2.5">
+                  <Loader2 className="w-4 h-4 animate-spin text-blue-400" />
+                  <span>Generating certificate image for <strong className="text-white">{downloadProgress.currentName}</strong>...</span>
+                </div>
+                <span className="font-mono font-bold text-white">
+                  {downloadProgress.current} / {downloadProgress.total}
+                </span>
+              </div>
+            )}
+          </div>
+        )}
         
         {/* Certificate Display Canvas Container */}
         {isCustomTemplate ? (

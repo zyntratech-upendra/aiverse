@@ -43,7 +43,8 @@ const generateConfetti = (): Confetti[] =>
 export const LaunchSplash: React.FC = () => {
   const [isVisible, setIsVisible] = useState(false);
   const [isOpening, setIsOpening] = useState(false);
-  const [phase, setPhase] = useState<'idle' | 'untie' | 'split' | 'fadeout' | 'done'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'pre-countdown' | 'countdown' | 'untie' | 'split' | 'fadeout' | 'done'>('idle');
+  const [countdown, setCountdown] = useState(5);
   const [entered, setEntered] = useState(false);
   const confettiRef = useRef<Confetti[]>(generateConfetti());
 
@@ -68,16 +69,32 @@ export const LaunchSplash: React.FC = () => {
   const handleOpen = useCallback(() => {
     if (isOpening) return;
     setIsOpening(true);
-    setPhase('untie');
-    setTimeout(() => setPhase('split'), 800);
+    setPhase('pre-countdown');
+    
     setTimeout(() => {
-      setPhase('fadeout');
-      // After split animation, start fading out the whole container
-      setTimeout(() => {
-        setPhase('done');
-        setIsVisible(false);
-      }, 1800); // Increased from 1200ms to match the slower animation
-    }, 1200);
+      setPhase('countdown');
+      setCountdown(5);
+      
+      let currentCount = 5;
+      const interval = setInterval(() => {
+        currentCount -= 1;
+        if (currentCount > 0) {
+          setCountdown(currentCount);
+        } else {
+          clearInterval(interval);
+          setPhase('untie');
+          setTimeout(() => setPhase('split'), 800);
+          setTimeout(() => {
+            setPhase('fadeout');
+            // After split animation, start fading out the whole container
+            setTimeout(() => {
+              setPhase('done');
+              setIsVisible(false);
+            }, 1800);
+          }, 1200);
+        }
+      }, 1000);
+    }, 2000); // Show pre-countdown for 2 seconds
   }, [isOpening]);
 
   if (!isVisible || phase === 'done') return null;
@@ -128,6 +145,13 @@ export const LaunchSplash: React.FC = () => {
         @keyframes bgGlowMove {
           0%, 100% { transform: translate(0, 0) scale(1); }
           50% { transform: translate(30px, -20px) scale(1.1); }
+        }
+        @keyframes countPulse {
+          0% { transform: scale(0.85) translateY(10px); opacity: 0; filter: blur(4px); }
+          20% { transform: scale(1.04) translateY(0); opacity: 1; filter: blur(0px); }
+          40% { transform: scale(1); opacity: 1; }
+          80% { transform: scale(1) translateY(0); opacity: 1; filter: blur(0px); }
+          100% { transform: scale(0.92) translateY(-10px); opacity: 0; filter: blur(4px); }
         }
       `}</style>
 
@@ -226,7 +250,13 @@ export const LaunchSplash: React.FC = () => {
            style={{ pointerEvents: phase === 'split' || phase === 'fadeout' ? 'none' : 'auto' }}>
         
         {/* Horizontal Ribbons SVG (Slides away) */}
-        <div className="absolute w-[340px] md:w-[500px] pointer-events-none">
+        <div 
+          className="absolute w-[340px] md:w-[500px] pointer-events-none"
+          style={{ 
+            opacity: (phase === 'countdown' || phase === 'pre-countdown' || phase === 'fadeout') ? 0 : 1,
+            transition: 'opacity 400ms ease-out'
+          }}
+        >
           <svg width="400" height="300" viewBox="0 0 400 300" className="w-full overflow-visible drop-shadow-[0_12px_24px_rgba(59,130,246,0.15)]">
             <defs>
               <linearGradient id="ribbonH" x1="0" y1="0" x2="0" y2="1">
@@ -268,9 +298,9 @@ export const LaunchSplash: React.FC = () => {
           className="relative cursor-pointer transition-transform duration-300 hover:scale-[1.02]"
           style={{ 
             animation: phase === 'idle' ? 'pulseSoft 4s ease-in-out infinite' : 'none',
-            opacity: phase === 'fadeout' ? 0 : 1,
+            opacity: (phase === 'countdown' || phase === 'pre-countdown' || phase === 'fadeout') ? 0 : 1,
             pointerEvents: phase !== 'idle' ? 'none' : 'auto',
-            transition: 'opacity 400ms ease-out'
+            transition: 'opacity 400ms ease-out',
           }}
         >
           <svg width="400" height="300" viewBox="0 0 400 300" className="w-[340px] md:w-[500px] drop-shadow-[0_12px_24px_rgba(59,130,246,0.15)] overflow-visible">
@@ -357,10 +387,79 @@ export const LaunchSplash: React.FC = () => {
             </g>
           </svg>
         </div>
+        {/* ═══ Countdown Card (Overlaying Bow) ═══ */}
+        {(phase === 'countdown' || phase === 'pre-countdown') && (
+          <div className="absolute z-50 flex items-center justify-center transition-all duration-500 animate-in fade-in zoom-in-75 pointer-events-none">
+            
+            {/* Animated Background Rings */}
+            <div className="absolute w-[160px] h-[160px] md:w-[200px] md:h-[200px] bg-blue-500/10 rounded-full blur-[40px] animate-pulse" />
+            <div className="absolute w-[120px] h-[120px] md:w-[150px] md:h-[150px] bg-indigo-400/20 rounded-full blur-[30px]" style={{ animation: 'pulseSoft 3s ease-in-out infinite alternate' }} />
+
+            {/* Glass Panel */}
+            <div className="relative overflow-hidden rounded-[2rem] bg-white/40 backdrop-blur-xl w-[210px] h-[210px] md:w-[250px] md:h-[250px] p-5 md:p-6 flex flex-col items-center justify-between shadow-[0_20px_40px_-10px_rgba(37,99,235,0.15),inset_0_1px_0_rgba(255,255,255,1)] border border-white/60 before:absolute before:inset-0 before:bg-gradient-to-br before:from-white/40 before:to-transparent before:opacity-50">
+              
+              {/* Spinning decorative ring */}
+              <div className="absolute inset-0 pointer-events-none p-3 md:p-4">
+                  <svg className="w-full h-full animate-[spin_12s_linear_infinite] opacity-40" viewBox="0 0 100 100">
+                    <circle cx="50" cy="50" r="48" fill="none" stroke="url(#spin-grad)" strokeWidth="0.75" strokeDasharray="10 6" />
+                    <defs>
+                      <linearGradient id="spin-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor="#3B82F6" stopOpacity="1" />
+                        <stop offset="50%" stopColor="#3B82F6" stopOpacity="0" />
+                        <stop offset="100%" stopColor="#818CF8" stopOpacity="1" />
+                      </linearGradient>
+                    </defs>
+                  </svg>
+              </div>
+
+              <div className="relative z-10 flex flex-col items-center justify-between h-full w-full">
+                <h2 className="text-[10px] md:text-xs font-bold text-blue-600/80 tracking-[0.16em] uppercase flex items-center justify-center gap-1.5 whitespace-nowrap select-none">
+                  <span className="w-3 md:w-5 h-[1px] bg-blue-600/30 shrink-0"></span>
+                  <span>GOING LIVE IN</span>
+                  <span className="w-3 md:w-5 h-[1px] bg-blue-600/30 shrink-0"></span>
+                </h2>
+                
+                {phase === 'pre-countdown' ? (
+                  <div 
+                    className="flex-1 flex flex-col items-center justify-center text-lg md:text-xl font-black text-transparent bg-clip-text bg-gradient-to-b from-blue-700 via-blue-500 to-blue-300 drop-shadow-[0_4px_8px_rgba(37,99,235,0.25)] text-center px-2 leading-snug select-none"
+                    style={{ animation: 'pulseSoft 2s ease-in-out infinite' }}
+                  >
+                    <span>Countdown</span>
+                    <span>Starting...</span>
+                  </div>
+                ) : (
+                  <div className="flex-1 w-full flex items-center justify-center">
+                    <span 
+                      key={countdown} 
+                      className="font-black leading-none tracking-normal text-transparent bg-clip-text bg-gradient-to-b from-blue-700 via-blue-500 to-blue-300 drop-shadow-[0_4px_8px_rgba(37,99,235,0.25)] text-[4.5rem] md:text-[5.5rem] tabular-nums select-none flex items-center justify-center text-center"
+                      style={{ animation: 'countPulse 1s ease-in-out forwards', transformOrigin: 'center center' }}
+                    >
+                      {countdown}
+                    </span>
+                  </div>
+                )}
+
+                {/* Progress Dots */}
+                <div className="flex items-center justify-center gap-2">
+                  {[1, 2, 3, 4, 5].map((i) => (
+                    <div 
+                      key={i} 
+                      className={`w-1.5 h-1.5 rounded-full transition-all duration-500 ease-out ${
+                        phase === 'pre-countdown' ? 'bg-blue-200/50' : 
+                        ((6 - countdown) >= i ? 'bg-blue-600 scale-125 shadow-[0_0_8px_rgba(37,99,235,0.5)]' : 'bg-blue-200/50')
+                      }`} 
+                    />
+                  ))}
+                </div>
+              </div>
+
+            </div>
+          </div>
+        )}
       </div>
 
       {/* ═══ Bottom Text ═══ */}
-      <div className={`absolute bottom-8 md:bottom-12 w-full flex items-center justify-center z-50 transition-all duration-1000 delay-800 ${entered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'} ${phase === 'split' || phase === 'fadeout' ? '!opacity-0 translate-y-4' : ''}`}>
+      <div className={`absolute bottom-8 md:bottom-12 w-full flex items-center justify-center z-50 transition-all duration-1000 delay-800 ${entered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'} ${(phase === 'split' || phase === 'fadeout' || phase === 'countdown' || phase === 'pre-countdown') ? '!opacity-0 translate-y-4' : ''}`}>
         <div className="flex items-center gap-6">
           <div className="w-16 md:w-24 h-[1px] bg-gradient-to-r from-transparent to-[#1E3A8A]/40" />
           <div className="flex items-center gap-4 md:gap-6 text-[#1E3A8A] font-bold tracking-[0.3em] text-[11px] md:text-sm drop-shadow-md">

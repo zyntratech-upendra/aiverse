@@ -36,7 +36,6 @@ import {
   fetchUsers as apiFetchUsers, 
   createUser as apiCreateUser, 
   updateUser as apiUpdateUser, 
-  deleteUser as apiDeleteUser,
   fetchOrganizers,
   fetchSettings
 } from "../../services/apiClient";

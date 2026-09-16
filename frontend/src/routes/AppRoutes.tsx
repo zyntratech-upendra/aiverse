@@ -48,7 +48,6 @@ const ProfilePage = React.lazy(() => import("../pages/faculty/ProfilePage"));
 const FacResultsPage = React.lazy(() => import("../pages/faculty/FacResultsPage"));
 const QuizManagementPage = React.lazy(() => import("../pages/faculty/QuizManagementPage"));
 const ContactInquiriesPage = React.lazy(() => import("../pages/faculty/ContactInquiriesPage"));
-const OrganizerManagementPage = React.lazy(() => import("../pages/faculty/OrganizerManagementPage"));
 
 // Participant & Quiz Pages (separate chunk for quiz takers)
 const ParticipantSetPasswordPage = React.lazy(() => import("../pages/auth/ParticipantSetPasswordPage"));

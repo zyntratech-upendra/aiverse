@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { createPortal } from 'react-dom';
-import { Sparkles, Calendar, MapPin, ExternalLink, CheckCircle2, ArrowRight, X } from 'lucide-react';
+import { Sparkles, Calendar, MapPin, CheckCircle2, X } from 'lucide-react';
 
 // ─── 3D Confetti Particle System ───
 const CONFETTI_COUNT = 32;
@@ -103,7 +103,8 @@ export const EventLaunchSplash: React.FC<EventLaunchSplashProps> = ({
   onViewEvent
 }) => {
   const [isOpening, setIsOpening] = useState(false);
-  const [phase, setPhase] = useState<'idle' | 'untie' | 'split' | 'fadeout' | 'done'>('idle');
+  const [phase, setPhase] = useState<'idle' | 'pre-countdown' | 'countdown' | 'untie' | 'split' | 'fadeout' | 'done'>('idle');
+  const [countdown, setCountdown] = useState(5);
   const [entered, setEntered] = useState(false);
   const confettiRef = useRef<Confetti[]>(generateConfetti());
 
@@ -123,22 +124,40 @@ export const EventLaunchSplash: React.FC<EventLaunchSplashProps> = ({
   const handleUntieRibbon = useCallback(() => {
     if (isOpening) return;
     setIsOpening(true);
-    playCelebrationChime();
-    setPhase('untie');
-    setTimeout(() => setPhase('split'), 700);
+    setPhase('pre-countdown');
+    
     setTimeout(() => {
-      setPhase('fadeout');
-      setTimeout(() => {
-        setPhase('done');
-        onClose();
-      }, 1600);
-    }, 1100);
-  }, [isOpening, onClose]);
+      setPhase('countdown');
+      setCountdown(5);
+      
+      let currentCount = 5;
+      const interval = setInterval(() => {
+        currentCount -= 1;
+        if (currentCount > 0) {
+          setCountdown(currentCount);
+        } else {
+          clearInterval(interval);
+          playCelebrationChime();
+          setPhase('untie');
+          setTimeout(() => setPhase('split'), 700);
+          setTimeout(() => {
+            setPhase('fadeout');
+            setTimeout(() => {
+              setPhase('done');
+              if (onViewEvent && event?.eventId) {
+                onViewEvent(event.eventId);
+              }
+              onClose();
+            }, 1600);
+          }, 1100);
+        }
+      }, 1000);
+    }, 2000);
+  }, [isOpening, onClose, onViewEvent, event]);
 
   if (!isOpen || phase === 'done' || !event) return null;
 
   const confetti = confettiRef.current;
-  const isEditing = event.isEditing;
 
   return createPortal(
     <div
@@ -184,6 +203,13 @@ export const EventLaunchSplash: React.FC<EventLaunchSplashProps> = ({
           @keyframes badgeGlow {
             0%, 100% { box-shadow: 0 0 15px rgba(37,99,235,0.25); }
             50% { box-shadow: 0 0 30px rgba(37,99,235,0.55); }
+          }
+          @keyframes countPulse {
+            0% { transform: scale(0.85) translateY(10px); opacity: 0; filter: blur(4px); }
+            20% { transform: scale(1.04) translateY(0); opacity: 1; filter: blur(0px); }
+            40% { transform: scale(1); opacity: 1; }
+            80% { transform: scale(1) translateY(0); opacity: 1; filter: blur(0px); }
+            100% { transform: scale(0.92) translateY(-10px); opacity: 0; filter: blur(4px); }
           }
         `}</style>
 
@@ -261,49 +287,51 @@ export const EventLaunchSplash: React.FC<EventLaunchSplashProps> = ({
         {/* ═══ Center Ceremony: Event Title, Badges, & Satin Ribbon Bow ═══ */}
         <div className="relative z-20 flex-1 flex flex-col items-center justify-center text-center my-auto max-w-4xl mx-auto w-full px-4">
           
-          {/* Official Launch Badge */}
-          <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-50/90 border border-blue-200 text-[#2563EB] font-black text-xs uppercase tracking-[0.2em] mb-4 shadow-sm transition-all duration-1000 delay-200 ${entered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}
-               style={{ animation: 'badgeGlow 3s ease-in-out infinite' }}>
-            <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
-            <span>{isEditing ? "Event Updated & Successfully Launched" : "Official Event Launch Ceremony"}</span>
-            <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
-          </div>
+          <div className={`flex flex-col items-center transition-all duration-700 ${entered ? 'opacity-100 scale-100' : 'opacity-0 scale-95'}`}>
+            {/* Official Launch Badge */}
+            <div className={`inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-blue-50/90 border border-blue-200 text-[#2563EB] font-black text-xs uppercase tracking-[0.2em] mb-4 shadow-sm transition-all duration-1000 delay-200 ${entered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}
+                 style={{ animation: 'badgeGlow 3s ease-in-out infinite' }}>
+              <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+              <span>Event Launch</span>
+              <Sparkles className="w-3.5 h-3.5 text-amber-500 animate-pulse" />
+            </div>
 
-          {/* Super Heading */}
-          <p className={`text-slate-500 tracking-[0.35em] uppercase text-xs md:text-sm font-extrabold mb-2 transition-all duration-1000 delay-300 ${entered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
-            AI VERSE PRESENTS
-          </p>
+            {/* Super Heading */}
+            <p className={`text-slate-500 tracking-[0.35em] uppercase text-xs md:text-sm font-extrabold mb-2 transition-all duration-1000 delay-300 ${entered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
+              AI VERSE PRESENTS
+            </p>
 
-          <h1 className={`text-3xl sm:text-5xl md:text-6xl font-black tracking-tight leading-tight text-slate-900 mb-4 transition-all duration-1000 delay-400 ${entered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
-            <span className="text-slate-900">{event.title}</span>{" "}
-            <span className="bg-gradient-to-r from-[#2563EB] via-blue-600 to-indigo-600 bg-clip-text text-transparent block sm:inline">
-              is Launched!
-            </span>
-          </h1>
+            <h1 className={`text-3xl sm:text-5xl md:text-6xl font-black tracking-tight leading-tight text-slate-900 mb-4 transition-all duration-1000 delay-400 ${entered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}>
+              <span className="text-slate-900">{event.title}</span>{" "}
+              <span className="bg-gradient-to-r from-[#2563EB] via-blue-600 to-indigo-600 bg-clip-text text-transparent block sm:inline">
+                is Launching!
+              </span>
+            </h1>
 
-          {/* Subtitle Details Pill */}
-          <div className={`flex flex-wrap items-center justify-center gap-2 sm:gap-3 text-xs sm:text-sm font-bold text-slate-600 mb-6 transition-all duration-1000 delay-500 ${entered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
-            {event.category && (
-              <span className="px-3 py-1 rounded-full bg-blue-600 text-white font-black tracking-wider text-[11px] uppercase shadow-sm">
-                {event.category}
+            {/* Subtitle Details Pill */}
+            <div className={`flex flex-wrap items-center justify-center gap-2 sm:gap-3 text-xs sm:text-sm font-bold text-slate-600 mb-6 transition-all duration-1000 delay-500 ${entered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
+              {event.category && (
+                <span className="px-3 py-1 rounded-full bg-blue-600 text-white font-black tracking-wider text-[11px] uppercase shadow-sm">
+                  {event.category}
+                </span>
+              )}
+              {event.date && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/90 border border-slate-200/90 text-slate-700 shadow-xs">
+                  <Calendar className="w-3.5 h-3.5 text-[#2563EB]" />
+                  {event.date}
+                </span>
+              )}
+              {event.location && (
+                <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/90 border border-slate-200/90 text-slate-700 shadow-xs">
+                  <MapPin className="w-3.5 h-3.5 text-rose-500" />
+                  {event.location}
+                </span>
+              )}
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold text-[11px] uppercase">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                {event.status || "Opened"}
               </span>
-            )}
-            {event.date && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/90 border border-slate-200/90 text-slate-700 shadow-xs">
-                <Calendar className="w-3.5 h-3.5 text-[#2563EB]" />
-                {event.date}
-              </span>
-            )}
-            {event.location && (
-              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-white/90 border border-slate-200/90 text-slate-700 shadow-xs">
-                <MapPin className="w-3.5 h-3.5 text-rose-500" />
-                {event.location}
-              </span>
-            )}
-            <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-700 font-bold text-[11px] uppercase">
-              <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
-              {event.status || "Opened"}
-            </span>
+            </div>
           </div>
 
           {/* ═══════════════════════════════════════════
@@ -316,7 +344,12 @@ export const EventLaunchSplash: React.FC<EventLaunchSplashProps> = ({
             style={{ pointerEvents: phase === 'split' || phase === 'fadeout' ? 'none' : 'auto' }}
           >
             {/* Horizontal Satin Ribbons SVG (Slides outward upon cutting) */}
-            <div className="absolute w-[360px] sm:w-[540px] md:w-[700px] pointer-events-none">
+            <div className="absolute w-[360px] sm:w-[540px] md:w-[700px] pointer-events-none"
+                 style={{ 
+                   opacity: (phase === 'countdown' || phase === 'pre-countdown' || phase === 'fadeout') ? 0 : 1,
+                   transition: 'opacity 400ms ease-out'
+                 }}
+            >
               <svg width="100%" height="240" viewBox="0 0 400 240" className="w-full overflow-visible drop-shadow-[0_12px_28px_rgba(37,99,235,0.2)]">
                 <defs>
                   <linearGradient id="eventRibbonH" x1="0" y1="0" x2="0" y2="1">
@@ -358,7 +391,7 @@ export const EventLaunchSplash: React.FC<EventLaunchSplashProps> = ({
               className="relative cursor-pointer transition-transform duration-300 hover:scale-105 active:scale-95 group"
               style={{
                 animation: phase === 'idle' ? 'pulseSoft 4s ease-in-out infinite' : 'none',
-                opacity: phase === 'fadeout' ? 0 : 1,
+                opacity: (phase === 'countdown' || phase === 'pre-countdown' || phase === 'fadeout') ? 0 : 1,
                 pointerEvents: phase !== 'idle' ? 'none' : 'auto',
                 transition: 'opacity 400ms ease-out',
               }}
@@ -457,50 +490,78 @@ export const EventLaunchSplash: React.FC<EventLaunchSplashProps> = ({
                 </g>
               </svg>
             </div>
+
+            {/* ═══ Countdown Card (Overlaying Bow) ═══ */}
+            {(phase === 'countdown' || phase === 'pre-countdown') && (
+              <div className="absolute z-50 flex items-center justify-center transition-all duration-500 animate-in fade-in zoom-in-75 pointer-events-none">
+                
+                {/* Animated Background Rings */}
+                <div className="absolute w-[160px] h-[160px] md:w-[200px] md:h-[200px] bg-blue-500/10 rounded-full blur-[40px] animate-pulse" />
+                <div className="absolute w-[120px] h-[120px] md:w-[150px] md:h-[150px] bg-indigo-400/20 rounded-full blur-[30px]" style={{ animation: 'pulseSoft 3s ease-in-out infinite alternate' }} />
+
+                {/* Glass Panel */}
+                <div className="relative overflow-hidden rounded-[2rem] bg-white/40 backdrop-blur-xl w-[210px] h-[210px] md:w-[250px] md:h-[250px] p-5 md:p-6 flex flex-col items-center justify-between shadow-[0_20px_40px_-10px_rgba(37,99,235,0.15),inset_0_1px_0_rgba(255,255,255,1)] border border-white/60 before:absolute before:inset-0 before:bg-gradient-to-br before:from-white/40 before:to-transparent before:opacity-50">
+                  
+                  {/* Spinning decorative ring */}
+                  <div className="absolute inset-0 pointer-events-none p-3 md:p-4">
+                      <svg className="w-full h-full animate-[spin_12s_linear_infinite] opacity-40" viewBox="0 0 100 100">
+                        <circle cx="50" cy="50" r="48" fill="none" stroke="url(#spin-grad)" strokeWidth="0.75" strokeDasharray="10 6" />
+                        <defs>
+                          <linearGradient id="spin-grad" x1="0%" y1="0%" x2="100%" y2="100%">
+                            <stop offset="0%" stopColor="#3B82F6" stopOpacity="1" />
+                            <stop offset="50%" stopColor="#3B82F6" stopOpacity="0" />
+                            <stop offset="100%" stopColor="#818CF8" stopOpacity="1" />
+                          </linearGradient>
+                        </defs>
+                      </svg>
+                  </div>
+
+                  <div className="relative z-10 flex flex-col items-center justify-between h-full w-full">
+                    <h2 className="text-[10px] md:text-xs font-bold text-blue-600/80 tracking-[0.16em] uppercase flex items-center justify-center gap-1.5 whitespace-nowrap select-none">
+                      <span className="w-3 md:w-5 h-[1px] bg-blue-600/30 shrink-0"></span>
+                      <span>GOING LIVE IN</span>
+                      <span className="w-3 md:w-5 h-[1px] bg-blue-600/30 shrink-0"></span>
+                    </h2>
+                    
+                    {phase === 'pre-countdown' ? (
+                      <div 
+                        className="flex-1 flex flex-col items-center justify-center text-lg md:text-xl font-black text-transparent bg-clip-text bg-gradient-to-b from-blue-700 via-blue-500 to-blue-300 drop-shadow-[0_4px_8px_rgba(37,99,235,0.25)] text-center px-2 leading-snug select-none"
+                        style={{ animation: 'pulseSoft 2s ease-in-out infinite' }}
+                      >
+                        <span>Countdown</span>
+                        <span>Starting...</span>
+                      </div>
+                    ) : (
+                      <div className="flex-1 w-full flex items-center justify-center">
+                        <span 
+                          key={countdown} 
+                          className="font-black leading-none tracking-normal text-transparent bg-clip-text bg-gradient-to-b from-blue-700 via-blue-500 to-blue-300 drop-shadow-[0_4px_8px_rgba(37,99,235,0.25)] text-[4.5rem] md:text-[5.5rem] tabular-nums select-none flex items-center justify-center text-center"
+                          style={{ animation: 'countPulse 1s ease-in-out forwards', transformOrigin: 'center center' }}
+                        >
+                          {countdown}
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Progress Dots */}
+                    <div className="flex items-center justify-center gap-2">
+                      {[1, 2, 3, 4, 5].map((i) => (
+                        <div 
+                          key={i} 
+                          className={`w-1.5 h-1.5 rounded-full transition-all duration-500 ease-out ${
+                            phase === 'countdown' && (6 - countdown) >= i 
+                              ? 'bg-blue-600 scale-100 shadow-[0_0_6px_rgba(37,99,235,0.5)]' 
+                              : 'bg-blue-200/50 scale-75'
+                          }`}
+                        />
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
 
-          {/* Prompt to Untie / Cut Ribbon */}
-          <div className={`mt-2 transition-all duration-1000 delay-800 ${entered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
-            <p className="text-xs font-bold text-slate-500 uppercase tracking-widest flex items-center justify-center gap-1.5 mb-5">
-              <span>✂️</span>
-              <span>Click the 3D Bow or button below to untie ribbon and reveal event</span>
-            </p>
-
-            <div className="flex flex-wrap items-center justify-center gap-3">
-              <button
-                type="button"
-                onClick={handleUntieRibbon}
-                disabled={isOpening}
-                className="px-7 py-3.5 bg-[#2563EB] hover:bg-blue-700 active:scale-95 text-white font-extrabold rounded-2xl shadow-xl shadow-blue-600/25 hover:shadow-2xl transition-all text-sm flex items-center gap-2.5 cursor-pointer"
-              >
-                <span>✂️ Untie Ribbon & Reveal Event</span>
-                <ArrowRight className="w-4 h-4" />
-              </button>
-
-              {onViewEvent && (
-                <button
-                  type="button"
-                  onClick={() => onViewEvent(event.eventId)}
-                  className="px-6 py-3.5 bg-white hover:bg-slate-50 border border-slate-200 text-slate-700 font-bold rounded-2xl shadow-sm hover:shadow-md transition-all text-sm flex items-center gap-2 cursor-pointer"
-                >
-                  <span>View Details</span>
-                  <ExternalLink className="w-4 h-4 text-blue-600" />
-                </button>
-              )}
-            </div>
-          </div>
-
-        </div>
-
-        {/* ═══ Footer: Brand pillars ═══ */}
-        <div className={`relative z-20 flex items-center justify-center pt-4 transition-all duration-1000 delay-900 ${entered ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}>
-          <div className="flex items-center gap-4 text-[10px] sm:text-xs font-extrabold tracking-[0.25em] text-slate-400">
-            <span>INNOVATE</span>
-            <span className="text-blue-500/40">•</span>
-            <span>COLLABORATE</span>
-            <span className="text-blue-500/40">•</span>
-            <span>EXCEL</span>
-          </div>
         </div>
 
       </div>

@@ -83,7 +83,7 @@ import DatePicker from "../../components/ui/DatePicker";
 import TimePicker from "../../components/ui/TimePicker";
 import MemberSelectCombobox from "../../components/ui/MemberSelectCombobox";
 import { sendResendEmail } from "../../utils/resendEmailService";
-import { buildRoundPromotionEmail, buildCertificateEmail } from "../../utils/emailTemplates";
+import { buildRoundPromotionEmail, buildCertificateEmail, buildTeamCertificateEmail, type TeamMemberCertItem } from "../../utils/emailTemplates";
 import { dataCache } from "../../utils/dataCache";
 import { EventLaunchSplash, type EventLaunchData } from "../../components/common/EventLaunchSplash";
 
@@ -876,7 +876,8 @@ const EventManagementPage: React.FC = () => {
     document.body.removeChild(link);
   };
 
-  // Flattened list of all individual recipients (Lead + all Team Members)
+  // Recipient list where each row represents a registered Team (or Solo Participant).
+  // When certificates are distributed, all team certificates are emailed exclusively to the Team Leader's address.
   const flattenedCertRecipients = useMemo(() => {
     const list: any[] = [];
     (eventAccessRegistrations || []).forEach((reg: any) => {
@@ -887,17 +888,21 @@ const EventManagementPage: React.FC = () => {
       const leadName = reg.teamLeadName || reg.fullName || reg.name || "Participant";
       const leadStudentId = reg.teamLeadStudentId || reg.studentId || "";
 
-      // 1. Add Team Lead / Individual
-      if (leadEmail) {
+      // Validated team members array
+      const members = Array.isArray(reg.members) ? reg.members.filter((m: any) => m && (m.name || m.email)) : [];
+      const totalMembersCount = 1 + members.length;
+
+      if (leadEmail || leadName) {
         list.push({
-          key: `${regId}_lead`,
+          key: regId,
           regId,
-          isLead: true,
-          memberIndex: -1,
-          name: leadName,
-          email: leadEmail,
-          studentId: leadStudentId,
+          isGroup,
           teamName,
+          leadName,
+          leadEmail,
+          leadStudentId,
+          membersList: members,
+          totalMembersCount,
           currentRound: reg.currentRound || 1,
           roundStatus: reg.roundStatus || "Active",
           attendanceMarked: !!reg.attendanceMarked,
@@ -908,35 +913,6 @@ const EventManagementPage: React.FC = () => {
           certificateId: reg.certificateId || `AIV-${regId.slice(-6).toUpperCase()}-L`,
           certificateSentAt: reg.certificateSentAt || null,
           certificateType: reg.certificateType || certType,
-        });
-      }
-
-      // 2. Add Team Members
-      if (Array.isArray(reg.members)) {
-        reg.members.forEach((m: any, mIdx: number) => {
-          const mEmail = (m.email || m.personalEmail || "").trim().toLowerCase();
-          if (mEmail && m.name) {
-            list.push({
-              key: `${regId}_m_${mIdx}`,
-              regId,
-              isLead: false,
-              memberIndex: mIdx,
-              name: m.name,
-              email: mEmail,
-              studentId: m.studentId || m.rollNo || "",
-              teamName,
-              currentRound: reg.currentRound || 1,
-              roundStatus: reg.roundStatus || "Active",
-              attendanceMarked: !!reg.attendanceMarked,
-              submissionStatus: reg.submissionStatus === "Submitted" || !!reg.submittedAt ? "Submitted" : (reg.submissionStatus || "Draft"),
-              isPromoted: (reg.currentRound || 1) > 1 || reg.roundStatus === "Qualified",
-              isWinner: reg.isWinner || reg.rank || (reg.roundStatus === "Qualified" && reg.currentRound >= (eventAccessEvent?.totalRounds || 3)),
-              certificateIssued: !!(m.certificateIssued || (reg.certificateIssued && m.certificateIssued !== false)),
-              certificateId: m.certificateId || `AIV-${regId.slice(-4).toUpperCase()}-M${mIdx + 1}`,
-              certificateSentAt: m.certificateSentAt || reg.certificateSentAt || null,
-              certificateType: m.certificateType || reg.certificateType || certType,
-            });
-          }
         });
       }
     });
@@ -970,11 +946,16 @@ const EventManagementPage: React.FC = () => {
     if (certSearchQuery.trim()) {
       const q = certSearchQuery.toLowerCase().trim();
       result = result.filter(r =>
-        r.name.toLowerCase().includes(q) ||
-        r.email.toLowerCase().includes(q) ||
-        r.studentId.toLowerCase().includes(q) ||
+        r.leadName.toLowerCase().includes(q) ||
+        r.leadEmail.toLowerCase().includes(q) ||
+        r.leadStudentId.toLowerCase().includes(q) ||
         r.teamName.toLowerCase().includes(q) ||
-        (r.certificateId && r.certificateId.toLowerCase().includes(q))
+        (r.certificateId && r.certificateId.toLowerCase().includes(q)) ||
+        (Array.isArray(r.membersList) && r.membersList.some((m: any) => 
+          (m.name && m.name.toLowerCase().includes(q)) || 
+          (m.email && m.email.toLowerCase().includes(q)) || 
+          (m.studentId && m.studentId.toLowerCase().includes(q))
+        ))
       );
     }
 
@@ -1033,23 +1014,25 @@ const EventManagementPage: React.FC = () => {
     );
   };
 
-  // Bulk Dispatch Certificates via Email
+  // Bulk Dispatch Certificates via Email (Sent exclusively to Team Leaders)
   const handleSendCertificatesBatch = async () => {
     const recipientsToSend = flattenedCertRecipients.filter(r => selectedCertRecipients.includes(r.key));
 
     if (recipientsToSend.length === 0) {
       await showAlert({
-        title: "No Recipients Selected",
-        message: "Please select at least one participant to send certificates.",
+        title: "No Teams Selected",
+        message: "Please select at least one team or participant to send certificates.",
         type: "warning",
       });
       return;
     }
 
+    const totalCertCount = recipientsToSend.reduce((acc, r) => acc + (r.totalMembersCount || 1), 0);
+
     const confirmed = await showConfirm({
-      title: `Dispatch ${recipientsToSend.length} Certificate(s)?`,
-      message: `You are about to email official "${certType}" certificates directly to ${recipientsToSend.length} participant(s). Would you like to proceed?`,
-      confirmText: `🚀 Send ${recipientsToSend.length} Certificates`,
+      title: `Dispatch Certificates to ${recipientsToSend.length} Team(s)?`,
+      message: `You are about to email official "${certType}" certificates for ${totalCertCount} participant(s) across ${recipientsToSend.length} team(s). All certificates for each team will be sent directly to their registered Team Leader's email address only. Would you like to proceed?`,
+      confirmText: `🚀 Dispatch to Leaders (${recipientsToSend.length} Teams)`,
       cancelText: "Cancel",
       type: "primary",
     });
@@ -1071,34 +1054,96 @@ const EventManagementPage: React.FC = () => {
     let failCount = 0;
 
     for (let i = 0; i < recipientsToSend.length; i++) {
-      const recipient = recipientsToSend[i];
-      const certId = recipient.certificateId || `AIV-${Date.now().toString(36).toUpperCase()}-${i + 1}`;
-      const certUrl = `${siteBaseUrl}/certificate/${certId}?name=${encodeURIComponent(recipient.name)}&event=${encodeURIComponent(eventAccessEvent?.title || "AI Verse Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(recipient.studentId)}&team=${encodeURIComponent(recipient.teamName)}&mode=${encodeURIComponent(certTemplateMode)}&nameY=${encodeURIComponent(certNamePosY)}&nameSize=${encodeURIComponent(certNameFontSize)}&nameColor=${encodeURIComponent(certNameColor)}&teamY=${encodeURIComponent(certTeamPosY)}&teamSize=${encodeURIComponent(certTeamFontSize)}&teamColor=${encodeURIComponent(certTeamColor)}&showTeam=${certShowTeamName}&rollY=${encodeURIComponent(certRollPosY)}&rollSize=${encodeURIComponent(certRollFontSize)}&rollColor=${encodeURIComponent(certRollColor)}&showRoll=${certShowRollNo}&showQr=${certShowQrCode}`;
+      const teamItem = recipientsToSend[i];
+      const leadCertId = teamItem.certificateId || `AIV-${teamItem.regId.slice(-6).toUpperCase()}-L`;
+
+      const buildCertUrl = (personName: string, studentId: string, certId: string) => {
+        return `${siteBaseUrl}/certificate/${certId}?name=${encodeURIComponent(personName)}&event=${encodeURIComponent(eventAccessEvent?.title || "AI Verse Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(studentId)}&team=${encodeURIComponent(teamItem.teamName)}&regId=${encodeURIComponent(teamItem.regId)}&eventId=${encodeURIComponent(eventAccessEvent?.id || "")}&mode=${encodeURIComponent(certTemplateMode)}&nameY=${encodeURIComponent(certNamePosY)}&nameSize=${encodeURIComponent(certNameFontSize)}&nameColor=${encodeURIComponent(certNameColor)}&teamY=${encodeURIComponent(certTeamPosY)}&teamSize=${encodeURIComponent(certTeamFontSize)}&teamColor=${encodeURIComponent(certTeamColor)}&showTeam=${certShowTeamName}&rollY=${encodeURIComponent(certRollPosY)}&rollSize=${encodeURIComponent(certRollFontSize)}&rollColor=${encodeURIComponent(certRollColor)}&showRoll=${certShowRollNo}&showQr=${certShowQrCode}`;
+      };
+
+      const leadCertUrl = buildCertUrl(teamItem.leadName, teamItem.leadStudentId, leadCertId);
+
+      // Build member certificate items for email & hub
+      const memberCertItems: TeamMemberCertItem[] = [
+        {
+          name: teamItem.leadName,
+          studentId: teamItem.leadStudentId,
+          role: teamItem.isGroup ? "Team Leader" : "Participant",
+          isLead: true,
+          certificateId: leadCertId,
+          certificateUrl: leadCertUrl,
+        }
+      ];
+
+      const updatedMembersArray: any[] = [];
+      if (Array.isArray(teamItem.membersList)) {
+        teamItem.membersList.forEach((m: any, mIdx: number) => {
+          const mName = m.name || `Member ${mIdx + 1}`;
+          const mStudentId = m.studentId || m.rollNo || "";
+          const mCertId = m.certificateId || `AIV-${teamItem.regId.slice(-4).toUpperCase()}-M${mIdx + 1}`;
+          const mCertUrl = buildCertUrl(mName, mStudentId, mCertId);
+
+          memberCertItems.push({
+            name: mName,
+            studentId: mStudentId,
+            role: m.role || "Member",
+            isLead: false,
+            certificateId: mCertId,
+            certificateUrl: mCertUrl,
+          });
+
+          updatedMembersArray.push({
+            ...m,
+            certificateIssued: true,
+            certificateId: mCertId,
+            certificateSentAt: Date.now(),
+            certificateType: certType,
+          });
+        });
+      }
 
       setCertSendingProgress({
         current: i + 1,
         total: recipientsToSend.length,
-        currentName: recipient.name,
-        currentEmail: recipient.email,
+        currentName: teamItem.teamName ? `${teamItem.teamName} (Lead: ${teamItem.leadName})` : teamItem.leadName,
+        currentEmail: teamItem.leadEmail,
         successCount,
         failCount,
       });
 
       try {
-        const emailData = buildCertificateEmail({
-          recipientName: recipient.name,
-          eventTitle: eventAccessEvent?.title || "AI Verse Event",
-          certificateType: certType,
-          groupName: recipient.teamName,
-          studentId: recipient.studentId,
-          certificateId: certId,
-          issueDate: certIssueDate,
-          collegeName: certCollegeName,
-          certificateUrl: certUrl,
-        });
+        let emailData: { subject: string; html: string; text: string };
+
+        if (teamItem.isGroup || memberCertItems.length > 1) {
+          // Send all team certificates to team leader only
+          emailData = buildTeamCertificateEmail({
+            teamLeadName: teamItem.leadName,
+            teamLeadEmail: teamItem.leadEmail,
+            eventTitle: eventAccessEvent?.title || "AI Verse Event",
+            groupName: teamItem.teamName || `${teamItem.leadName}'s Team`,
+            certificateType: certType,
+            issueDate: certIssueDate,
+            collegeName: certCollegeName,
+            teamHubUrl: leadCertUrl,
+            members: memberCertItems,
+          });
+        } else {
+          // Solo participant
+          emailData = buildCertificateEmail({
+            recipientName: teamItem.leadName,
+            eventTitle: eventAccessEvent?.title || "AI Verse Event",
+            certificateType: certType,
+            groupName: teamItem.teamName,
+            studentId: teamItem.leadStudentId,
+            certificateId: leadCertId,
+            issueDate: certIssueDate,
+            collegeName: certCollegeName,
+            certificateUrl: leadCertUrl,
+          });
+        }
 
         const emailRes = await sendResendEmail({
-          to: recipient.email,
+          to: teamItem.leadEmail,
           subject: emailData.subject,
           text: emailData.text,
           html: emailData.html,
@@ -1110,67 +1155,46 @@ const EventManagementPage: React.FC = () => {
 
           // Persist status to Firebase
           try {
-            const regRef = doc(db, "registrations", recipient.regId);
-            if (recipient.isLead) {
-              await updateDoc(regRef, {
-                certificateIssued: true,
-                certificateId: certId,
-                certificateType: certType,
-                certificateSentAt: now,
-                certificateTemplateMode: certTemplateMode,
-                certificateNamePosY: certNamePosY,
-                certificateNameFontSize: certNameFontSize,
-                certificateNameColor: certNameColor,
-                certificateTeamPosY: certTeamPosY,
-                certificateTeamFontSize: certTeamFontSize,
-                certificateTeamColor: certTeamColor,
-                certificateShowTeamName: certShowTeamName,
-                certificateRollPosY: certRollPosY,
-                certificateRollFontSize: certRollFontSize,
-                certificateRollColor: certRollColor,
-                certificateShowRollNo: certShowRollNo,
-                certificateShowQrCode: certShowQrCode,
-                updatedAt: now,
-              });
-            } else {
-              // Update specific member inside members array
-              const regDoc = (eventAccessRegistrations || []).find((r: any) => (r.id || r._id) === recipient.regId);
-              if (regDoc && Array.isArray(regDoc.members)) {
-                const updatedMembers = [...regDoc.members];
-                if (updatedMembers[recipient.memberIndex]) {
-                  updatedMembers[recipient.memberIndex] = {
-                    ...updatedMembers[recipient.memberIndex],
-                    certificateIssued: true,
-                    certificateId: certId,
-                    certificateSentAt: now,
-                  };
-                  await updateDoc(regRef, {
-                    members: updatedMembers,
-                    certificateIssued: true,
-                    updatedAt: now,
-                  });
-                }
-              }
+            const regRef = doc(db, "registrations", teamItem.regId);
+            const updatePayload: any = {
+              certificateIssued: true,
+              certificateId: leadCertId,
+              certificateType: certType,
+              certificateSentAt: now,
+              certificateTemplateMode: certTemplateMode,
+              certificateNamePosY: certNamePosY,
+              certificateNameFontSize: certNameFontSize,
+              certificateNameColor: certNameColor,
+              certificateTeamPosY: certTeamPosY,
+              certificateTeamFontSize: certTeamFontSize,
+              certificateTeamColor: certTeamColor,
+              certificateShowTeamName: certShowTeamName,
+              certificateRollPosY: certRollPosY,
+              certificateRollFontSize: certRollFontSize,
+              certificateRollColor: certRollColor,
+              certificateShowRollNo: certShowRollNo,
+              certificateShowQrCode: certShowQrCode,
+              updatedAt: now,
+            };
+
+            if (updatedMembersArray.length > 0) {
+              updatePayload.members = updatedMembersArray;
             }
+
+            await updateDoc(regRef, updatePayload);
 
             // Sync local state
             setEventAccessRegistrations((prev: any[]) =>
               prev.map(r => {
-                if ((r.id || r._id) === recipient.regId) {
-                  if (recipient.isLead) {
-                    return { ...r, certificateIssued: true, certificateId: certId, certificateSentAt: now, certificateType: certType };
-                  } else {
-                    const newMembers = Array.isArray(r.members) ? [...r.members] : [];
-                    if (newMembers[recipient.memberIndex]) {
-                      newMembers[recipient.memberIndex] = {
-                        ...newMembers[recipient.memberIndex],
-                        certificateIssued: true,
-                        certificateId: certId,
-                        certificateSentAt: now,
-                      };
-                    }
-                    return { ...r, members: newMembers, certificateIssued: true };
-                  }
+                if ((r.id || r._id) === teamItem.regId) {
+                  return {
+                    ...r,
+                    certificateIssued: true,
+                    certificateId: leadCertId,
+                    certificateSentAt: now,
+                    certificateType: certType,
+                    ...(updatedMembersArray.length > 0 ? { members: updatedMembersArray } : {}),
+                  };
                 }
                 return r;
               })
@@ -1180,11 +1204,11 @@ const EventManagementPage: React.FC = () => {
           }
         } else {
           failCount++;
-          console.error(`Failed to send certificate to ${recipient.email}:`, emailRes.error);
+          console.error(`Failed to send team certificate email to leader ${teamItem.leadEmail}:`, emailRes.error);
         }
       } catch (sendErr) {
         failCount++;
-        console.error(`Exception sending certificate to ${recipient.email}:`, sendErr);
+        console.error(`Exception sending certificate email to ${teamItem.leadEmail}:`, sendErr);
       }
 
       // Small delay between mail deliveries for smooth queue dispatch
@@ -1194,7 +1218,7 @@ const EventManagementPage: React.FC = () => {
     }
 
     setIsSendingCertificates(false);
-    setCertSuccessToast(`Successfully sent ${successCount} certificate(s) via email!${failCount > 0 ? ` (${failCount} failed)` : ""}`);
+    setCertSuccessToast(`Successfully dispatched certificates for ${successCount} team(s) to Team Leaders!${failCount > 0 ? ` (${failCount} failed)` : ""}`);
     setTimeout(() => setCertSuccessToast(null), 5000);
   };
 
@@ -1245,7 +1269,7 @@ const EventManagementPage: React.FC = () => {
     }
   };
 
-  // Export Certificate Issuance Log CSV
+  // Export Certificate Issuance Log CSV (Expanded for all Team Leaders & Members)
   const handleExportCertificateLogsCsv = () => {
     if (flattenedCertRecipients.length === 0) {
       alert("No participant records found.");
@@ -1255,22 +1279,50 @@ const EventManagementPage: React.FC = () => {
     const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
     const siteBaseUrl = isLocal ? "https://aiversevitb.in" : window.location.origin;
 
-    const exportData = flattenedCertRecipients.map((r, idx) => ({
-      "S.No": idx + 1,
-      "Certificate ID": r.certificateId || `AIV-${r.regId.slice(-6).toUpperCase()}`,
-      "Participant Name": r.name,
-      "Email Address": r.email,
-      "Roll / Student ID": r.studentId || "N/A",
-      "Team Name": r.teamName || "Individual",
-      "Role": r.isLead ? "Team Lead" : "Member",
-      "Event Title": eventAccessEvent?.title || "Event",
-      "Certificate Type": r.certificateType || certType,
-      "Issuance Status": r.certificateIssued ? "Issued & Emailed" : "Pending",
-      "Dispatched Timestamp": r.certificateSentAt ? new Date(r.certificateSentAt).toLocaleString() : "Not Sent",
-      "Online Verification URL": `${siteBaseUrl}/certificate/${r.certificateId || `AIV-${r.regId.slice(-6).toUpperCase()}`}`,
-    }));
+    const exportRows: any[] = [];
+    let counter = 1;
 
-    const csv = Papa.unparse(exportData);
+    flattenedCertRecipients.forEach((teamItem) => {
+      const leadCertId = teamItem.certificateId || `AIV-${teamItem.regId.slice(-6).toUpperCase()}-L`;
+      // Lead Row
+      exportRows.push({
+        "S.No": counter++,
+        "Certificate ID": leadCertId,
+        "Participant Name": teamItem.leadName,
+        "Role": teamItem.isGroup ? "Team Leader" : "Individual Participant",
+        "Team Name": teamItem.teamName || "Individual Entry",
+        "Dispatched To (Email)": teamItem.leadEmail,
+        "Roll / Student ID": teamItem.leadStudentId || "N/A",
+        "Event Title": eventAccessEvent?.title || "Event",
+        "Certificate Type": teamItem.certificateType || certType,
+        "Issuance Status": teamItem.certificateIssued ? "Issued & Sent to Leader" : "Pending",
+        "Dispatched Timestamp": teamItem.certificateSentAt ? new Date(teamItem.certificateSentAt).toLocaleString() : "Not Sent",
+        "Online Verification URL": `${siteBaseUrl}/certificate/${leadCertId}?regId=${teamItem.regId}`,
+      });
+
+      // Member Rows
+      if (Array.isArray(teamItem.membersList)) {
+        teamItem.membersList.forEach((m: any, mIdx: number) => {
+          const mCertId = m.certificateId || `AIV-${teamItem.regId.slice(-4).toUpperCase()}-M${mIdx + 1}`;
+          exportRows.push({
+            "S.No": counter++,
+            "Certificate ID": mCertId,
+            "Participant Name": m.name || `Member ${mIdx + 1}`,
+            "Role": m.role || "Team Member",
+            "Team Name": teamItem.teamName || "Individual Entry",
+            "Dispatched To (Email)": `${teamItem.leadEmail} (Sent to Leader)`,
+            "Roll / Student ID": m.studentId || m.rollNo || "N/A",
+            "Event Title": eventAccessEvent?.title || "Event",
+            "Certificate Type": m.certificateType || teamItem.certificateType || certType,
+            "Issuance Status": (m.certificateIssued || teamItem.certificateIssued) ? "Issued & Sent to Leader" : "Pending",
+            "Dispatched Timestamp": (m.certificateSentAt || teamItem.certificateSentAt) ? new Date(m.certificateSentAt || teamItem.certificateSentAt).toLocaleString() : "Not Sent",
+            "Online Verification URL": `${siteBaseUrl}/certificate/${mCertId}?regId=${teamItem.regId}`,
+          });
+        });
+      }
+    });
+
+    const csv = Papa.unparse(exportRows);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -10070,7 +10122,7 @@ const EventManagementPage: React.FC = () => {
                   {flattenedCertRecipients.filter(r => !r.certificateIssued).length} Pending
                 </span>
                 <span className="text-white/30">|</span>
-                <span className="text-slate-200">Total: {flattenedCertRecipients.length} Recipients</span>
+                <span className="text-slate-200">Total: {flattenedCertRecipients.length} Teams/Recipients</span>
               </div>
 
               <button
@@ -10195,7 +10247,7 @@ const EventManagementPage: React.FC = () => {
                         className="w-full pl-4 pr-10 py-2.5 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-2xl text-xs font-black text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs cursor-pointer transition-all appearance-none"
                       >
                         <option value="all">
-                          👥 All Round 1 Participants ({flattenedCertRecipients.length})
+                          👥 All Registered Teams & Participants ({flattenedCertRecipients.length})
                         </option>
                         <option value="promoted_r2">
                           🏆 Promoted to Round 2 ({flattenedCertRecipients.filter(r => (r.currentRound || 1) >= 2 || r.isPromoted).length})
@@ -10311,7 +10363,7 @@ const EventManagementPage: React.FC = () => {
                         </span>
                       </button>
                       <span className="text-xs font-bold text-slate-500">
-                        Showing {filteredCertRecipients.length} participants ({selectedCertRecipients.length} selected)
+                        Showing {filteredCertRecipients.length} teams/participants ({selectedCertRecipients.length} selected)
                       </span>
                     </div>
 
@@ -10332,9 +10384,9 @@ const EventManagementPage: React.FC = () => {
                               className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
                             />
                           </th>
-                          <th className="py-3.5 px-4">Participant & ID</th>
-                          <th className="py-3.5 px-4">Team / Role</th>
-                          <th className="py-3.5 px-4">Email Address</th>
+                          <th className="py-3.5 px-4">Team / Participant</th>
+                          <th className="py-3.5 px-4">Dispatched Target (Leader Email)</th>
+                          <th className="py-3.5 px-4">Team Members</th>
                           <th className="py-3.5 px-4">Stage / Status</th>
                           <th className="py-3.5 px-4">Certificate Status</th>
                           <th className="py-3.5 px-4 text-right">Actions</th>
@@ -10345,13 +10397,14 @@ const EventManagementPage: React.FC = () => {
                           <tr>
                             <td colSpan={7} className="text-center py-12 text-slate-400">
                               <Award className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-                              <p className="font-bold text-sm text-slate-600">No participants found</p>
+                              <p className="font-bold text-sm text-slate-600">No teams or participants found</p>
                               <p className="text-xs text-slate-400 mt-0.5">Try clearing filters or search queries.</p>
                             </td>
                           </tr>
                         ) : (
                           filteredCertRecipients.map((recipient) => {
                             const isSelected = selectedCertRecipients.includes(recipient.key);
+                            const isTeam = recipient.isGroup || (recipient.membersList && recipient.membersList.length > 0);
                             return (
                               <tr
                                 key={recipient.key}
@@ -10370,25 +10423,51 @@ const EventManagementPage: React.FC = () => {
                                 </td>
 
                                 <td className="py-4 px-4">
-                                  <div className="font-bold text-slate-900 text-sm">{recipient.name}</div>
-                                  <div className="text-[11px] font-mono text-slate-400">
-                                    {recipient.studentId || "Student"}
+                                  <div className="font-bold text-slate-900 text-sm flex items-center gap-1.5">
+                                    {recipient.teamName || recipient.leadName}
+                                    {isTeam && (
+                                      <span className="text-[10px] font-black bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full">
+                                        👥 {recipient.totalMembersCount} Members
+                                      </span>
+                                    )}
+                                  </div>
+                                  <div className="text-[11px] text-slate-500 font-medium mt-0.5">
+                                    Leader: <strong className="text-slate-700">{recipient.leadName}</strong> {recipient.leadStudentId && <span className="font-mono text-slate-400">({recipient.leadStudentId})</span>}
                                   </div>
                                 </td>
 
                                 <td className="py-4 px-4">
-                                  <div className="font-bold text-slate-800">
-                                    {recipient.teamName || "Individual Entry"}
+                                  <div className="font-mono text-slate-800 text-xs font-bold">
+                                    {recipient.leadEmail || "—"}
                                   </div>
-                                  <span className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md ${
-                                    recipient.isLead ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-600"
-                                  }`}>
-                                    {recipient.isLead ? "Team Lead" : "Member"}
-                                  </span>
+                                  {isTeam && (
+                                    <span className="inline-flex items-center gap-1 text-[10px] font-extrabold text-indigo-700 bg-indigo-50 border border-indigo-200/70 px-2 py-0.5 rounded-md mt-1">
+                                      <Mail className="w-3 h-3 text-indigo-500" />
+                                      Dispatched to Leader Only
+                                    </span>
+                                  )}
                                 </td>
 
-                                <td className="py-4 px-4 font-mono text-slate-700 text-xs">
-                                  {recipient.email}
+                                <td className="py-4 px-4">
+                                  {recipient.membersList && recipient.membersList.length > 0 ? (
+                                    <div className="flex flex-wrap gap-1 max-w-xs">
+                                      <span className="text-[10px] font-bold bg-amber-50 text-amber-800 border border-amber-200/60 px-2 py-0.5 rounded-md" title={`Team Leader: ${recipient.leadName}`}>
+                                        ⭐ {recipient.leadName}
+                                      </span>
+                                      {recipient.membersList.slice(0, 3).map((m: any, mIdx: number) => (
+                                        <span key={mIdx} className="text-[10px] font-medium bg-slate-100 text-slate-700 px-2 py-0.5 rounded-md" title={m.studentId || m.email}>
+                                          {m.name}
+                                        </span>
+                                      ))}
+                                      {recipient.membersList.length > 3 && (
+                                        <span className="text-[10px] font-bold text-slate-400 self-center">
+                                          +{recipient.membersList.length - 3} more
+                                        </span>
+                                      )}
+                                    </div>
+                                  ) : (
+                                    <span className="text-xs text-slate-400 italic">Solo Participant</span>
+                                  )}
                                 </td>
 
                                 <td className="py-4 px-4">
@@ -10421,14 +10500,14 @@ const EventManagementPage: React.FC = () => {
                                 <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
                                   <div className="flex items-center justify-end gap-2">
                                     <a
-                                      href={`/certificate/${recipient.certificateId}?name=${encodeURIComponent(recipient.name)}&event=${encodeURIComponent(eventAccessEvent?.title || "Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(recipient.studentId)}&team=${encodeURIComponent(recipient.teamName)}`}
+                                      href={`/certificate/${recipient.certificateId}?name=${encodeURIComponent(recipient.leadName)}&event=${encodeURIComponent(eventAccessEvent?.title || "Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(recipient.leadStudentId)}&team=${encodeURIComponent(recipient.teamName)}&regId=${encodeURIComponent(recipient.regId)}&eventId=${encodeURIComponent(eventAccessEvent?.id || "")}`}
                                       target="_blank"
                                       rel="noreferrer"
-                                      className="p-2 bg-slate-100 hover:bg-blue-100 text-slate-700 hover:text-blue-700 rounded-xl transition-all font-bold text-xs flex items-center gap-1"
-                                      title="Open verified certificate preview in new tab"
+                                      className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl transition-all text-xs flex items-center gap-1.5 shadow-2xs"
+                                      title="Preview Team Certificate Hub in new tab"
                                     >
-                                      <Eye className="w-3.5 h-3.5" />
-                                      <span className="hidden sm:inline">Preview</span>
+                                      <Eye className="w-3.5 h-3.5 text-blue-600" />
+                                      <span>Team Hub</span>
                                     </a>
                                   </div>
                                 </td>
@@ -11191,20 +11270,23 @@ const EventManagementPage: React.FC = () => {
                           <tr key={r.key} className="hover:bg-slate-50 transition-colors">
                             <td className="py-3.5 px-4 text-slate-400">{idx + 1}</td>
                             <td className="py-3.5 px-4 font-mono font-bold text-blue-700">{r.certificateId}</td>
-                            <td className="py-3.5 px-4 font-bold text-slate-900">{r.name}</td>
-                            <td className="py-3.5 px-4 font-mono text-slate-600">{r.email}</td>
+                            <td className="py-3.5 px-4">
+                              <div className="font-bold text-slate-900">{r.teamName || r.leadName}</div>
+                              {r.teamName && <div className="text-[11px] text-slate-500">Lead: {r.leadName} ({r.totalMembersCount} members)</div>}
+                            </td>
+                            <td className="py-3.5 px-4 font-mono text-slate-600">{r.leadEmail}</td>
                             <td className="py-3.5 px-4 font-bold text-indigo-700">{r.certificateType || certType}</td>
                             <td className="py-3.5 px-4 text-slate-500">
                               {r.certificateSentAt ? new Date(r.certificateSentAt).toLocaleString() : "Issued"}
                             </td>
                             <td className="py-3.5 px-4 text-right">
                               <a
-                                href={`/certificate/${r.certificateId}?name=${encodeURIComponent(r.name)}&event=${encodeURIComponent(eventAccessEvent?.title || "Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(r.studentId)}`}
+                                href={`/certificate/${r.certificateId}?name=${encodeURIComponent(r.leadName)}&event=${encodeURIComponent(eventAccessEvent?.title || "Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(r.leadStudentId)}&team=${encodeURIComponent(r.teamName)}&regId=${encodeURIComponent(r.regId)}&eventId=${encodeURIComponent(eventAccessEvent?.id || "")}`}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 font-bold rounded-lg text-xs transition-all inline-flex items-center gap-1"
                               >
-                                <span>Verify Online</span>
+                                <span>Team Hub</span>
                                 <ExternalLink className="w-3 h-3" />
                               </a>
                             </td>
