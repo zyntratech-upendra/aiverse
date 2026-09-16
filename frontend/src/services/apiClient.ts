@@ -29,18 +29,18 @@ let TOKEN: string | null = null;
 try {
   const savedToken = localStorage.getItem('aiverse_api_token');
   if (savedToken) TOKEN = savedToken;
-} catch (e) {}
+} catch (e) { }
 
 export function setToken(token: string | null) {
   TOKEN = token;
   if (token) {
     try {
       localStorage.setItem('aiverse_api_token', token);
-    } catch (e) {}
+    } catch (e) { }
   } else {
     try {
       localStorage.removeItem('aiverse_api_token');
-    } catch (e) {}
+    } catch (e) { }
   }
 }
 
@@ -114,7 +114,7 @@ export async function fetchCurrentUser() {
 // ==========================================
 // File & Image Uploads (Cloudinary)
 // ==========================================
-export async function uploadImage(fileOrBase64: File | Blob | string, folder = 'ai_verse'): Promise<{ url: string; public_id?: string; [key: string]: any }> {
+export async function uploadImage(fileOrBase64: File | Blob | string, folder = 'ai_verse'): Promise<{ url: string; public_id?: string;[key: string]: any }> {
   if (typeof fileOrBase64 === 'string') {
     // Base64 data URI
     const res = await fetch(`${API_BASE}/upload`, {
@@ -430,15 +430,6 @@ export async function deleteEvent(eventId: string) {
   return res.json();
 }
 
-export async function updateEvent(id: string, patch: any) {
-  const res = await fetch(`${API_BASE}/events/${id}`, {
-    method: 'PUT',
-    headers: authHeaders(),
-    body: JSON.stringify(patch),
-  });
-  return res.json();
-}
-
 // ==========================================
 // Registrations
 // ==========================================
@@ -474,14 +465,6 @@ export async function updateRegistration(id: string, patch: any) {
     method: 'PUT',
     headers: authHeaders(),
     body: JSON.stringify(patch),
-  });
-  return res.json();
-}
-
-export async function deleteRegistration(id: string) {
-  const res = await fetch(`${API_BASE}/registrations/${id}`, {
-    method: 'DELETE',
-    headers: authHeaders(),
   });
   return res.json();
 }
