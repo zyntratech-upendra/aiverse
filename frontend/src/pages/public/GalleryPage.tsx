@@ -261,9 +261,9 @@ const GalleryPage: React.FC = () => {
   return (
     <div className="overflow-hidden bg-[#FAFBFC] pb-24 min-h-screen font-sans">
       <SEO 
-        title="Gallery - Visual Moments | AI Verse VITB - VIT Bhimavaram" 
-        description="Explore the visual legacy of AI Verse VITB — hackathons, AI & Data Science workshops, project expos, and student achievements at Vishnu Institute of Technology, Bhimavaram." 
-        keywords="AI Verse Gallery, aiversevitb, AI Verse VITB, VIT Bhimavaram, Vishnu Institute of Technology, AI Workshops Gallery, Student Tech Photos"
+        title="Event Gallery & Tech Expos | AI Verse VIT Bhimavaram" 
+        description="Explore the visual journey of AI Verse at Vishnu Institute of Technology, Bhimavaram. View photo highlights of our national-level hackathons, AI/ML workshops, tech expos, and student achievements." 
+        keywords="AI Verse Gallery, Hackathon Photos, Tech Expo Images, VIT Bhimavaram Student Events, AI Workshops Gallery, Tech Club Photos Andhra Pradesh"
         url="/gallery"
         schema={{
           "@context": "https://schema.org",

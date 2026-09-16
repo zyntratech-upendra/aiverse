@@ -16,7 +16,7 @@ import {
   Trash2
 } from "lucide-react";
 import { db, collection, getDocs, addDoc, doc, setDoc, deleteDoc } from "../../config/firebase";
-import { fetchEvents as apiFetchEvents, fetchUsers as apiFetchUsers, fetchOrganizers } from "../../services/apiClient";
+import { fetchEvents as apiFetchEvents, fetchUsers as apiFetchUsers, fetchOrganizers, createOrganizer, deleteOrganizer } from "../../services/apiClient";
 import { userService } from "../../services/userService";
 
 // Import local assets if they exist
@@ -411,7 +411,9 @@ const OrganizerManagementPage: React.FC = () => {
         tempPassword: formTempPassword,
         createdAt: Date.now()
       };
-      await addDoc(collection(db, "organizers"), payload);
+      
+      // Save via API instead of Firebase
+      await createOrganizer(payload);
 
       if (selectedUserId) {
         const userRef = doc(db, "users", selectedUserId);
@@ -433,20 +435,23 @@ const OrganizerManagementPage: React.FC = () => {
   const handleDeleteOrganizer = async (id: string, email: string) => {
     if (!window.confirm("Are you sure you want to delete this organizer?")) return;
     try {
-      // 1. Delete organizer profile doc from Firestore 'organizers' collection
-      const docRef = doc(db, "organizers", id);
-      await deleteDoc(docRef);
+      // 1. Delete organizer profile using API
+      await deleteOrganizer(id);
 
       // 2. Reset target user account role in 'users' collection to default role (e.g. member/Volunteer)
-      const usersSnap = await getDocs(collection(db, "users"));
-      let targetUserId = "";
-      usersSnap.forEach(uDoc => {
-        if (uDoc.data().email === email) {
-          targetUserId = uDoc.id;
+      try {
+        const usersSnap = await getDocs(collection(db, "users"));
+        let targetUserId = "";
+        usersSnap.forEach(uDoc => {
+          if (uDoc.data().email === email) {
+            targetUserId = uDoc.id;
+          }
+        });
+        if (targetUserId) {
+          await setDoc(doc(db, "users", targetUserId), { role: "member" }, { merge: true });
         }
-      });
-      if (targetUserId) {
-        await setDoc(doc(db, "users", targetUserId), { role: "member" }, { merge: true });
+      } catch (err) {
+        console.warn("Could not reset Firebase user role:", err);
       }
 
       alert("Organizer successfully deleted!");

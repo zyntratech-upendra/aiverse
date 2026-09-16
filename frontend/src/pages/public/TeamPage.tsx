@@ -599,9 +599,9 @@ const TeamPage: React.FC = () => {
   return (
     <div className="bg-[#F8FAFC] min-h-screen text-slate-800">
       <SEO 
-        title="Leadership Team & Organizers | AI Verse VITB" 
-        description="Meet the student leaders, technical developers, designers, faculty coordinators, and organizers powering AI Verse at Vishnu Institute of Technology, Bhimavaram."
-        keywords="AI Verse Team, Student Leaders, Faculty Coordinators, AI Verse VITB, Vishnu Institute of Technology, Technical Society"
+        title="Leadership Team & Organizers | AI Verse VIT Bhimavaram" 
+        description="Meet the passionate student leaders, technical developers, designers, and faculty coordinators powering AI Verse. Discover the minds behind the premier Artificial Intelligence club at Vishnu Institute of Technology (VITB)."
+        keywords="AI Verse Team, Tech Club Founders, Student Leaders VIT Bhimavaram, Faculty Coordinators, AI Club Organizers, Vishnu Institute of Technology Students"
         url="/team"
       />
       

@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { doc, updateDoc, getDoc, collection, getDocs } from "../../config/firebase";
+import SEO from "../../components/layout/SEO";
 
 interface ProjectSubmissionPageProps {
   targetRegId?: string;
@@ -753,6 +754,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
 
   return (
     <div className={`space-y-8 font-sans ${embedded ? "" : "max-w-6xl mx-auto p-8"}`}>
+      {!embedded && <SEO title="Project Submission - AI Verse" description="Submit your hackathon project to AI Verse." noIndex={true} />}
       
       {/* Header Section */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">

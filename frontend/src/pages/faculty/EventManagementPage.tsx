@@ -509,7 +509,7 @@ const EventManagementPage: React.FC = () => {
 
     try {
       const evRef = doc(db, "events", eventAccessEvent.id);
-      await updateDoc(evRef, {
+      await updateEvent(eventAccessEvent.id, {
         lockedSteps: newLocked,
         updatedAt: Date.now()
       });
@@ -605,7 +605,7 @@ const EventManagementPage: React.FC = () => {
 
     try {
       const regRef = doc(db, "registrations", regId);
-      await updateDoc(regRef, {
+      await updateRegistration(recipient?.regId || regId || recipient?.id || user.id, {
         isPsLocked: false,
         problemStatementLocked: false,
         submissionLocked: false,
@@ -799,7 +799,7 @@ const EventManagementPage: React.FC = () => {
 
       // 1. Save to Firestore
       const evRef = doc(db, "events", eventAccessEvent.id);
-      await updateDoc(evRef, {
+      await updateEvent(eventAccessEvent.id, {
         certificateConfig: certConfig,
         updatedAt: Date.now(),
       });
@@ -1112,7 +1112,7 @@ const EventManagementPage: React.FC = () => {
           try {
             const regRef = doc(db, "registrations", recipient.regId);
             if (recipient.isLead) {
-              await updateDoc(regRef, {
+              await updateRegistration(recipient?.regId || regId || recipient?.id || user.id, {
                 certificateIssued: true,
                 certificateId: certId,
                 certificateType: certType,
@@ -1144,7 +1144,7 @@ const EventManagementPage: React.FC = () => {
                     certificateId: certId,
                     certificateSentAt: now,
                   };
-                  await updateDoc(regRef, {
+                  await updateRegistration(recipient?.regId || regId || recipient?.id || user.id, {
                     members: updatedMembers,
                     certificateIssued: true,
                     updatedAt: now,
@@ -1457,7 +1457,7 @@ const EventManagementPage: React.FC = () => {
       const evRef = doc(db, "events", eventAccessEvent.id);
       const primaryPs = problemList[0] || null;
 
-      await updateDoc(evRef, {
+      await updateEvent(eventAccessEvent.id, {
         problemStatements: problemList,
         problemStatementTitle: primaryPs?.title || "",
         problemStatementTrack: primaryPs?.track || "",
@@ -1926,7 +1926,7 @@ const EventManagementPage: React.FC = () => {
             : null;
 
         const regRef = doc(db, "registrations", regId);
-        await updateDoc(regRef, {
+        await updateRegistration(recipient?.regId || regId || recipient?.id || user.id, {
           currentRound: promoteToRound,
           roundStatus: "Qualified",
           promotedToRound: promoteToRound,
@@ -1973,7 +1973,7 @@ const EventManagementPage: React.FC = () => {
         );
         eliminatePromises = unselectedTeams.map(async (t) => {
           const regRef = doc(db, "registrations", t.id);
-          await updateDoc(regRef, {
+          await updateRegistration(recipient?.regId || regId || recipient?.id || user.id, {
             roundStatus: "Eliminated",
             eliminatedInRound: promoteFromRound,
             eliminatedAt: now,
@@ -2035,7 +2035,7 @@ const EventManagementPage: React.FC = () => {
       // Advance active event stage if requested
       if (advanceEventRoundOnPromote && eventAccessEvent?.id && promoteToRound > (eventAccessEvent.currentRound || 1)) {
         const evRef = doc(db, "events", eventAccessEvent.id);
-        await updateDoc(evRef, {
+        await updateEvent(eventAccessEvent.id, {
           currentRound: promoteToRound,
           updatedAt: now
         });
@@ -2145,7 +2145,7 @@ const EventManagementPage: React.FC = () => {
     setSavingLiveRounds(true);
     try {
       const evRef = doc(db, "events", eventAccessEvent.id);
-      await updateDoc(evRef, {
+      await updateEvent(eventAccessEvent.id, {
         rounds: liveRoundsList,
         currentRound: liveCurrentRound,
         totalRounds: liveTotalRounds,
@@ -2279,7 +2279,7 @@ const EventManagementPage: React.FC = () => {
 
       if (eventAccessEvent?.id) {
         try {
-          await updateDoc(doc(db, "events", eventAccessEvent.id), { allowLoginAccess: true });
+          await updateEvent(eventAccessEvent.id, { allowLoginAccess: true });
         } catch (evErr) {
           console.warn("Notice updating allowLoginAccess on event:", evErr);
         }
@@ -2384,7 +2384,7 @@ const EventManagementPage: React.FC = () => {
 
       if (eventAccessEvent?.id) {
         try {
-          await updateDoc(doc(db, "events", eventAccessEvent.id), { allowLoginAccess: false });
+          await updateEvent(eventAccessEvent.id, { allowLoginAccess: false });
         } catch (evErr) {
           console.warn("Notice updating allowLoginAccess on event upon revoke:", evErr);
         }
@@ -2415,7 +2415,7 @@ const EventManagementPage: React.FC = () => {
     try {
       const now = Date.now();
       const regRef = doc(db, "registrations", regId);
-      await updateDoc(regRef, {
+      await updateRegistration(recipient?.regId || regId || recipient?.id || user.id, {
         accessGranted: true,
         loginAccessGranted: true,
         accessProvisionedAt: now,
@@ -2458,7 +2458,7 @@ const EventManagementPage: React.FC = () => {
     if (!confirmRevoke) return;
 
     try {
-      await updateDoc(doc(db, "registrations", regId), {
+      await updateRegistration(regId, {
         accessGranted: false,
         loginAccessGranted: false,
         accessRevokedAt: Date.now(),
@@ -3286,7 +3286,7 @@ const EventManagementPage: React.FC = () => {
       // 3. Delete from Firestore if present
       try {
         const docRef = doc(db, "events", id);
-        await deleteDoc(docRef);
+        await deleteRegistration(user.id); // Replaced from docRef
       } catch (e) {}
 
       setEvents(prev => prev.filter(e => e.id !== id));

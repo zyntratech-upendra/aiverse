@@ -99,6 +99,10 @@ app.use('/api/admin/settings', settingsRouter);
 app.use('/api/jury_evaluations', juryEvaluationsRouter);
 app.use('/api/jury-evaluations', juryEvaluationsRouter);
 
+// Sitemap
+const sitemapRouter = require('./routes/sitemap');
+app.use('/', sitemapRouter);
+
 // 404 Handler
 app.use(notFoundHandler);
 

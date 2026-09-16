@@ -406,20 +406,20 @@ const EventsPage: React.FC = () => {
   return (
     <div className="overflow-hidden bg-[#F8FAFC] pb-16">
       <SEO 
-        title="Events, Hackathons & Coding Workshops | AI Verse VITB" 
-        description="Join AI Verse VITB hackathons, coding workshops, AI & Data Science symposiums, and technical competitions at Vishnu Institute of Technology, Bhimavaram."
-        keywords="AI workshops, Hackathons, Coding Competitions, AI Seminars, Community Events, aiversevitb, AI Verse VITB, VIT Bhimavaram"
+        title="Hackathons, Tech Events & AI Workshops | AI Verse VIT Bhimavaram" 
+        description="Register for upcoming AI/ML hackathons, coding competitions, technical workshops, and guest lectures hosted by AI Verse at Vishnu Institute of Technology (VITB). Stay updated with the latest in Data Science and GenAI."
+        keywords="AI Workshops, Machine Learning Hackathons, Coding Competitions, Tech Seminars, AI Verse Events, VIT Bhimavaram Tech Events, Student Hackathons Andhra Pradesh, VITB Hackathons"
         url="/events"
         image="/event-banner.png"
         schema={{
           "@context": "https://schema.org",
           "@type": "CollectionPage",
-          "name": "AI Verse VITB Events & Hackathons",
-          "description": "Comprehensive list of technical hackathons, workshops, and competitions hosted by AI Verse at Vishnu Institute of Technology.",
+          "name": "AI Verse VITB Events, Hackathons & Workshops",
+          "description": "Comprehensive list of technical hackathons, AI/ML workshops, and coding competitions hosted by AI Verse at Vishnu Institute of Technology, Bhimavaram.",
           "url": "https://aiversevitb.in/events",
           "publisher": {
             "@type": "EducationalOrganization",
-            "name": "AI Verse VITB",
+            "name": "AI Verse - Vishnu Institute of Technology",
             "url": "https://aiversevitb.in"
           }
         }}

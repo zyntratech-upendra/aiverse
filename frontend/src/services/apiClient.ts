@@ -430,6 +430,15 @@ export async function deleteEvent(eventId: string) {
   return res.json();
 }
 
+export async function updateEvent(id: string, patch: any) {
+  const res = await fetch(`${API_BASE}/events/${id}`, {
+    method: 'PUT',
+    headers: authHeaders(),
+    body: JSON.stringify(patch),
+  });
+  return res.json();
+}
+
 // ==========================================
 // Registrations
 // ==========================================
@@ -465,6 +474,14 @@ export async function updateRegistration(id: string, patch: any) {
     method: 'PUT',
     headers: authHeaders(),
     body: JSON.stringify(patch),
+  });
+  return res.json();
+}
+
+export async function deleteRegistration(id: string) {
+  const res = await fetch(`${API_BASE}/registrations/${id}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
   });
   return res.json();
 }
