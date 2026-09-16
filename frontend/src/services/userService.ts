@@ -1,6 +1,7 @@
 import { 
   fetchUsers, 
   fetchUser, 
+  fetchTeamMembers,
   createUser, 
   bulkCreateUsers, 
   updateUser as apiUpdateUser, 
@@ -264,12 +265,35 @@ export const userService = {
   },
 
   /**
-   * Fetch team members specifically for the About page
+   * Fetch team members specifically for the About/Team page.
+   * Uses a public endpoint — no authentication required.
    */
   async getAboutTeamMembers(): Promise<SupabaseUser[]> {
     try {
-      const users = await this.getUsers();
-      return users.filter((u) => u.show_in_about && u.status === "Active");
+      const backendUsers: any = await fetchTeamMembers();
+      return (backendUsers || []).map((u: any) => ({
+        id: u.id || u._id || "",
+        auth_id: u.auth_id || null,
+        name: u.name || u.display_name || "",
+        display_name: u.display_name || u.name || null,
+        email: u.email || "",
+        personal_email: null,
+        phone: null,
+        role: u.role || "member",
+        status: u.status || "Active",
+        position: u.position || null,
+        bio: u.bio || null,
+        linkedin: u.linkedin || null,
+        github: u.github || null,
+        image: u.image || null,
+        show_in_about: true,
+        year: u.year || null,
+        team_name: null,
+        event_title: null,
+        registration_id: null,
+        created_at: u.created_at || null,
+        updated_at: u.updated_at || null,
+      })) as SupabaseUser[];
     } catch (err) {
       console.error("[userService] Error fetching about team members:", err);
       return [];

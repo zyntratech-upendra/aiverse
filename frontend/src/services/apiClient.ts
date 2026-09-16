@@ -497,6 +497,14 @@ export async function fetchUsers(query?: { role?: string; email?: string }) {
   return res.json();
 }
 
+// Public endpoint - no auth required, returns only show_in_about members
+export async function fetchTeamMembers() {
+  const res = await fetch(`${API_BASE}/users/team`);
+  if (!res.ok) throw new Error('Failed to fetch team members');
+  return res.json();
+}
+
+
 export async function fetchUserById(id: string) {
   const res = await fetch(`${API_BASE}/users/${encodeURIComponent(id)}`, { headers: authHeaders() });
   if (!res.ok) return null;
@@ -524,7 +532,7 @@ export async function createUser(userObj: any) {
 }
 
 export async function updateUser(id: string, patch: any) {
-  const res = await fetch(`${API_BASE}/users/${id}`, {
+  const res = await fetch(`${API_BASE}/users/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: authHeaders(),
     body: JSON.stringify(patch),
@@ -533,7 +541,7 @@ export async function updateUser(id: string, patch: any) {
 }
 
 export async function deleteUser(id: string) {
-  const res = await fetch(`${API_BASE}/users/${id}`, {
+  const res = await fetch(`${API_BASE}/users/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });

@@ -2,6 +2,30 @@
   "framework": "vite",
   "rewrites": [
     {
+      "source": "/favicon.svg",
+      "destination": "/favicon.svg"
+    },
+    {
+      "source": "/ai_verse.png",
+      "destination": "/ai_verse.png"
+    },
+    {
+      "source": "/event-banner.png",
+      "destination": "/event-banner.png"
+    },
+    {
+      "source": "/robots.txt",
+      "destination": "/robots.txt"
+    },
+    {
+      "source": "/sitemap.xml",
+      "destination": "/sitemap.xml"
+    },
+    {
+      "source": "/icons.svg",
+      "destination": "/icons.svg"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
