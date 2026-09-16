@@ -56,7 +56,13 @@ router.post(
       'needsFood', 'foodOption', 'foodPreference', 'isPaidEvent', 'pricingType',
       'registrationFee', 'totalFeePaid', 'paymentProofPreview', 'paymentProofFilename',
       'paymentProof', 'transactionId', 'paymentStatus', 'status', 'confirmedAt',
-      'sendEmail', 'sendConfirmationEmail', 'createdAt'
+      'sendEmail', 'sendConfirmationEmail', 'createdAt', 'qrCodeData', 'backendId',
+      'certificateIssued', 'certificateId', 'certificateType', 'certificateSentAt',
+      'certificateTemplateMode', 'certificateNamePosY', 'certificateNameFontSize',
+      'certificateNameColor', 'certificateTeamPosY', 'certificateTeamFontSize',
+      'certificateTeamColor', 'certificateShowTeamName', 'certificateRollPosY',
+      'certificateRollFontSize', 'certificateRollColor', 'certificateShowRollNo',
+      'certificateShowQrCode'
     ];
     const payload = pick(rawPayload, allowedFields);
     const eventId = payload.eventId;
@@ -209,7 +215,13 @@ router.put(
       'needsFood', 'foodOption', 'foodPreference', 'isPaidEvent', 'pricingType',
       'registrationFee', 'totalFeePaid', 'paymentProofPreview', 'paymentProofFilename',
       'paymentProof', 'transactionId', 'paymentStatus', 'status', 'confirmedAt',
-      'sendEmail', 'sendConfirmationEmail', 'createdAt', 'qrCodeData', 'backendId'
+      'sendEmail', 'sendConfirmationEmail', 'createdAt', 'qrCodeData', 'backendId',
+      'certificateIssued', 'certificateId', 'certificateType', 'certificateSentAt',
+      'certificateTemplateMode', 'certificateNamePosY', 'certificateNameFontSize',
+      'certificateNameColor', 'certificateTeamPosY', 'certificateTeamFontSize',
+      'certificateTeamColor', 'certificateShowTeamName', 'certificateRollPosY',
+      'certificateRollFontSize', 'certificateRollColor', 'certificateShowRollNo',
+      'certificateShowQrCode'
     ];
     const payload = pick(rawPayload, allowedFields);
     payload.updatedAt = Date.now();

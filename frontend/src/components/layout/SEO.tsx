@@ -1,4 +1,5 @@
-import React, { useEffect } from "react";
+import React from "react";
+import { Helmet } from "react-helmet-async";
 
 export interface SEOProps {
   title: string;
@@ -23,119 +24,83 @@ const SEO: React.FC<SEOProps> = ({
   noIndex = false,
   schema,
 }) => {
-  useEffect(() => {
-    // 1. Page Title
-    const fullTitle = title.toLowerCase().includes("ai verse") ? title : `AI Verse VITB | ${title}`;
-    document.title = fullTitle;
+  const fullTitle = title.toLowerCase().includes("ai verse") ? title : `AI Verse VITB | ${title}`;
+  
+  let fullUrl = PRODUCTION_DOMAIN;
+  if (url) {
+    fullUrl = url.startsWith("http") ? url : `${PRODUCTION_DOMAIN}${url.startsWith("/") ? "" : "/"}${url}`;
+  } else if (typeof window !== "undefined") {
+    fullUrl = `${PRODUCTION_DOMAIN}${window.location.pathname}${window.location.search}`;
+  }
 
-    // Helper function to create or update meta tags
-    const updateMetaTag = (name: string, content: string, isProperty = false) => {
-      const attribute = isProperty ? "property" : "name";
-      let element = document.querySelector(`meta[${attribute}="${name}"]`);
+  const fullImage = image
+    ? (image.startsWith("http") ? image : `${PRODUCTION_DOMAIN}${image.startsWith("/") ? "" : "/"}${image}`)
+    : `${PRODUCTION_DOMAIN}/event-banner.png`;
 
-      if (!element) {
-        element = document.createElement("meta");
-        element.setAttribute(attribute, name);
-        document.head.appendChild(element);
-      }
+  const baseKeywords = "aiversevitb.in, aiversevitb, AI Verse VITB, aiverse vitb, VIT Bhimavaram, Vishnu Institute of Technology, AI & Data Science, Student Technical Club, Hackathons, Coding Competitions";
+  const combinedKeywords = keywords ? `${keywords}, ${baseKeywords}` : baseKeywords;
 
-      element.setAttribute("content", content);
-    };
+  return (
+    <Helmet>
+      {/* Title */}
+      <title>{fullTitle}</title>
+      <meta name="description" content={description} />
+      <meta name="keywords" content={combinedKeywords} />
 
-    // Helper to update link tags
-    const updateLinkTag = (rel: string, href: string) => {
-      let element = document.querySelector(`link[rel="${rel}"]`);
+      {/* Application Meta */}
+      <meta name="application-name" content="AI Verse VITB" />
+      <meta name="apple-mobile-web-app-title" content="AI Verse VITB" />
 
-      if (!element) {
-        element = document.createElement("link");
-        element.setAttribute("rel", rel);
-        document.head.appendChild(element);
-      }
+      {/* Robots Directives */}
+      {noIndex ? (
+        <meta name="robots" content="noindex, nofollow" />
+      ) : (
+        <meta name="robots" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+      )}
+      {noIndex ? (
+        <meta name="googlebot" content="noindex, nofollow" />
+      ) : (
+        <meta name="googlebot" content="index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1" />
+      )}
 
-      element.setAttribute("href", href);
-    };
+      {/* Canonical Link */}
+      <link rel="canonical" href={fullUrl} />
 
-    // 2. Robots Directives (Strict noindex for private portals, rich indexing for public pages)
-    if (noIndex) {
-      updateMetaTag("robots", "noindex, nofollow");
-      updateMetaTag("googlebot", "noindex, nofollow");
-    } else {
-      updateMetaTag("robots", "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1");
-      updateMetaTag("googlebot", "index, follow, max-snippet:-1, max-image-preview:large, max-video-preview:-1");
-    }
+      {/* Open Graph (Facebook/LinkedIn) */}
+      <meta property="og:site_name" content="AI Verse VITB" />
+      <meta property="og:type" content={type} />
+      <meta property="og:locale" content="en_US" />
+      <meta property="og:url" content={fullUrl} />
+      <meta property="og:title" content={fullTitle} />
+      <meta property="og:description" content={description} />
+      <meta property="og:image" content={fullImage} />
+      <meta property="og:image:secure_url" content={fullImage} />
+      <meta property="og:image:alt" content={fullTitle} />
+      <meta property="og:image:type" content="image/png" />
 
-    // 3. Meta Description
-    updateMetaTag("description", description);
-    updateMetaTag("og:description", description, true);
-    updateMetaTag("twitter:description", description);
+      {/* Twitter Cards */}
+      <meta name="twitter:card" content="summary_large_image" />
+      <meta name="twitter:site" content="@aiverse_vitb" />
+      <meta name="twitter:creator" content="@aiverse_vitb" />
+      <meta name="twitter:url" content={fullUrl} />
+      <meta name="twitter:title" content={fullTitle} />
+      <meta name="twitter:description" content={description} />
+      <meta name="twitter:image" content={fullImage} />
+      <meta name="twitter:image:alt" content={fullTitle} />
 
-    // 4. Site Name & App Identity
-    updateMetaTag("og:site_name", "AI Verse VITB", true);
-    updateMetaTag("og:type", type, true);
-    updateMetaTag("og:locale", "en_US", true);
-    updateMetaTag("application-name", "AI Verse VITB");
-    updateMetaTag("apple-mobile-web-app-title", "AI Verse VITB");
+      {/* Icons */}
+      <link rel="icon" href="/ai_verse.png" />
+      <link rel="apple-touch-icon" href="/ai_verse.png" />
 
-    // 5. Meta Keywords
-    const baseKeywords = "aiversevitb.in, aiversevitb, AI Verse VITB, aiverse vitb, VIT Bhimavaram, Vishnu Institute of Technology, AI & Data Science, Student Technical Club, Hackathons, Coding Competitions";
-    const combinedKeywords = keywords ? `${keywords}, ${baseKeywords}` : baseKeywords;
-    updateMetaTag("keywords", combinedKeywords);
-
-    // 6. Title Tags for OG & Twitter
-    updateMetaTag("og:title", fullTitle, true);
-    updateMetaTag("twitter:title", fullTitle);
-
-    // 7. Favicon & Touch Icons
-    updateLinkTag("icon", "/ai_verse.png");
-    updateLinkTag("apple-touch-icon", "/ai_verse.png");
-
-    // 8. Canonical & URL Tags
-    let fullUrl = PRODUCTION_DOMAIN;
-    if (url) {
-      fullUrl = url.startsWith("http") ? url : `${PRODUCTION_DOMAIN}${url.startsWith("/") ? "" : "/"}${url}`;
-    } else if (typeof window !== "undefined") {
-      fullUrl = `${PRODUCTION_DOMAIN}${window.location.pathname}${window.location.search}`;
-    }
-    updateMetaTag("og:url", fullUrl, true);
-    updateMetaTag("twitter:url", fullUrl);
-    updateLinkTag("canonical", fullUrl);
-
-    // 9. Social Media Image Cards
-    const fullImage = image
-      ? (image.startsWith("http") ? image : `${PRODUCTION_DOMAIN}${image.startsWith("/") ? "" : "/"}${image}`)
-      : `${PRODUCTION_DOMAIN}/event-banner.png`;
-    updateMetaTag("og:image", fullImage, true);
-    updateMetaTag("og:image:secure_url", fullImage, true);
-    updateMetaTag("og:image:alt", fullTitle, true);
-    updateMetaTag("og:image:type", "image/png", true);
-    updateMetaTag("twitter:image", fullImage);
-    updateMetaTag("twitter:image:alt", fullTitle);
-    updateMetaTag("twitter:card", "summary_large_image");
-    updateMetaTag("twitter:site", "@aiverse_vitb");
-    updateMetaTag("twitter:creator", "@aiverse_vitb");
-
-    // 10. Dynamic JSON-LD Structured Data Schema
-    const scriptId = "dynamic-route-schema";
-    let scriptTag = document.getElementById(scriptId) as HTMLScriptElement | null;
-    if (schema) {
-      if (!scriptTag) {
-        scriptTag = document.createElement("script");
-        scriptTag.id = scriptId;
-        scriptTag.type = "application/ld+json";
-        document.head.appendChild(scriptTag);
-      }
-      scriptTag.text = JSON.stringify(schema);
-    } else if (scriptTag) {
-      scriptTag.remove();
-    }
-
-    return () => {
-      const dynamicScript = document.getElementById(scriptId);
-      if (dynamicScript) dynamicScript.remove();
-    };
-  }, [title, description, keywords, url, image, type, noIndex, schema]);
-
-  return null;
+      {/* JSON-LD Structured Data Schema */}
+      {schema && (
+        <script type="application/ld+json">
+          {JSON.stringify(schema)}
+        </script>
+      )}
+    </Helmet>
+  );
 };
 
 export default SEO;
+

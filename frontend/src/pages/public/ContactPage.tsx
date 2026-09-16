@@ -60,19 +60,19 @@ const ContactPage: React.FC = () => {
   return (
     <div className="overflow-hidden bg-[#FAFBFC] pb-24 pt-28 min-h-screen font-sans">
       <SEO 
-        title="Contact AI Verse VITB | Vishnu Institute of Technology, Bhimavaram" 
-        description="Get in touch with the AI Verse VITB team at Vishnu Institute of Technology, Bhimavaram for project partnerships, event queries, student hackathons, and community membership."
-        keywords="Contact AI Verse, aiversevitb, AI Verse VITB, VIT Bhimavaram, Vishnu Institute of Technology, AI Student Club Contact, Bhimavaram"
+        title="Contact AI Verse | Partner with VIT Bhimavaram's Tech Club" 
+        description="Get in touch with the AI Verse team at Vishnu Institute of Technology, Bhimavaram (VITB). Reach out for hackathon sponsorships, guest speaker opportunities, tech partnerships, and community membership queries."
+        keywords="Contact AI Verse, Sponsor Hackathon VITB, Tech Club Partnerships, VIT Bhimavaram Student Club Contact, Guest Speaker AI Workshops, Andhra Pradesh Tech Events"
         url="/contact"
         schema={{
           "@context": "https://schema.org",
           "@type": "ContactPage",
           "name": "Contact AI Verse VITB",
           "url": "https://aiversevitb.in/contact",
-          "description": "Get in touch with AI Verse at Vishnu Institute of Technology, Bhimavaram.",
+          "description": "Get in touch with AI Verse for sponsorships, tech partnerships, and event collaborations at Vishnu Institute of Technology, Bhimavaram.",
           "mainEntity": {
             "@type": "EducationalOrganization",
-            "name": "AI Verse VITB",
+            "name": "AI Verse - Vishnu Institute of Technology",
             "alternateName": "Aiverse VITB",
             "url": "https://aiversevitb.in",
             "email": "aiversevitb@gmail.com",

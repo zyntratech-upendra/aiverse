@@ -41,7 +41,7 @@ router.post(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const rawPayload = req.body || {};
-    const allowedFields = ['title', 'description', 'shortDescription', 'category', 'track', 'date', 'time', 'venue', 'location', 'banner', 'bannerImage', 'coverImage', 'rules', 'prizes', 'tags', 'maxParticipants', 'maxReg', 'currentReg', 'teamSizeMin', 'teamSizeMax', 'minTeamSize', 'maxTeamSize', 'fee', 'isLive', 'registrationOpen', 'status', 'coordinators'];
+    const allowedFields = ['title', 'description', 'shortDescription', 'category', 'track', 'date', 'time', 'venue', 'location', 'banner', 'bannerImage', 'coverImage', 'rules', 'prizes', 'tags', 'maxParticipants', 'maxReg', 'currentReg', 'teamSizeMin', 'teamSizeMax', 'minTeamSize', 'maxTeamSize', 'fee', 'isLive', 'registrationOpen', 'status', 'coordinators', 'certificateConfig', 'allowLoginAccess'];
     const payload = pick(rawPayload, allowedFields);
     
     const id = rawPayload._id || rawPayload.id || new mongoose.Types.ObjectId().toString();
@@ -66,7 +66,7 @@ router.put(
   asyncHandler(async (req, res) => {
     const id = req.params.id;
     const rawPayload = req.body || {};
-    const allowedFields = ['title', 'description', 'shortDescription', 'category', 'track', 'date', 'time', 'venue', 'location', 'banner', 'bannerImage', 'coverImage', 'rules', 'prizes', 'tags', 'maxParticipants', 'maxReg', 'currentReg', 'teamSizeMin', 'teamSizeMax', 'minTeamSize', 'maxTeamSize', 'fee', 'isLive', 'registrationOpen', 'status', 'coordinators'];
+    const allowedFields = ['title', 'description', 'shortDescription', 'category', 'track', 'date', 'time', 'venue', 'location', 'banner', 'bannerImage', 'coverImage', 'rules', 'prizes', 'tags', 'maxParticipants', 'maxReg', 'currentReg', 'teamSizeMin', 'teamSizeMax', 'minTeamSize', 'maxTeamSize', 'fee', 'isLive', 'registrationOpen', 'status', 'coordinators', 'certificateConfig', 'allowLoginAccess'];
     const payload = pick(rawPayload, allowedFields);
     payload.updatedAt = Date.now();
 

@@ -190,9 +190,9 @@ const HomePage: React.FC = () => {
   return (
     <div className="overflow-hidden bg-[#F8FAFC]">
       <SEO
-        title="AI Verse VITB | AI & Data Science Student Community - VIT Bhimavaram"
-        description="Welcome to AI Verse VITB (aiversevitb) — the premier Artificial Intelligence & Data Science student community at Vishnu Institute of Technology, Bhimavaram (VIT Bhimavaram). Collaborate on AI projects, hackathons, workshops, and student innovation."
-        keywords="AI Verse, aiversevitb, AI Verse VITB, VIT Bhimavaram, Vishnu Institute of Technology, AI & Data Science, Data Science, Student AI Community, VITB AI, AI Hackathons Bhimavaram"
+        title="AI Verse | Official AI & Data Science Club of VIT Bhimavaram"
+        description="Welcome to AI Verse, the premier Artificial Intelligence and Data Science technical club at Vishnu Institute of Technology, Bhimavaram (VITB). Join us to explore Machine Learning, Deep Learning, Generative AI, and Data Analytics through hands-on workshops, national-level hackathons, and innovative student projects."
+        keywords="AI Verse, AI Verse VITB, Vishnu Institute of Technology AI Club, VIT Bhimavaram Tech Club, Artificial Intelligence, Data Science, Machine Learning, Deep Learning, Student Community, Hackathons in Bhimavaram, Tech Events Andhra Pradesh"
         url="/"
         type="website"
       />
