@@ -75,10 +75,11 @@ const ContactPage: React.FC = () => {
             "name": "AI Verse - Vishnu Institute of Technology",
             "alternateName": "Aiverse VITB",
             "url": "https://aiversevitb.in",
-            "email": "aiversevitb@gmail.com",
+            "email": "aiverse@vishnu.edu.in",
+            "telephone": "+918500538521",
             "address": {
               "@type": "PostalAddress",
-              "streetAddress": "Vishnu Institute of Technology, Vishnupur",
+              "streetAddress": "C Block, 2nd Floor, Room 302, Vishnu Institute of Technology, Vishnupur",
               "addressLocality": "Bhimavaram",
               "addressRegion": "Andhra Pradesh",
               "postalCode": "534202",
@@ -128,7 +129,7 @@ const ContactPage: React.FC = () => {
                 <div className="space-y-1">
                   <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Research Hub</h4>
                   <p className="text-sm font-semibold text-slate-700 leading-relaxed">
-                    AI Innovation Lab, Room 402, Block III<br />
+                    C Block, 2nd Floor, Room 302<br />
                     Vishnu Institute of Technology
                   </p>
                 </div>
@@ -142,8 +143,8 @@ const ContactPage: React.FC = () => {
                 <div className="space-y-1">
                   <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Email Inquiry</h4>
                   <p className="text-sm font-semibold text-slate-700">
-                    <a href="mailto:coordination@ai-verse.org" className="hover:text-[#2563EB] transition-colors">
-                      coordination@ai-verse.org
+                    <a href="mailto:aiverse@vishnu.edu.in" className="hover:text-[#2563EB] transition-colors">
+                      aiverse@vishnu.edu.in
                     </a>
                   </p>
                 </div>
@@ -157,7 +158,9 @@ const ContactPage: React.FC = () => {
                 <div className="space-y-1">
                   <h4 className="text-xs font-bold text-slate-400 uppercase tracking-wider">Coordinator Helpline</h4>
                   <p className="text-sm font-semibold text-slate-700">
-                    +1 (555) 234-5678
+                    <a href="tel:+918500538521" className="hover:text-[#2563EB] transition-colors">
+                      +91 8500538521
+                    </a>
                   </p>
                 </div>
               </div>

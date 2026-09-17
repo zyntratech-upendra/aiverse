@@ -15,6 +15,7 @@ import SEO from "../../components/layout/SEO";
 
 import { dataCache } from "../../utils/dataCache";
 import HeroImageCarousel from "../../components/home/HeroImageCarousel";
+import { formatEventDateRange } from "../../utils/dateFormatter";
 
 // Fallback assets
 import sparkImg from "../../assets/images/spark.png";
@@ -88,7 +89,7 @@ const HomePage: React.FC = () => {
             id: data.id || data._id,
             title: title,
             category: eventType,
-            date: data.date || "Oct 24",
+            date: formatEventDateRange(data.startDate || data.date, data.endDate),
             description: data.description || "",
             image: img,
             iconType: eventType === "Hackathon" ? "globe" : "network"

@@ -1,7 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
-import { fetchAlbums, createAlbum, bulkCreateAlbums, updateAlbum, deleteAlbum } from "../../services/apiClient";
+import { fetchAlbums, createAlbum, bulkCreateAlbums, updateAlbum, deleteAlbum, fetchEvents } from "../../services/apiClient";
 import { dataCache } from "../../utils/dataCache";
 import { 
   Image as ImageIcon, 
@@ -68,6 +68,11 @@ export const GalleryManagementPage: React.FC = () => {
   const [loading, setLoading] = useState<boolean>(true);
   const [toastQueue, setToastQueue] = useState<ToastMessage[]>([]);
 
+  // Events list for selector
+  const [eventsList, setEventsList] = useState<any[]>([]);
+  const [selectedEventId, setSelectedEventId] = useState<string>("");
+  const [isCustomEvent, setIsCustomEvent] = useState<boolean>(false);
+
   // Search, Filter & View Controls
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedCategory, setSelectedCategory] = useState<string>("All");
@@ -116,6 +121,59 @@ export const GalleryManagementPage: React.FC = () => {
           : p.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ").replace(/\b\w/g, (c) => c.toUpperCase())
       }))
     );
+  };
+
+  const handleEventSelectChange = (eventId: string) => {
+    setSelectedEventId(eventId);
+    if (eventId === "custom") {
+      setIsCustomEvent(true);
+      return;
+    }
+
+    if (!eventId) {
+      setIsCustomEvent(false);
+      handleBatchNameChange("");
+      return;
+    }
+
+    setIsCustomEvent(false);
+    const ev = eventsList.find((e) => (e.id || e._id) === eventId);
+    if (ev) {
+      const eventTitle = ev.title || ev.name || "";
+      handleBatchNameChange(eventTitle);
+
+      // Auto-map category if matching
+      const evType = `${ev.type || ""} ${ev.category || ""}`.toLowerCase();
+      let matchedCategory: GalleryPhotoItem["category"] = "Workshops";
+      if (evType.includes("hackathon")) matchedCategory = "Hackathons";
+      else if (evType.includes("symposium") || evType.includes("seminar") || evType.includes("talk") || evType.includes("conference")) matchedCategory = "Symposiums";
+      else if (evType.includes("social") || evType.includes("meet") || evType.includes("network") || evType.includes("club")) matchedCategory = "Socials";
+      else if (evType.includes("workshop") || evType.includes("bootcamp") || evType.includes("training") || evType.includes("quiz")) matchedCategory = "Workshops";
+
+      setBatchCategory(matchedCategory);
+
+      // Auto-set date if available
+      if (ev.date) {
+        const parsedDate = new Date(ev.date);
+        let formattedDate = ev.date;
+        if (!isNaN(parsedDate.getTime())) {
+          const yyyyMmDd = parsedDate.toISOString().split("T")[0];
+          setBatchDate(yyyyMmDd);
+          formattedDate = parsedDate.toLocaleDateString("en-US", {
+            month: "short",
+            day: "numeric",
+            year: "numeric"
+          });
+        }
+        setPendingUploads((prev) =>
+          prev.map((p) => ({ ...p, category: matchedCategory, date: formattedDate }))
+        );
+      } else {
+        setPendingUploads((prev) =>
+          prev.map((p) => ({ ...p, category: matchedCategory }))
+        );
+      }
+    }
   };
 
   // Edit Form State
@@ -197,8 +255,21 @@ export const GalleryManagementPage: React.FC = () => {
     }
   };
 
+  // Load events for selection dropdown
+  const loadEvents = async () => {
+    try {
+      const data = await fetchEvents();
+      if (Array.isArray(data)) {
+        setEventsList(data);
+      }
+    } catch (err) {
+      console.warn("Failed to load events for gallery selector:", err);
+    }
+  };
+
   useEffect(() => {
     loadPhotos();
+    loadEvents();
   }, []);
 
   // Compression helper
@@ -331,6 +402,11 @@ export const GalleryManagementPage: React.FC = () => {
       return;
     }
 
+    if (!batchName.trim() && !isCustomEvent && !selectedEventId) {
+      addToast("Please select an event or enter an event name", "warning");
+      return;
+    }
+
     setIsUploading(true);
     addToast(`Processing and compressing ${pendingUploads.length} ${pendingUploads.length === 1 ? "photo" : "photos"}...`, "info");
 
@@ -343,6 +419,7 @@ export const GalleryManagementPage: React.FC = () => {
           return {
             title: p.title.trim() || `Photo ${idx + 1}`,
             eventTitle: cleanEventName,
+            eventId: selectedEventId && selectedEventId !== "custom" ? selectedEventId : undefined,
             imageUrl: compressed,
             coverImage: compressed,
             bannerImage: compressed,
@@ -570,6 +647,9 @@ export const GalleryManagementPage: React.FC = () => {
             variant="gradient"
             onClick={() => {
               setPendingUploads([]);
+              setSelectedEventId("");
+              setIsCustomEvent(false);
+              setBatchName("");
               setIsUploadModalOpen(true);
             }}
             className="rounded-2xl px-5 py-2.5 font-black text-xs shadow-md hover:shadow-lg flex items-center gap-2 cursor-pointer"
@@ -730,6 +810,9 @@ export const GalleryManagementPage: React.FC = () => {
             variant="gradient"
             onClick={() => {
               setPendingUploads([]);
+              setSelectedEventId("");
+              setIsCustomEvent(false);
+              setBatchName("");
               setIsUploadModalOpen(true);
             }}
             className="rounded-xl px-5 py-2 text-xs font-black shadow-md cursor-pointer"
@@ -745,6 +828,9 @@ export const GalleryManagementPage: React.FC = () => {
           <div
             onClick={() => {
               setPendingUploads([]);
+              setSelectedEventId("");
+              setIsCustomEvent(false);
+              setBatchName("");
               setIsUploadModalOpen(true);
             }}
             className="group rounded-3xl border-2 border-dashed border-slate-200 hover:border-blue-500/80 bg-slate-50/50 hover:bg-blue-50/20 p-6 flex flex-col items-center justify-center text-center transition-all duration-200 cursor-pointer min-h-[280px]"
@@ -1046,16 +1132,59 @@ export const GalleryManagementPage: React.FC = () => {
                 {/* Common Defaults for Uploads */}
                 <div className="bg-slate-50 p-4 rounded-2xl border border-slate-200/80 space-y-3">
                   <div>
-                    <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
-                      Photo / Event Name *
-                    </label>
-                    <input
-                      type="text"
-                      value={batchName}
-                      onChange={(e) => handleBatchNameChange(e.target.value)}
-                      placeholder="E.g. Code Slayer Hackathon 2026, AI Symposium, Student Project..."
-                      className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-bold text-[#0F172A] placeholder-slate-400 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
-                    />
+                    <div className="flex items-center justify-between mb-1">
+                      <label className="text-[10px] font-extrabold text-slate-500 uppercase block">
+                        Photo / Event Name *
+                      </label>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const nextCustom = !isCustomEvent;
+                          setIsCustomEvent(nextCustom);
+                          if (nextCustom) {
+                            setSelectedEventId("custom");
+                          } else {
+                            setSelectedEventId("");
+                            handleBatchNameChange("");
+                          }
+                        }}
+                        className="text-[10px] font-bold text-blue-600 hover:text-blue-700 hover:underline cursor-pointer"
+                      >
+                        {isCustomEvent ? "← Choose From Events Page" : "✍ Enter Custom Name"}
+                      </button>
+                    </div>
+
+                    {!isCustomEvent ? (
+                      <select
+                        value={selectedEventId}
+                        onChange={(e) => handleEventSelectChange(e.target.value)}
+                        className="w-full bg-white border border-slate-200 rounded-xl px-3.5 py-2.5 text-xs font-bold text-[#0F172A] outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs cursor-pointer"
+                      >
+                        <option value="">-- Select Event From Events Page --</option>
+                        {eventsList.map((ev) => (
+                          <option key={ev.id || ev._id} value={ev.id || ev._id}>
+                            {ev.title || ev.name} {ev.type ? `[${ev.type}]` : ""} {ev.date ? `• ${ev.date}` : ""}
+                          </option>
+                        ))}
+                        <option value="custom">✍ Other / Custom Event Name...</option>
+                      </select>
+                    ) : (
+                      <input
+                        type="text"
+                        value={batchName}
+                        onChange={(e) => handleBatchNameChange(e.target.value)}
+                        placeholder="E.g. Code Slayer Hackathon 2026, AI Symposium, Student Project..."
+                        autoFocus
+                        className="w-full bg-white border border-blue-300 ring-2 ring-blue-500/10 rounded-xl px-3.5 py-2 text-xs font-bold text-[#0F172A] placeholder-slate-400 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
+                      />
+                    )}
+
+                    {selectedEventId && !isCustomEvent && batchName && (
+                      <div className="mt-1.5 flex items-center gap-1.5 text-[11px] text-slate-600 font-medium bg-blue-50/80 border border-blue-200/60 px-2.5 py-1 rounded-lg">
+                        <span className="text-blue-600 font-bold">Selected Event:</span>
+                        <span className="truncate font-semibold">{batchName}</span>
+                      </div>
+                    )}
                   </div>
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">

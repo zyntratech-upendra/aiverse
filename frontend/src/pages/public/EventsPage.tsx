@@ -12,6 +12,7 @@ import Button from "../../components/ui/Button";
 import SEO from "../../components/layout/SEO";
 import { fetchEvents } from "../../services/apiClient";
 import { dataCache } from "../../utils/dataCache";
+import { formatEventDateRange } from "../../utils/dateFormatter";
 
 // Import local assets
 import sparkImg from "../../assets/images/spark.png";
@@ -24,14 +25,15 @@ interface Event {
   type: "Workshop" | "Hackathon" | "Seminar" | "Networking" | "Quiz";
   category?: string;
   date: string;
+  startDate?: string;
+  endDate?: string;
   time: string;
   location: string;
   description: string;
   image: string;
-  status: "Draft" | "Active" | "Opened" | "Completed" | "Archived";
+  status: "Draft" | "Active" | "Opened" | "Completed" | "Archived" | "Closed";
   currentReg: number;
   maxReg: number;
-  endDate?: string;
   isPastEvent?: boolean;
   registrationFee?: number;
   pricingType?: "per_person" | "per_team";
@@ -48,6 +50,11 @@ const EventsPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"All" | "Hackathon" | "Workshop" | "Seminar" | "Quiz" | "Completed">("All");
   const [events, setEvents] = useState<Event[]>(() => dataCache.get<Event[]>("public_events") || []);
   const [loading, setLoading] = useState<boolean>(() => !dataCache.get<Event[]>("public_events"));
+  const [visibleCount, setVisibleCount] = useState<number>(5);
+
+  useEffect(() => {
+    setVisibleCount(5);
+  }, [activeTab, searchQuery]);
 
   useEffect(() => {
     const loadEvents = async () => {
@@ -107,6 +114,8 @@ const EventsPage: React.FC = () => {
             type: eventType,
             category: data.category || eventType,
             date: data.date || data.startDate || "TBD",
+            startDate: data.startDate || data.date || "TBD",
+            endDate: data.endDate || "",
             time: timeText,
             location: data.location || data.venue || "Virtual Hub",
             description: data.description || data.shortDescription || "",
@@ -114,7 +123,6 @@ const EventsPage: React.FC = () => {
             status: normStatus as Event["status"],
             currentReg: Math.max(0, Number(data.currentReg) || 0),
             maxReg: data.maxReg || 100,
-            endDate: data.endDate || data.startDate || "",
             isPastEvent: isExplicitlyCompleted,
             registrationFee: data.registrationFee !== undefined ? Number(data.registrationFee) : 0,
             pricingType: data.pricingType === "per_team" || data.pricingModel === "per_team" ? "per_team" : "per_person",
@@ -385,7 +393,7 @@ const EventsPage: React.FC = () => {
   };
 
   const timelineEvents = events.slice(0, 5).map(e => ({
-    date: e.date,
+    date: formatEventDateRange(e.startDate || e.date, e.endDate),
     title: e.title,
     type: `${e.type} • ${e.location.split("/")[0].trim()}`
   }));
@@ -432,6 +440,9 @@ const EventsPage: React.FC = () => {
                           (event.category || "").toLowerCase().includes(searchQuery.toLowerCase());
     return matchesTab && matchesSearch;
   });
+
+  const displayedEvents = filteredEvents.slice(0, visibleCount);
+  const hasMoreEvents = visibleCount < filteredEvents.length;
 
   const fadeInUp = {
     hidden: { opacity: 0, y: 25 },
@@ -564,8 +575,8 @@ const EventsPage: React.FC = () => {
               <div className="bg-white rounded-card shadow-sm border border-slate-100 py-16 text-center text-slate-500 font-bold animate-pulse text-xs uppercase tracking-wider">
                 Loading events from database...
               </div>
-            ) : filteredEvents.length > 0 ? (
-              filteredEvents.map((event) => {
+            ) : displayedEvents.length > 0 ? (
+              displayedEvents.map((event) => {
                 const isCompleted = isCompletedEvent(event);
 
                 return (
@@ -597,7 +608,7 @@ const EventsPage: React.FC = () => {
                         <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-xs text-slate-500 font-medium">
                           <span className="flex items-center gap-1.5">
                             <Calendar className="h-3.5 w-3.5 text-[#2563EB]" />
-                            {event.date} • {event.time}
+                            {formatEventDateRange(event.startDate || event.date, event.endDate)} • {event.time}
                           </span>
                           <span className="flex items-center gap-1.5">
                             <MapPin className="h-3.5 w-3.5 text-slate-400" />
@@ -667,9 +678,15 @@ const EventsPage: React.FC = () => {
             )}
 
             {/* Load More Button */}
-            {filteredEvents.length > 0 && (
-              <button className="w-full py-3.5 border border-slate-200 hover:border-slate-300 text-slate-500 hover:text-slate-700 bg-white hover:bg-slate-50 transition-all font-bold text-xs rounded-xl shadow-sm">
-                Load More Events
+            {hasMoreEvents && (
+              <button 
+                onClick={() => setVisibleCount((prev) => prev + 5)}
+                className="w-full py-3.5 border border-slate-200 hover:border-blue-300 text-slate-600 hover:text-blue-600 bg-white hover:bg-blue-50/40 transition-all font-bold text-xs rounded-2xl shadow-sm cursor-pointer flex items-center justify-center gap-2 group"
+              >
+                <span>Load More Events</span>
+                <span className="text-[10px] bg-slate-100 group-hover:bg-blue-100 text-slate-500 group-hover:text-blue-700 px-2 py-0.5 rounded-full font-bold">
+                  Showing {displayedEvents.length} of {filteredEvents.length}
+                </span>
               </button>
             )}
           </div>

@@ -22,6 +22,7 @@ import Button from "../../components/ui/Button";
 import { fetchEvents, fetchOrganizers } from "../../services/apiClient";
 import { userService } from "../../services/userService";
 import { dataCache } from "../../utils/dataCache";
+import { formatEventDateRange } from "../../utils/dateFormatter";
 
 // Import local assets
 import sparkImg from "../../assets/images/spark.png";
@@ -646,7 +647,7 @@ const EventDetailsPage: React.FC = () => {
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-4 text-xs sm:text-sm text-slate-550 font-semibold">
                 <span className="flex items-center gap-2">
                   <Calendar className="h-4.5 w-4.5 text-blue-600 shrink-0" />
-                  {event.date}
+                  {formatEventDateRange(event.startDate || event.date, event.endDate)}
                 </span>
                 <span className="flex items-center gap-2">
                   <Clock className="h-4.5 w-4.5 text-blue-600 shrink-0" />
@@ -1326,7 +1327,7 @@ const EventDetailsPage: React.FC = () => {
                     <div className="flex items-center gap-4 text-[10px] font-bold text-slate-400 pt-1">
                       <span className="flex items-center gap-1">
                         <Calendar className="h-3.5 w-3.5 text-blue-500" />
-                        {rEvent.date}
+                        {formatEventDateRange((rEvent as any).startDate || rEvent.date, (rEvent as any).endDate)}
                       </span>
                       <span className="flex items-center gap-1">
                         <MapPin className="h-3.5 w-3.5 text-blue-500 truncate" />
