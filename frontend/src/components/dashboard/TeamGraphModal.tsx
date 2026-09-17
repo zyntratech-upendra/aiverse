@@ -40,6 +40,65 @@ const DEFAULT_MODAL_ROLES = [
   "Event Management"
 ];
 
+// Ranking helpers for intelligent hierarchy
+const getFacultyRank = (member: { name?: string; role?: string; position?: string; sub_role?: string; roleType?: string }): number => {
+  const name = (member.name || "").toLowerCase();
+  const pos = (member.position || "").toLowerCase();
+  const role = (member.role || "").toLowerCase();
+  const sub = (member.sub_role || "").toLowerCase();
+  const combined = `${pos} ${role} ${sub} ${name}`.toLowerCase();
+
+  // 1. Conveners / Advisors
+  if (combined.includes("convener") || combined.includes("conviner")) return 1;
+  
+  // 2. Doctors, Professors, Faculty Coordinators
+  if (
+    combined.includes("faculty coordinator") ||
+    combined.includes("faculty advisor") ||
+    combined.includes("dr.") ||
+    combined.includes("dr ") ||
+    name.startsWith("dr") ||
+    combined.includes("prof") ||
+    role === "faculty" ||
+    pos === "faculty" ||
+    sub === "faculty"
+  ) {
+    return 2;
+  }
+
+  // 3. Staff Members / Non-faculty staff
+  if (combined.includes("staff") || combined.includes("lab") || combined.includes("assistant")) {
+    return 3;
+  }
+
+  return 4;
+};
+
+const getOrganizerRank = (member: { name?: string; role?: string; position?: string; sub_role?: string; roleType?: string }): number => {
+  const combined = `${member.position || ""} ${member.role || ""} ${member.sub_role || ""} ${member.roleType || ""}`.toLowerCase().trim();
+  if (combined.includes("lead organizer") || (combined.includes("organizer") && !combined.includes("co-") && !combined.includes("co "))) return 1;
+  if (combined.includes("co-organizer") || combined.includes("co organizer")) return 2;
+  if (combined.includes("secretary")) return 3;
+  if (combined.includes("facilitator")) return 4;
+  return 5;
+};
+
+const getSubRoleRank = (member: { name?: string; role?: string; position?: string; sub_role?: string; roleType?: string }): number => {
+  const pos = (member.position || "").toLowerCase().trim();
+  const role = (member.role || "").toLowerCase().trim();
+  const sub = (member.sub_role || "").toLowerCase().trim();
+  const combined = `${pos} ${role} ${sub}`.toLowerCase().trim();
+
+  if (pos === "lead" || pos === "head" || pos === "student lead" || pos === "team lead") return 1;
+  if (pos === "co-lead" || pos === "co lead" || pos === "colead" || pos === "co-head" || pos === "vice lead") return 2;
+  if (pos === "associate" || pos === "assoc" || pos === "core member") return 3;
+
+  if (combined.includes("co-lead") || combined.includes("co lead") || combined.includes("colead") || combined.includes("vice lead")) return 2;
+  if (combined.includes("lead") || combined.includes("head") || combined.includes("president") || combined.includes("convener")) return 1;
+  if (combined.includes("associate") || combined.includes("assoc") || combined.includes("executive")) return 3;
+  return 4;
+};
+
 // Helper to determine the best initial role column for a user
 const mapUserToInitialRole = (user: UserItem, rolesList: string[]): string => {
   const role = (user.role || "").toLowerCase().trim();
@@ -228,20 +287,48 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
           initialGroups[targetRole].push({ ...u });
         });
 
-        // Sort members in each column: Saved order first, then Leads, then Co-Leads, then Others
+        // Sort members in each column: Saved roleMemberOrder first, then explicit numeric order, then hierarchy, then alphabetical
         Object.keys(initialGroups).forEach(roleKey => {
+          const savedOrderList: string[] = (configData?.roleMemberOrder?.[roleKey] || []).map((e: string) => (e || "").toLowerCase().trim());
+          const isFaculty = roleKey.toLowerCase().includes("faculty") || roleKey.toLowerCase().includes("convener");
+          const isOrg = roleKey.toLowerCase().includes("club organizer") || roleKey.toLowerCase() === "organizers";
+
           initialGroups[roleKey].sort((a, b) => {
+            const emailA = (a.email || "").toLowerCase().trim();
+            const emailB = (b.email || "").toLowerCase().trim();
+            const idA = (a.id || a._id || "").toLowerCase().trim();
+            const idB = (b.id || b._id || "").toLowerCase().trim();
+
+            if (savedOrderList.length > 0) {
+              const idxA = savedOrderList.findIndex(e => e && (e === emailA || (idA && e === idA)));
+              const idxB = savedOrderList.findIndex(e => e && (e === emailB || (idB && e === idB)));
+              if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+              if (idxA !== -1) return -1;
+              if (idxB !== -1) return 1;
+            }
+
             if (a.order !== undefined && b.order !== undefined && a.order !== b.order) {
               return a.order - b.order;
             }
             if (a.order !== undefined && b.order === undefined) return -1;
             if (a.order === undefined && b.order !== undefined) return 1;
 
-            const posA = (a.position || a.role || "").toLowerCase();
-            const posB = (b.position || b.role || "").toLowerCase();
-            const rankA = posA.includes("lead") && !posA.includes("co-") ? 1 : posA.includes("co-lead") ? 2 : 3;
-            const rankB = posB.includes("lead") && !posB.includes("co-") ? 1 : posB.includes("co-lead") ? 2 : 3;
-            if (rankA !== rankB) return rankA - rankB;
+            if (isFaculty) {
+              const fRankA = getFacultyRank(a);
+              const fRankB = getFacultyRank(b);
+              if (fRankA !== fRankB) return fRankA - fRankB;
+            }
+
+            if (isOrg) {
+              const oRankA = getOrganizerRank(a);
+              const oRankB = getOrganizerRank(b);
+              if (oRankA !== oRankB) return oRankA - oRankB;
+            }
+
+            const subRankA = getSubRoleRank(a);
+            const subRankB = getSubRoleRank(b);
+            if (subRankA !== subRankB) return subRankA - subRankB;
+
             return (a.name || "").localeCompare(b.name || "");
           });
         });
@@ -424,13 +511,23 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
     setSaveSuccess(false);
 
     try {
-      // 1. Save ordered roles to settings (portal_config)
-      await updateSettings("portal_config", {
-        availableRoles: roles,
-        roleOrder: roles
+      // 1. Build roleMemberOrder list per role to preserve exact drag/drop visual order
+      const roleMemberOrder: Record<string, string[]> = {};
+      roles.forEach(roleName => {
+        const mems = membersByRole[roleName] || [];
+        roleMemberOrder[roleName] = mems
+          .map(m => (m.email || m.id || m._id || "").toLowerCase().trim())
+          .filter(Boolean);
       });
 
-      // 2. Identify users whose role or order changed and update them
+      // 2. Save ordered roles and member order list to settings (portal_config)
+      await updateSettings("portal_config", {
+        availableRoles: roles,
+        roleOrder: roles,
+        roleMemberOrder: roleMemberOrder
+      });
+
+      // 3. Identify users whose role or order changed and update them
       const updatePromises: Promise<any>[] = [];
       const updatedMembersByRole: Record<string, UserItem[]> = {};
 
@@ -471,11 +568,11 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
       await Promise.allSettled(updatePromises);
       setMembersByRole(updatedMembersByRole);
 
-      // 3. Invalidate client caches
+      // 4. Invalidate client caches
       dataCache.remove("public_team");
       dataCache.remove("portal_config");
 
-      // 4. Update snapshot & notify
+      // 5. Update snapshot & notify
       setInitialStateSnapshot(JSON.stringify({ roles, members: updatedMembersByRole }));
       setSaveSuccess(true);
       onUsersUpdated?.();

@@ -23,10 +23,11 @@ function userQuery(id) {
 // GET /api/users/team - Public endpoint for About/Team page (no auth required)
 router.get(
   '/team',
+  optionalAuth,
   asyncHandler(async (req, res) => {
-    const users = await User.find({ status: 'Active' })
-      .select('name display_name email role position bio linkedin github image show_in_about year status')
-      .sort({ created_at: 1 })
+    const users = await User.find({ status: { $regex: /^active$/i } })
+      .select('name display_name displayName email personal_email role roleType position sub_role bio linkedin github image show_in_about year status order created_at')
+      .sort({ order: 1, created_at: 1 })
       .lean();
 
     // Filter out participants to safely expose only team members

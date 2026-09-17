@@ -509,9 +509,32 @@ export async function fetchUsers(query?: { role?: string; email?: string }) {
 
 // Public endpoint - no auth required, returns only show_in_about members
 export async function fetchTeamMembers() {
-  const res = await fetch(`${API_BASE}/users/team`);
-  if (!res.ok) throw new Error('Failed to fetch team members');
-  return res.json();
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json'
+    };
+    const authH = authHeaders();
+    if (authH && (authH as any).Authorization) {
+      headers['Authorization'] = (authH as any).Authorization;
+    }
+
+    const res = await fetch(`${API_BASE}/users/team`, { headers });
+    if (res.ok) {
+      return await res.json();
+    }
+  } catch (e) {
+    console.warn('[apiClient] Notice fetching /users/team:', e);
+  }
+
+  // Fallback to organizers endpoint if /users/team is unavailable
+  try {
+    const orgRes = await fetch(`${API_BASE}/organizers`);
+    if (orgRes.ok) {
+      return await orgRes.json();
+    }
+  } catch {}
+
+  return [];
 }
 
 

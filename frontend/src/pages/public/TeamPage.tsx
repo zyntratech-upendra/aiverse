@@ -161,6 +161,7 @@ const TeamPage: React.FC = () => {
     return cached.filter(m => !isParticipantUser(m));
   });
   const [configuredRoles, setConfiguredRoles] = useState<string[]>([]);
+  const [roleMemberOrder, setRoleMemberOrder] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState<boolean>(() => !dataCache.get<MemberData[]>("public_team"));
 
   useEffect(() => {
@@ -173,12 +174,15 @@ const TeamPage: React.FC = () => {
           fetchOrganizers()
         ]);
 
-        // Process config roles (prioritizing roleOrder from Team Roles Graph)
+        // Process config roles (prioritizing roleOrder and roleMemberOrder from Team Roles Graph)
         if (configRes.status === "fulfilled" && configRes.value) {
           const configData = configRes.value;
           const roles = configData.roleOrder || configData.availableRoles;
           if (roles && Array.isArray(roles) && roles.length > 0) {
             setConfiguredRoles(roles);
+          }
+          if (configData.roleMemberOrder && typeof configData.roleMemberOrder === "object") {
+            setRoleMemberOrder(configData.roleMemberOrder);
           }
         }
 
@@ -315,6 +319,40 @@ const TeamPage: React.FC = () => {
     );
   };
 
+  // Rank within Faculty Coordinators & Staff: 1. Convener -> 2. Doctors/Prof/Faculty -> 3. Staff Members -> 4. Others
+  const getFacultyRank = (member: MemberData): number => {
+    const name = (member.name || "").toLowerCase();
+    const pos = (member.position || "").toLowerCase();
+    const role = (member.role || "").toLowerCase();
+    const sub = (member.sub_role || "").toLowerCase();
+    const combined = `${pos} ${role} ${sub} ${name}`.toLowerCase();
+
+    // 1. Conveners / Advisors
+    if (combined.includes("convener") || combined.includes("conviner")) return 1;
+    
+    // 2. Doctors, Professors, Faculty Coordinators
+    if (
+      combined.includes("faculty coordinator") ||
+      combined.includes("faculty advisor") ||
+      combined.includes("dr.") ||
+      combined.includes("dr ") ||
+      name.startsWith("dr") ||
+      combined.includes("prof") ||
+      role === "faculty" ||
+      pos === "faculty" ||
+      sub === "faculty"
+    ) {
+      return 2;
+    }
+
+    // 3. Staff Members / Non-faculty staff
+    if (combined.includes("staff") || combined.includes("lab") || combined.includes("assistant")) {
+      return 3;
+    }
+
+    return 4;
+  };
+
   // Rank within Club Organizers: 1. Organizer -> 2. Co-Organizer -> 3. Secretary -> 4. Facilitator
   const getOrganizerRank = (member: MemberData): number => {
     const combined = `${member.position || ""} ${member.role || ""} ${member.roleType || ""}`.toLowerCase().trim();
@@ -372,28 +410,76 @@ const TeamPage: React.FC = () => {
     return 4;
   };
 
-  const compareMembersByRank = (a: MemberData, b: MemberData): number => {
-    // 1. If explicit order is set via Team Roles Graph, respect it strictly
-    if (a.order !== undefined && b.order !== undefined && a.order !== b.order) {
-      return a.order - b.order;
+  // Section-specific comparator that honors saved graph order, roleMemberOrder, and hierarchy
+  const createSectionMemberComparator = (sectionRoleName: string) => {
+    let emailOrderList: string[] = [];
+    if (roleMemberOrder && typeof roleMemberOrder === "object") {
+      if (Array.isArray(roleMemberOrder[sectionRoleName])) {
+        emailOrderList = roleMemberOrder[sectionRoleName];
+      } else {
+        const foundKey = Object.keys(roleMemberOrder).find(
+          k => k.toLowerCase().trim() === sectionRoleName.toLowerCase().trim()
+        );
+        if (foundKey && Array.isArray(roleMemberOrder[foundKey])) {
+          emailOrderList = roleMemberOrder[foundKey];
+        }
+      }
     }
-    if (a.order !== undefined && b.order === undefined) return -1;
-    if (a.order === undefined && b.order !== undefined) return 1;
+    const cleanOrderList = emailOrderList.map(e => (e || "").toLowerCase().trim()).filter(Boolean);
 
-    // 2. For Club Organizers without explicit order, compare by organizer rank
-    if (isClubOrganizer(a) && isClubOrganizer(b)) {
-      const orgRankA = getOrganizerRank(a);
-      const orgRankB = getOrganizerRank(b);
-      if (orgRankA !== orgRankB) return orgRankA - orgRankB;
-    }
+    const isFacultySection =
+      sectionRoleName.toLowerCase().includes("faculty") ||
+      sectionRoleName.toLowerCase().includes("convener");
+    const isOrgSection =
+      sectionRoleName.toLowerCase().includes("club organizer") ||
+      sectionRoleName.toLowerCase() === "organizers" ||
+      sectionRoleName.toLowerCase() === "club organizers";
 
-    // 3. Fallback to sub-role hierarchy rank
-    const rankA = getSubRoleRank(a);
-    const rankB = getSubRoleRank(b);
-    if (rankA !== rankB) return rankA - rankB;
+    return (a: MemberData, b: MemberData): number => {
+      const emailA = (a.email || "").toLowerCase().trim();
+      const emailB = (b.email || "").toLowerCase().trim();
+      const idA = (a.id || "").toLowerCase().trim();
+      const idB = (b.id || "").toLowerCase().trim();
 
-    // 4. Fallback to name
-    return (a.name || "").localeCompare(b.name || "");
+      // 1. Strict match against saved roleMemberOrder list from Team Roles Graph
+      if (cleanOrderList.length > 0) {
+        const idxA = cleanOrderList.findIndex(e => e && (e === emailA || (idA && e === idA)));
+        const idxB = cleanOrderList.findIndex(e => e && (e === emailB || (idB && e === idB)));
+
+        if (idxA !== -1 && idxB !== -1) return idxA - idxB;
+        if (idxA !== -1) return -1;
+        if (idxB !== -1) return 1;
+      }
+
+      // 2. Explicit numeric order from user document
+      if (a.order !== undefined && b.order !== undefined && a.order !== b.order) {
+        return a.order - b.order;
+      }
+      if (a.order !== undefined && b.order === undefined) return -1;
+      if (a.order === undefined && b.order !== undefined) return 1;
+
+      // 3. Faculty section hierarchy (Convener > Dr/Prof/Faculty > Staff > Other)
+      if (isFacultySection) {
+        const fRankA = getFacultyRank(a);
+        const fRankB = getFacultyRank(b);
+        if (fRankA !== fRankB) return fRankA - fRankB;
+      }
+
+      // 4. Club Organizers section hierarchy
+      if (isOrgSection || (isClubOrganizer(a) && isClubOrganizer(b))) {
+        const orgRankA = getOrganizerRank(a);
+        const orgRankB = getOrganizerRank(b);
+        if (orgRankA !== orgRankB) return orgRankA - orgRankB;
+      }
+
+      // 5. General department sub-role hierarchy (Lead > Co-Lead > Associate > Member)
+      const subRankA = getSubRoleRank(a);
+      const subRankB = getSubRoleRank(b);
+      if (subRankA !== subRankB) return subRankA - subRankB;
+
+      // 6. Name alphabetical fallback
+      return (a.name || "").localeCompare(b.name || "");
+    };
   };
 
   // Intelligent member-to-role matching for other departments
@@ -524,8 +610,9 @@ const TeamPage: React.FC = () => {
       }
 
       if (sectionMembers.length > 0) {
-        // Sort section members strictly by rank & saved order
-        sectionMembers.sort(compareMembersByRank);
+        // Sort section members strictly by roleMemberOrder, rank & saved order
+        const comparator = createSectionMemberComparator(roleName);
+        sectionMembers.sort(comparator);
         sectionMembers.forEach(m => assignedMemberIds.add(m.id || m.email || `${m.name}-${m.role}`));
 
         activeSections.push({
@@ -553,7 +640,7 @@ const TeamPage: React.FC = () => {
     });
 
     if (unassignedMembers.length > 0) {
-      unassignedMembers.sort(compareMembersByRank);
+      unassignedMembers.sort(createSectionMemberComparator("Additional Team Members"));
       activeSections.push({
         definition: {
           id: "other-members",
@@ -565,7 +652,7 @@ const TeamPage: React.FC = () => {
     }
 
     return activeSections;
-  }, [dbMembers, configuredRoles]);
+  }, [dbMembers, configuredRoles, roleMemberOrder]);
 
   return (
     <div className="bg-[#F8FAFC] min-h-screen text-slate-800">
