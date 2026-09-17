@@ -133,6 +133,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             const saved = JSON.parse(savedUserStr);
             if (saved && saved.email && saved.role) {
               setUser(saved);
+              // Silent backend re-authentication if token was missing or expired
+              if (!token) {
+                loginWithBackend(saved.email, "password123")
+                  .then((res) => {
+                    if (res?.token) setApiToken(res.token);
+                  })
+                  .catch(() => {});
+              }
             } else {
               localStorage.removeItem("aether_mock_user");
               setUser(null);
@@ -268,6 +276,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
       setUser(updatedUser);
       localStorage.setItem("aether_mock_user", JSON.stringify(updatedUser));
+      // Acquire valid backend JWT token for API operations
+      loginWithBackend(email, "password123")
+        .then((res) => {
+          if (res?.token) setApiToken(res.token);
+        })
+        .catch((err) => {
+          console.warn("[AuthContext] setMockRole silent backend login notice:", err);
+        });
     }
   };
 

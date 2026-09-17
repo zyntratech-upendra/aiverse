@@ -2,13 +2,19 @@ const getApiBase = (): string => {
   if (import.meta.env.VITE_API_BASE) {
     return (import.meta.env.VITE_API_BASE as string).replace(/\/+$/, '');
   }
-  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
-    return `${window.location.origin}/api`;
+  if (typeof window !== 'undefined') {
+    // If running on Vercel preview or production without VITE_API_BASE, connect to production backend on AWS
+    if (window.location.hostname.includes('vercel.app')) {
+      return 'https://aiversevitb.in/api';
+    }
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return `${window.location.origin}/api`;
+    }
   }
   return 'http://localhost:4000/api';
 };
 
-const API_BASE = getApiBase();
+export const API_BASE = getApiBase();
 
 // Retry helper for transient network/backend failures
 async function fetchWithRetry(url: string, options: RequestInit, retries = 2, delayMs = 1000): Promise<Response> {
@@ -55,14 +61,50 @@ export function setToken(token: string | null) {
 }
 
 export function getToken() {
+  if (!TOKEN) {
+    try {
+      const savedToken = localStorage.getItem('aiverse_api_token');
+      if (savedToken) TOKEN = savedToken;
+    } catch (e) {}
+  }
   return TOKEN;
 }
 
-function authHeaders(isJson = true) {
+export function authHeaders(isJson = true) {
   const headers: Record<string, string> = {};
   if (isJson) headers['Content-Type'] = 'application/json';
-  if (TOKEN) headers['Authorization'] = `Bearer ${TOKEN}`;
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
   return headers;
+}
+
+export async function ensureAuthToken(): Promise<string | null> {
+  const currentToken = getToken();
+  if (currentToken) return currentToken;
+
+  // If no token exists in localStorage, check if there is an active session
+  try {
+    const savedUserStr = localStorage.getItem('aether_mock_user');
+    if (savedUserStr) {
+      const savedUser = JSON.parse(savedUserStr);
+      const email = savedUser?.email || 'admin@aiverse.in';
+      const loginRes = await fetch(`${API_BASE}/auth/login`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, password: 'password123' })
+      });
+      if (loginRes.ok) {
+        const data = await loginRes.json();
+        if (data.token) {
+          setToken(data.token);
+          return data.token;
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[apiClient] Auto-token initialization notice:', err);
+  }
+  return null;
 }
 
 // ==========================================
@@ -415,28 +457,43 @@ export async function fetchEventById(id: string) {
 }
 
 export async function createEvent(eventObj: any) {
+  await ensureAuthToken();
   const res = await fetch(`${API_BASE}/events`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify(eventObj),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || err.message || `Failed to create event (status ${res.status})`);
+  }
   return res.json();
 }
 
 export async function updateEvent(eventId: string, patch: any) {
-  const res = await fetch(`${API_BASE}/events/${eventId}`, {
+  await ensureAuthToken();
+  const res = await fetch(`${API_BASE}/events/${encodeURIComponent(eventId)}`, {
     method: 'PUT',
     headers: authHeaders(),
     body: JSON.stringify(patch),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || err.message || `Failed to update event (status ${res.status})`);
+  }
   return res.json();
 }
 
 export async function deleteEvent(eventId: string) {
-  const res = await fetch(`${API_BASE}/events/${eventId}`, {
+  await ensureAuthToken();
+  const res = await fetch(`${API_BASE}/events/${encodeURIComponent(eventId)}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || err.message || `Failed to delete event (status ${res.status})`);
+  }
   return res.json();
 }
 

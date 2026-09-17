@@ -26,6 +26,10 @@
       "destination": "/icons.svg"
     },
     {
+      "source": "/api/(.*)",
+      "destination": "https://aiversevitb.in/api/$1"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

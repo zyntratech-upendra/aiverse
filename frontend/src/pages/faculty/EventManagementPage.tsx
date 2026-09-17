@@ -2938,8 +2938,9 @@ const EventManagementPage: React.FC = () => {
         title: formTitle.trim(),
         date: displayDate,
         location: formLocation || "Virtual Hub",
+        venue: formLocation || "Virtual Hub",
         category: mappedCategory,
-        currentReg: 0,
+        currentReg: editingEventId ? (events.find(e => e.id === editingEventId)?.currentReg || 0) : 0,
         maxReg: formMaxParticipants ? Number(formMaxParticipants) : 100,
         imageName: imageName,
         primaryTag: formPrimaryTag,
@@ -3047,20 +3048,23 @@ const EventManagementPage: React.FC = () => {
           textY: formTicketTextY,
           textColor: formTicketTextColor,
         },
-        createdAt: Date.now()
+        ...(editingEventId ? {} : { createdAt: Date.now() })
       };
 
       let targetEventId = editingEventId;
       if (editingEventId) {
         // 1. Update backend MongoDB
-        await updateEvent(editingEventId, payload);
+        const res = await updateEvent(editingEventId, payload);
+        const savedDoc = res?.event || payload;
 
         const existingReg = events.find(e => e.id === editingEventId)?.currentReg || 0;
         const updatedEvent: EventItem = {
+          ...savedDoc,
           id: editingEventId,
           title: formTitle,
           date: displayDate,
           location: formLocation || "Virtual Hub",
+          venue: formLocation || "Virtual Hub",
           category: mappedCategory,
           status: formStatus || "Opened",
           currentReg: existingReg,
@@ -3318,12 +3322,13 @@ const EventManagementPage: React.FC = () => {
 
       // 2. Try fetching full document from backend API
       try {
-        const API_BASE = (import.meta.env.VITE_API_BASE as string) || 'http://localhost:4000/api';
-        const res = await fetch(`${API_BASE}/events/${id}`);
-        if (res.ok) {
-          data = await res.json();
+        const fullEvt = await fetchEventById(id);
+        if (fullEvt) {
+          data = { ...data, ...fullEvt };
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn("[EventManagementPage] Notice fetching full event:", e);
+      }
 
       // 3. Fallback to Firestore
       if (!data) {
@@ -3354,7 +3359,7 @@ const EventManagementPage: React.FC = () => {
         setFormStartTime(data.startTime || "");
         setFormEndTime(data.endTime || "");
         setFormIsVirtual(data.isVirtual !== undefined ? data.isVirtual : true);
-        setFormLocation(data.location || "");
+        setFormLocation(data.location || data.venue || "");
         setFormRegDeadline(data.regDeadline || data.registrationDeadline || "");
         setFormRegDeadlineTime(data.regDeadlineTime || data.registrationDeadlineTime || "");
         setFormMaxParticipants(data.maxReg ? String(data.maxReg) : "");

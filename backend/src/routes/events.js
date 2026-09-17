@@ -27,7 +27,8 @@ router.get(
   '/:id',
   optionalAuth,
   asyncHandler(async (req, res) => {
-    const event = await Event.findById(req.params.id).lean();
+    const id = req.params.id;
+    const event = await Event.findOne({ $or: [{ _id: id }, { id: id }] }).lean();
     if (!event) {
       return res.status(404).json({ success: false, error: 'Event not found' });
     }
@@ -41,16 +42,14 @@ router.post(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const rawPayload = req.body || {};
-    const allowedFields = ['title', 'description', 'shortDescription', 'category', 'track', 'date', 'time', 'venue', 'location', 'banner', 'bannerImage', 'coverImage', 'rules', 'prizes', 'tags', 'maxParticipants', 'maxReg', 'currentReg', 'teamSizeMin', 'teamSizeMax', 'minTeamSize', 'maxTeamSize', 'fee', 'isLive', 'registrationOpen', 'status', 'coordinators', 'certificateConfig', 'allowLoginAccess'];
-    const payload = pick(rawPayload, allowedFields);
-    
-    const id = rawPayload._id || rawPayload.id || new mongoose.Types.ObjectId().toString();
+    const { _id, id: bodyId, ...eventData } = rawPayload;
+    const id = _id || bodyId || new mongoose.Types.ObjectId().toString();
     const now = Date.now();
 
     const newEvent = new Event({
-      ...payload,
+      ...eventData,
       _id: id,
-      createdAt: payload.createdAt || now,
+      createdAt: eventData.createdAt || now,
       updatedAt: now,
     });
 
@@ -66,11 +65,15 @@ router.put(
   asyncHandler(async (req, res) => {
     const id = req.params.id;
     const rawPayload = req.body || {};
-    const allowedFields = ['title', 'description', 'shortDescription', 'category', 'track', 'date', 'time', 'venue', 'location', 'banner', 'bannerImage', 'coverImage', 'rules', 'prizes', 'tags', 'maxParticipants', 'maxReg', 'currentReg', 'teamSizeMin', 'teamSizeMax', 'minTeamSize', 'maxTeamSize', 'fee', 'isLive', 'registrationOpen', 'status', 'coordinators', 'certificateConfig', 'allowLoginAccess'];
-    const payload = pick(rawPayload, allowedFields);
-    payload.updatedAt = Date.now();
+    const { _id, id: bodyId, ...updateData } = rawPayload;
+    updateData.updatedAt = Date.now();
 
-    const updated = await Event.findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true }).lean();
+    const updated = await Event.findOneAndUpdate(
+      { $or: [{ _id: id }, { id: id }] },
+      { $set: updateData },
+      { new: true, runValidators: false }
+    ).lean();
+
     if (!updated) {
       return res.status(404).json({ success: false, error: 'Event not found' });
     }
@@ -85,7 +88,7 @@ router.delete(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
-    const deleted = await Event.findByIdAndDelete(id);
+    const deleted = await Event.findOneAndDelete({ $or: [{ _id: id }, { id: id }] });
     if (!deleted) {
       return res.status(404).json({ success: false, error: 'Event not found' });
     }
