@@ -3,12 +3,11 @@ import { Link } from "react-router-dom";
 import { 
   Mail,
   Users,
-  Sparkles,
   ArrowRight
 } from "lucide-react";
 import Button from "../../components/ui/Button";
 import SEO from "../../components/layout/SEO";
-import { fetchSettings, fetchUsers, fetchOrganizers } from "../../services/apiClient";
+import { fetchSettings, fetchOrganizers } from "../../services/apiClient";
 import { userService } from "../../services/userService";
 import { dataCache } from "../../utils/dataCache";
 
@@ -167,11 +166,10 @@ const TeamPage: React.FC = () => {
   useEffect(() => {
     const fetchTeam = async () => {
       try {
-        // Run all queries in parallel
-        const [configRes, supaRes, usersRes, orgsRes] = await Promise.allSettled([
+        // Run queries in parallel
+        const [configRes, teamRes, orgsRes] = await Promise.allSettled([
           fetchSettings("portal_config"),
-          userService.getUsers(),
-          fetchUsers(),
+          userService.getAboutTeamMembers(),
           fetchOrganizers()
         ]);
 
@@ -187,80 +185,29 @@ const TeamPage: React.FC = () => {
         const combinedList: any[] = [];
         const seenEmails = new Set<string>();
 
-        // 1. Process Supabase users
-        if (supaRes.status === "fulfilled" && Array.isArray(supaRes.value)) {
-          supaRes.value.forEach((u: any) => {
-            const email = (u.email || "").toLowerCase().trim();
-            if (isParticipantUser(u)) return;
-            if (email) seenEmails.add(email);
-            combinedList.push({
-              id: u.id,
-              name: u.name || u.display_name || "Unnamed Member",
-              email: u.email || "",
-              personal_email: u.personal_email || "",
-              role: u.role || "Student Member",
-              position: u.position || u.role || "",
-              sub_role: u.sub_role || "",
-              roleType: u.role || "Organizer",
-              status: u.status || "Active",
-              image: u.image || "",
-              bio: u.bio || "",
-              linkedin: u.linkedin || "",
-              github: u.github || "",
-              phone: u.phone || "",
-              registration_id: u.registration_id || "",
-              team_name: u.team_name || "",
-              event_title: u.event_title || ""
-            });
-          });
-        }
-
-        // 2. Process Backend users
-        if (usersRes.status === "fulfilled" && Array.isArray(usersRes.value)) {
-          usersRes.value.forEach((data: any) => {
+        // 1. Process Team Members (from public endpoint)
+        if (teamRes.status === "fulfilled" && Array.isArray(teamRes.value)) {
+          teamRes.value.forEach((data: any) => {
             const email = (data.email || "").toLowerCase().trim();
             if (isParticipantUser(data)) return;
-
-            if (email && seenEmails.has(email)) {
-              const idx = combinedList.findIndex(item => (item.email || "").toLowerCase().trim() === email);
-              if (idx >= 0) {
-                combinedList[idx] = {
-                  ...combinedList[idx],
-                  image: combinedList[idx].image || data.image || "",
-                  bio: combinedList[idx].bio || data.bio || "",
-                  linkedin: combinedList[idx].linkedin || data.linkedin || "",
-                  github: combinedList[idx].github || data.github || "",
-                  position: combinedList[idx].position || data.position || data.role || "",
-                  sub_role: combinedList[idx].sub_role || data.sub_role || "",
-                  order: data.order !== undefined ? data.order : combinedList[idx].order,
-                  registration_id: combinedList[idx].registration_id || data.registration_id || "",
-                  team_name: combinedList[idx].team_name || data.team_name || "",
-                  event_title: combinedList[idx].event_title || data.event_title || ""
-                };
-              }
-            } else if (email) {
-              seenEmails.add(email);
-              combinedList.push({
-                id: data.id || data._id,
-                name: data.name || data.displayName || data.teamLeadName || "Unnamed Member",
-                email: data.email || "",
-                personal_email: data.personal_email || data.personalEmail || "",
-                role: data.role || "Student Member",
-                position: data.position || data.role || "",
-                sub_role: data.sub_role || "",
-                roleType: data.roleType || data.role || "Organizer",
-                status: data.status || "Active",
-                order: data.order,
-                image: data.image || "",
-                bio: data.bio || "",
-                linkedin: data.linkedin || "",
-                github: data.github || "",
-                phone: data.phone || "",
-                registration_id: data.registration_id || "",
-                team_name: data.team_name || "",
-                event_title: data.event_title || ""
-              });
-            }
+            if (email) seenEmails.add(email);
+            combinedList.push({
+              id: data.id || data._id,
+              name: data.name || data.display_name || data.displayName || "Unnamed Member",
+              email: data.email || "",
+              personal_email: data.personal_email || "",
+              role: data.role || "Student Member",
+              position: data.position || data.role || "",
+              sub_role: data.sub_role || "",
+              roleType: data.roleType || data.role || "Organizer",
+              status: data.status || "Active",
+              image: data.image || "",
+              bio: data.bio || "",
+              linkedin: data.linkedin || "",
+              github: data.github || "",
+              phone: data.phone || "",
+              order: data.order !== undefined ? Number(data.order) : undefined,
+            });
           });
         }
 
@@ -630,27 +577,27 @@ const TeamPage: React.FC = () => {
       />
       
       {/* ================= HERO SECTION ================= */}
-      <section className="relative py-20 px-4 sm:px-6 lg:px-8 bg-slate-950 text-white rounded-b-[36px] shadow-lg border-b border-slate-800/80">
+      <section className="relative py-20 px-4 sm:px-6 lg:px-8 bg-white text-slate-900 rounded-b-[36px] shadow-sm border-b border-slate-200">
         <div className="absolute inset-0 overflow-hidden rounded-b-[36px] -z-10">
           <img 
             src={heroImg} 
             alt="Background" 
-            className="w-full h-full object-cover opacity-20 object-center"
+            className="w-full h-full object-cover opacity-[0.03] object-center"
           />
-          <div className="absolute inset-0 bg-slate-950/85"></div>
+          <div className="absolute inset-0 bg-gradient-to-b from-white/50 to-white/95"></div>
         </div>
 
         <div className="max-w-4xl mx-auto text-center space-y-4 relative z-10">
-          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-500/10 border border-blue-400/20 text-blue-300 text-xs font-bold uppercase tracking-widest">
-            <Sparkles className="h-3.5 w-3.5 text-blue-400" />
+          <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-blue-50 border border-blue-100 text-blue-600 text-xs font-bold uppercase tracking-widest">
+            <img src="/ai_verse.png" alt="AI Verse" className="h-4 w-4 object-contain rounded-sm" />
             <span>AI Verse Club • VIT Bhimavaram</span>
           </div>
 
-          <h1 className="text-3xl sm:text-5xl font-black text-white tracking-tight">
+          <h1 className="text-3xl sm:text-5xl font-black text-slate-900 tracking-tight">
             Our Team
           </h1>
 
-          <p className="max-w-xl mx-auto text-slate-300 text-sm sm:text-base font-normal leading-relaxed">
+          <p className="max-w-xl mx-auto text-slate-600 text-sm sm:text-base font-normal leading-relaxed">
             The builders, developers, designers, and organizers powering AI Verse.
           </p>
         </div>
@@ -809,7 +756,7 @@ const TeamPage: React.FC = () => {
       <section className="py-16 bg-white border-t border-slate-200">
         <div className="max-w-4xl mx-auto px-4 text-center space-y-4">
           <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-blue-50 text-blue-600 text-xs font-bold uppercase tracking-wider">
-            <Sparkles className="h-3.5 w-3.5 text-blue-500" />
+            <img src="/ai_verse.png" alt="AI Verse" className="h-3.5 w-3.5 object-contain rounded-sm" />
             Join AI Verse
           </div>
           

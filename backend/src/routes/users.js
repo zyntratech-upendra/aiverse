@@ -6,6 +6,52 @@ const { optionalAuth, requireAuth, requireAdmin } = require('../middleware/auth'
 const { asyncHandler } = require('../middleware/errorHandler');
 const { pick } = require('../utils/sanitize');
 
+// Helper: build a safe user lookup query
+// _id is String type (not ObjectId) so we can safely match on email/_id/uid without CastErrors
+function userQuery(id) {
+  const normalized = id.toLowerCase();
+  return {
+    $or: [
+      { _id: id },
+      { _id: normalized },
+      { uid: id },
+      { email: normalized },
+    ],
+  };
+}
+
+// GET /api/users/team - Public endpoint for About/Team page (no auth required)
+router.get(
+  '/team',
+  asyncHandler(async (req, res) => {
+    const users = await User.find({ status: 'Active' })
+      .select('name display_name email role position bio linkedin github image show_in_about year status')
+      .sort({ created_at: 1 })
+      .lean();
+
+    // Filter out participants to safely expose only team members
+    const filteredUsers = users.filter(u => {
+      const email = (u.email || '').toLowerCase();
+      const role = (u.role || '').toLowerCase();
+      const pos = (u.position || '').toLowerCase();
+
+      if (
+        role === 'participant' ||
+        role.includes('participant') ||
+        pos === 'participant' ||
+        pos.includes('participant') ||
+        email.includes('participant') ||
+        email.startsWith('team')
+      ) {
+        return false;
+      }
+      return true;
+    });
+
+    res.json(filteredUsers.map((u) => ({ ...u, id: u._id })));
+  })
+);
+
 // GET /api/users - List users
 router.get(
   '/',
@@ -28,9 +74,7 @@ router.get(
   requireAuth,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
-    const user = await User.findOne({
-      $or: [{ _id: id }, { uid: id }, { email: id.toLowerCase() }],
-    }).lean();
+    const user = await User.findOne(userQuery(id)).lean();
 
     if (!user) {
       return res.status(404).json({ success: false, error: 'User not found' });
@@ -153,7 +197,7 @@ router.put(
     payload.updated_at = Date.now();
 
     let updated = await User.findOneAndUpdate(
-      { $or: [{ _id: id }, { uid: id }, { email: id.toLowerCase() }] },
+      userQuery(id),
       { $set: payload },
       { new: true, runValidators: true }
     ).lean();
@@ -198,7 +242,7 @@ router.post(
     };
 
     let updated = await User.findOneAndUpdate(
-      { $or: [{ _id: id }, { uid: id }, { email: cleanId }] },
+      userQuery(id),
       { $set: teamResetPayload },
       { new: true }
     ).lean();
@@ -236,9 +280,7 @@ router.delete(
     const Organizer = require('../models/Organizer');
 
     // 1. Delete from User collection
-    const deleted = await User.findOneAndDelete({
-      $or: [{ _id: id }, { uid: id }, { email: cleanId }],
-    }).lean();
+    const deleted = await User.findOneAndDelete(userQuery(id)).lean();
 
     // 2. Also delete from Organizer collection
     const targetEmail = (deleted?.email || cleanId).toLowerCase();
