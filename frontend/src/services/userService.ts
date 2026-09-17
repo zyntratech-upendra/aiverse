@@ -5,6 +5,8 @@ import {
   bulkCreateUsers, 
   updateUser as apiUpdateUser, 
   deleteUser as apiDeleteUser, 
+  removeMemberFromTeamApi,
+  deleteOrganizer,
   deleteParticipantCascade as apiDeleteParticipantCascade 
 } from "./apiClient";
 
@@ -19,6 +21,8 @@ export interface SupabaseUser {
   role: string;
   status: "Active" | "Pending" | "Deactivated" | string;
   position?: string | null;
+  sub_role?: string | null;
+  order?: number;
   bio?: string | null;
   linkedin?: string | null;
   github?: string | null;
@@ -52,6 +56,8 @@ export const userService = {
         role: u.role || "Guest",
         status: u.status || "Active",
         position: u.position || u.displayRole || null,
+        sub_role: u.sub_role || null,
+        order: u.order !== undefined ? Number(u.order) : undefined,
         bio: u.bio || null,
         linkedin: u.linkedin || null,
         github: u.github || null,
@@ -89,6 +95,8 @@ export const userService = {
         role: u.role || "Guest",
         status: u.status || "Active",
         position: u.position || u.displayRole || null,
+        sub_role: u.sub_role || null,
+        order: u.order !== undefined ? Number(u.order) : undefined,
         bio: u.bio || null,
         linkedin: u.linkedin || null,
         github: u.github || null,
@@ -231,12 +239,52 @@ export const userService = {
   },
 
   /**
+   * Remove a member from the Club Team / Organizer role.
+   * Resets role to "participant", clears position/sub_role/order, and removes from organizers collection.
+   * PRESERVES the user's base account, credentials, and event history in MongoDB.
+   */
+  async removeMemberFromTeam(id: string, email?: string): Promise<boolean> {
+    try {
+      const cleanEmail = (email || id || "").toLowerCase().trim();
+      
+      // 1. Call backend remove-from-team endpoint
+      try {
+        await removeMemberFromTeamApi(id || cleanEmail);
+      } catch (apiErr) {
+        console.warn("[userService] Backend removeMemberFromTeam notice:", apiErr);
+      }
+
+      // 2. Also ensure updateUser resets role and showInAbout
+      await this.updateUser(id, {
+        role: "participant",
+        position: "",
+        sub_role: "",
+        order: 0,
+        show_in_about: false,
+      });
+
+      // 3. Clean up from organizers collection if exists
+      try {
+        await deleteOrganizer(id);
+      } catch {}
+
+      return true;
+    } catch (err) {
+      console.error("[userService] Error removing member from team:", err);
+      return false;
+    }
+  },
+
+  /**
    * Delete a user permanently from MongoDB
    */
   async deleteUser(id: string): Promise<void> {
     if (!id) return;
     try {
       await apiDeleteUser(id);
+      try {
+        await deleteOrganizer(id);
+      } catch {}
     } catch (err) {
       console.error("[userService] Error deleting user:", err);
     }
@@ -250,6 +298,9 @@ export const userService = {
     if (!cleanEmail) return;
     try {
       await apiDeleteUser(cleanEmail);
+      try {
+        await deleteOrganizer(cleanEmail);
+      } catch {}
     } catch (err) {
       console.error("[userService] Error deleting user by email:", err);
     }

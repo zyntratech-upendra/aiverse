@@ -1,4 +1,14 @@
-const API_BASE = ((import.meta.env.VITE_API_BASE as string) || 'http://localhost:4000/api').replace(/\/+$/, '');
+const getApiBase = (): string => {
+  if (import.meta.env.VITE_API_BASE) {
+    return (import.meta.env.VITE_API_BASE as string).replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined' && window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    return `${window.location.origin}/api`;
+  }
+  return 'http://localhost:4000/api';
+};
+
+const API_BASE = getApiBase();
 
 // Retry helper for transient network/backend failures
 async function fetchWithRetry(url: string, options: RequestInit, retries = 2, delayMs = 1000): Promise<Response> {
@@ -532,8 +542,16 @@ export async function updateUser(id: string, patch: any) {
   return res.json();
 }
 
+export async function removeMemberFromTeamApi(id: string) {
+  const res = await fetch(`${API_BASE}/users/${encodeURIComponent(id)}/remove-from-team`, {
+    method: 'POST',
+    headers: authHeaders(),
+  });
+  return res.json();
+}
+
 export async function deleteUser(id: string) {
-  const res = await fetch(`${API_BASE}/users/${id}`, {
+  const res = await fetch(`${API_BASE}/users/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });

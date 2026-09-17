@@ -27,13 +27,21 @@ const settingsRouter = require('./routes/settings');
 const juryEvaluationsRouter = require('./routes/juryEvaluations');
 
 // Initialize Express App
+// Initialize Express App
 const app = express();
+
+// Trust proxy for AWS ALB / ELB / CloudFront / Nginx reverse proxies
+app.set('trust proxy', 1);
 
 // Database Connection
 connectDB();
 
 // Middlewares
-app.use(helmet());
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: 'cross-origin' },
+  })
+);
 app.use(mongoSanitize());
 app.use(
   cors({
@@ -54,8 +62,8 @@ const apiLimiter = rateLimit({
 });
 app.use('/api', apiLimiter);
 
-// Health Check
-app.get('/health', (req, res) => {
+// Health Check (Both /health and /api/health for AWS Load Balancers / CloudFront / ECS)
+const healthHandler = (req, res) => {
   const isDbConnected = mongoose.connection.readyState === 1;
   res.json({
     status: 'online',
@@ -63,7 +71,9 @@ app.get('/health', (req, res) => {
     database: isDbConnected ? 'connected' : 'disconnected',
     uptime: process.uptime(),
   });
-});
+};
+app.get('/health', healthHandler);
+app.get('/api/health', healthHandler);
 
 // Root API Endpoint
 app.get('/api', (req, res) => {

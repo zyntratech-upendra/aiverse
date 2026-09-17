@@ -8,6 +8,7 @@ import {
   Check, 
   UserX, 
   UserCheck, 
+  UserMinus,
   X, 
   Filter,
   Shield,
@@ -170,6 +171,8 @@ const UserManagementPage: React.FC = () => {
               phone: u.phone || u.phoneNumber || "",
               role: (u.role || u.roleType || "Student Member") as any,
               position: u.position || u.sub_role || "",
+              sub_role: u.sub_role || u.position || "",
+              order: u.order !== undefined ? Number(u.order) : undefined,
               status: (u.status || "Active") as any,
               image: u.image || u.avatar || "",
               showInAbout: (u.showInAbout === true || u.showInAbout === "Yes" || u.show_in_about) ? "Yes" : "No",
@@ -183,7 +186,7 @@ const UserManagementPage: React.FC = () => {
         console.warn("[UserManagement] Notice fetching users from backend:", backErr);
       }
 
-      // 2. Fetch from Supabase
+      // 2. Fetch from Supabase / Mongo
       try {
         const supaUsers = await userService.getUsers();
         if (supaUsers && supaUsers.length > 0) {
@@ -203,6 +206,7 @@ const UserManagementPage: React.FC = () => {
                   linkedin: combinedList[idx].linkedin || su.linkedin || "",
                   github: combinedList[idx].github || su.github || "",
                   phone: combinedList[idx].phone || su.phone || "",
+                  order: su.order !== undefined ? Number(su.order) : combinedList[idx].order,
                 };
               }
             } else {
@@ -216,6 +220,8 @@ const UserManagementPage: React.FC = () => {
                 phone: su.phone || "",
                 role: (su.role || "Student Member") as any,
                 position: su.position || su.role || "",
+                sub_role: su.sub_role || su.position || "",
+                order: su.order !== undefined ? Number(su.order) : undefined,
                 status: (su.status || "Active") as any,
                 image: su.image || "",
                 showInAbout: su.show_in_about ? "Yes" : "No",
@@ -250,6 +256,7 @@ const UserManagementPage: React.FC = () => {
                   linkedin: combinedList[idx].linkedin || org.linkedin || "",
                   github: combinedList[idx].github || org.github || "",
                   phone: combinedList[idx].phone || org.phone || org.phoneNumber || "",
+                  order: org.order !== undefined ? Number(org.order) : combinedList[idx].order,
                 };
               } else {
                  if (email) seenEmails.add(email);
@@ -262,6 +269,8 @@ const UserManagementPage: React.FC = () => {
                   phone: org.phone || org.phoneNumber || "",
                   role: (org.role || org.roleType || "Organizer") as any,
                   position: org.position || org.sub_role || "",
+                  sub_role: org.sub_role || org.position || "",
+                  order: org.order !== undefined ? Number(org.order) : undefined,
                   status: (org.status || "Active") as any,
                   image: org.image || "",
                   showInAbout: (org.showInAbout === true || org.showInAbout === "Yes" || org.show_in_about) ? "Yes" : "No",
@@ -281,6 +290,8 @@ const UserManagementPage: React.FC = () => {
                 phone: org.phone || org.phoneNumber || "",
                 role: (org.role || org.roleType || "Organizer") as any,
                 position: org.position || org.sub_role || "",
+                sub_role: org.sub_role || org.position || "",
+                order: org.order !== undefined ? Number(org.order) : undefined,
                 status: (org.status || "Active") as any,
                 image: org.image || "",
                 showInAbout: (org.showInAbout === true || org.showInAbout === "Yes" || org.show_in_about) ? "Yes" : "No",
@@ -1144,11 +1155,39 @@ const UserManagementPage: React.FC = () => {
     setRoleConfirmState({ isOpen: false, userId: "", newRole: "" });
   };
 
-  const handleDeleteUser = async (id: string) => {
-    if (!window.confirm("Are you sure you want to permanently delete this user? This action cannot be undone.")) return;
+  const handleRemoveFromTeam = async (id: string) => {
+    const targetUser = users.find(u => u.id === id);
+    const userName = targetUser?.name || "this member";
+
+    if (!window.confirm(`Are you sure you want to remove ${userName} from the AI Verse Club Team?\n\n• They will be removed from the Club Team, About/Team page, and Team Roles Graph.\n• Their user account, login access, registrations, and attendance will REMAIN SAFE in the database.`)) {
+      return;
+    }
     
     try {
-      const targetUser = users.find(u => u.id === id);
+      if (targetUser && targetUser.email) {
+        await userService.removeMemberFromTeam(targetUser.id, targetUser.email);
+      } else {
+        await userService.removeMemberFromTeam(id);
+      }
+      
+      setUsers(prev => prev.filter(u => u.id !== id));
+      alert(`${userName} has been removed from the club team. Their base account is preserved in the database.`);
+    } catch (err: any) {
+      console.error("Error removing member from team:", err);
+      alert(`Failed to remove member: ${err.message || err}`);
+    }
+    setActiveMenuId(null);
+  };
+
+  const handlePermanentDeleteUser = async (id: string) => {
+    const targetUser = users.find(u => u.id === id);
+    const userName = targetUser?.name || "this user";
+
+    if (!window.confirm(`⚠️ PERMANENT DATABASE DELETION WARNING:\n\nAre you sure you want to completely delete ${userName}'s account from the database?\n\n• This will permanently wipe all user data, credentials, and records from the database.\n• This action CANNOT be undone.`)) {
+      return;
+    }
+    
+    try {
       if (targetUser && targetUser.email) {
         await userService.deleteUserByEmail(targetUser.email);
       } else {
@@ -1156,9 +1195,9 @@ const UserManagementPage: React.FC = () => {
       }
       
       setUsers(prev => prev.filter(u => u.id !== id));
-      alert("User successfully deleted.");
+      alert(`${userName}'s account has been permanently deleted from the database.`);
     } catch (err: any) {
-      console.error("Error deleting user:", err);
+      console.error("Error permanently deleting user:", err);
       alert(`Failed to delete user: ${err.message || err}`);
     }
     setActiveMenuId(null);
@@ -2001,11 +2040,20 @@ const UserManagementPage: React.FC = () => {
                                         </button>
                                       )}
                                       <button
-                                        onClick={() => handleDeleteUser(user.id)}
-                                        className="w-full px-3 py-2 text-xs font-semibold rounded-xl hover:bg-red-50 text-red-600 flex items-center gap-2.5 transition-colors"
+                                        onClick={() => handleRemoveFromTeam(user.id)}
+                                        className="w-full px-3 py-2 text-xs font-semibold rounded-xl hover:bg-amber-50 text-amber-750 flex items-center gap-2.5 transition-colors text-amber-700"
+                                        title="Remove member from club team (preserves account in database)"
                                       >
-                                        <Trash2 className="h-3.5 w-3.5 text-red-500" />
-                                        Remove Member
+                                        <UserMinus className="h-3.5 w-3.5 text-amber-500 shrink-0" />
+                                        Remove from Team
+                                      </button>
+                                      <button
+                                        onClick={() => handlePermanentDeleteUser(user.id)}
+                                        className="w-full px-3 py-2 text-xs font-semibold rounded-xl hover:bg-red-50 text-red-600 flex items-center gap-2.5 transition-colors"
+                                        title="Permanently wipe user account from database"
+                                      >
+                                        <Trash2 className="h-3.5 w-3.5 text-red-500 shrink-0" />
+                                        Delete Account
                                       </button>
                                     </>
                                   )}

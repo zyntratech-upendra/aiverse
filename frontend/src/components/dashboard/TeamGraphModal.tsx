@@ -46,6 +46,13 @@ const mapUserToInitialRole = (user: UserItem, rolesList: string[]): string => {
   const pos = (user.position || "").toLowerCase().trim();
   const combined = `${pos} ${role}`.toLowerCase();
 
+  // 0. Direct match with existing role in rolesList
+  for (const r of rolesList) {
+    if (role === r.toLowerCase()) {
+      return r;
+    }
+  }
+
   // 1. Faculty / Staff
   if (
     combined.includes("faculty") ||
@@ -54,7 +61,7 @@ const mapUserToInitialRole = (user: UserItem, rolesList: string[]): string => {
     combined.includes("advisor") ||
     combined.includes("staff")
   ) {
-    return "Faculty Coordinators";
+    return rolesList.find(r => r.toLowerCase().includes("faculty")) || "Faculty Coordinators";
   }
 
   // 2. Club Organizers (leadership)
@@ -70,7 +77,7 @@ const mapUserToInitialRole = (user: UserItem, rolesList: string[]): string => {
     combined.includes("lead organizer") ||
     (combined.includes("organizer") && !combined.includes("event"))
   ) {
-    return "Club Organizers";
+    return rolesList.find(r => r.toLowerCase().includes("club organizer") || r.toLowerCase().includes("organizer")) || "Club Organizers";
   }
 
   // 3. Technical and Web Dev
@@ -82,25 +89,25 @@ const mapUserToInitialRole = (user: UserItem, rolesList: string[]): string => {
     combined.includes("web app developer") ||
     combined.includes("software")
   ) {
-    return "Technical and Web Dev";
+    return rolesList.find(r => r.toLowerCase().includes("technical") || r.toLowerCase().includes("web")) || "Technical and Web Dev";
   }
 
   // 4. Design
   if (combined.includes("design") || combined.includes("ui") || combined.includes("ux")) {
-    return "Design";
+    return rolesList.find(r => r.toLowerCase().includes("design")) || "Design";
   }
 
   // 5. Photography / Videography
-  if (combined.includes("photo") && rolesList.includes("Photography")) {
-    return "Photography";
+  if (combined.includes("photo") && rolesList.some(r => r.toLowerCase().includes("photo"))) {
+    return rolesList.find(r => r.toLowerCase().includes("photo")) || "Photography";
   }
-  if (combined.includes("video") && rolesList.includes("Videography")) {
-    return "Videography";
+  if (combined.includes("video") && rolesList.some(r => r.toLowerCase().includes("video"))) {
+    return rolesList.find(r => r.toLowerCase().includes("video")) || "Videography";
   }
 
   // 6. Content and Media
   if (combined.includes("content") || combined.includes("media")) {
-    return "Content and Media";
+    return rolesList.find(r => r.toLowerCase().includes("content") || r.toLowerCase().includes("media")) || "Content and Media";
   }
 
   // 7. Match any existing role directly
@@ -197,6 +204,23 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
         });
 
         users.forEach(u => {
+          const email = (u.email || "").toLowerCase().trim();
+          const role = String(u.role || "").toLowerCase().trim();
+          const pos = String(u.position || "").toLowerCase().trim();
+          const name = String(u.name || "").toLowerCase().trim();
+          if (
+            role === "participant" ||
+            role.includes("participant") ||
+            pos === "participant" ||
+            pos.includes("participant") ||
+            email.includes("participant") ||
+            email.startsWith("team") ||
+            email === "participant@aiverse.in" ||
+            email === "alphaa@aiverse.in" ||
+            name.includes("participant")
+          ) {
+            return;
+          }
           const targetRole = mapUserToInitialRole(u, cleanedRoles);
           if (!initialGroups[targetRole]) {
             initialGroups[targetRole] = [];
@@ -204,9 +228,15 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
           initialGroups[targetRole].push({ ...u });
         });
 
-        // Sort members in each column: Leads first, then Co-Leads, then Others
+        // Sort members in each column: Saved order first, then Leads, then Co-Leads, then Others
         Object.keys(initialGroups).forEach(roleKey => {
           initialGroups[roleKey].sort((a, b) => {
+            if (a.order !== undefined && b.order !== undefined && a.order !== b.order) {
+              return a.order - b.order;
+            }
+            if (a.order !== undefined && b.order === undefined) return -1;
+            if (a.order === undefined && b.order !== undefined) return 1;
+
             const posA = (a.position || a.role || "").toLowerCase();
             const posB = (b.position || b.role || "").toLowerCase();
             const rankA = posA.includes("lead") && !posA.includes("co-") ? 1 : posA.includes("co-lead") ? 2 : 3;
@@ -338,6 +368,39 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
     setDraggedMember(null);
   };
 
+  const handleMemberDropOnCard = (e: React.DragEvent, targetRole: string, targetIdx: number) => {
+    e.preventDefault();
+    e.stopPropagation();
+    setDragOverRole(null);
+
+    if (!draggedMember) return;
+    const { member, sourceRole } = draggedMember;
+    const memberId = member.id || member._id;
+
+    if (sourceRole === targetRole) {
+      const list = [...(membersByRole[sourceRole] || [])];
+      const currentIdx = list.findIndex(m => (m.id || m._id) === memberId);
+      if (currentIdx === -1 || currentIdx === targetIdx) {
+        setDraggedMember(null);
+        return;
+      }
+      const [moved] = list.splice(currentIdx, 1);
+      list.splice(targetIdx, 0, moved);
+      setMembersByRole(prev => ({ ...prev, [sourceRole]: list }));
+    } else {
+      const sourceList = (membersByRole[sourceRole] || []).filter(m => (m.id || m._id) !== memberId);
+      const targetList = [...(membersByRole[targetRole] || [])];
+      const newMember: UserItem = { ...member, role: targetRole as any };
+      targetList.splice(targetIdx, 0, newMember);
+      setMembersByRole(prev => ({
+        ...prev,
+        [sourceRole]: sourceList,
+        [targetRole]: targetList
+      }));
+    }
+    setDraggedMember(null);
+  };
+
   // Add custom role column
   const handleAddRole = () => {
     const trimmed = newRoleName.trim();
@@ -369,9 +432,15 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
 
       // 2. Identify users whose role or order changed and update them
       const updatePromises: Promise<any>[] = [];
+      const updatedMembersByRole: Record<string, UserItem[]> = {};
 
       roles.forEach(roleName => {
         const roleMembers = membersByRole[roleName] || [];
+        updatedMembersByRole[roleName] = roleMembers.map((member, index) => ({
+          ...member,
+          order: index + 1
+        }));
+
         roleMembers.forEach((member, index) => {
           const mId = member.id || member._id;
           if (!mId) return;
@@ -400,13 +469,14 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
       });
 
       await Promise.allSettled(updatePromises);
+      setMembersByRole(updatedMembersByRole);
 
       // 3. Invalidate client caches
       dataCache.remove("public_team");
       dataCache.remove("portal_config");
 
       // 4. Update snapshot & notify
-      setInitialStateSnapshot(JSON.stringify({ roles, members: membersByRole }));
+      setInitialStateSnapshot(JSON.stringify({ roles, members: updatedMembersByRole }));
       setSaveSuccess(true);
       onUsersUpdated?.();
 
@@ -649,6 +719,11 @@ export const TeamGraphModal: React.FC<TeamGraphModalProps> = ({
                             key={mId}
                             draggable
                             onDragStart={(e) => handleMemberDragStart(e, member, roleName)}
+                            onDragOver={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                            }}
+                            onDrop={(e) => handleMemberDropOnCard(e, roleName, memberIdx)}
                             className="bg-white rounded-xl border border-slate-200/90 p-3 shadow-2xs hover:shadow-md hover:border-blue-300 transition-all cursor-grab active:cursor-grabbing group/card select-none"
                           >
                             <div className="flex items-start gap-2.5">

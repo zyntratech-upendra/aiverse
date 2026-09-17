@@ -59,12 +59,16 @@ interface MemberData {
   role: string;
   position?: string;
   roleType?: string;
+  sub_role?: string;
   order?: number;
   image: string;
   bio?: string;
   github?: string;
   linkedin?: string;
   phone?: string;
+  registration_id?: string;
+  team_name?: string;
+  event_title?: string;
 }
 
 const DEFAULT_ROLE_HIERARCHY = [
@@ -88,13 +92,75 @@ const EXCLUDED_SYSTEM_EMAILS = [
   "studentorganizer@aiverse.in",
   "jurry@aiverse.in",
   "jury@aiverse.in",
-  "participant@aiverse.in"
+  "participant@aiverse.in",
+  "alphaa@aiverse.in"
 ];
+
+// Helper to determine if a record belongs to an event participant rather than a club team member
+const isParticipantUser = (m: Partial<MemberData>): boolean => {
+  const email = (m.email || "").toLowerCase().trim();
+  const name = (m.name || "").toLowerCase().trim();
+  const role = (m.role || "").toLowerCase().trim();
+  const pos = (m.position || "").toLowerCase().trim();
+  const roleType = (m.roleType || "").toLowerCase().trim();
+  const subRole = (m.sub_role || "").toLowerCase().trim();
+  const regId = (m.registration_id || "").trim();
+  const teamName = (m.team_name || "").trim();
+  const eventTitle = (m.event_title || "").trim();
+
+  // 1. Explicit participant role indicators
+  if (
+    role === "participant" ||
+    role.includes("participant") ||
+    pos === "participant" ||
+    pos.includes("participant") ||
+    roleType === "participant" ||
+    roleType.includes("participant") ||
+    subRole === "participant" ||
+    subRole.includes("participant")
+  ) {
+    return true;
+  }
+
+  // 2. Event registration / hackathon team member indicators
+  if (regId || teamName || eventTitle) {
+    const isClubLeadershipOrDev =
+      role.includes("faculty") ||
+      role.includes("coordinator") ||
+      role.includes("organizer") ||
+      pos.includes("lead") ||
+      pos.includes("head") ||
+      pos.includes("dev") ||
+      role.includes("developer") ||
+      role.includes("designer");
+
+    if (!isClubLeadershipOrDev) {
+      return true;
+    }
+  }
+
+  // 3. Email and name patterns
+  if (
+    email.includes("participant") ||
+    email.startsWith("team") ||
+    email === "participant@aiverse.in" ||
+    email === "alphaa@aiverse.in" ||
+    name.includes("participant") ||
+    name === "participant user"
+  ) {
+    return true;
+  }
+
+  return false;
+};
 
 const BLANK_AVATAR = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%2394A3B8'%3E%3Cpath d='M12 12c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm0 2c-2.67 0-8 1.34-8 4v2h16v-2c0-2.66-5.33-4-8-4z'/%3E%3C/svg%3E";
 
 const TeamPage: React.FC = () => {
-  const [dbMembers, setDbMembers] = useState<MemberData[]>(() => dataCache.get<MemberData[]>("public_team") || []);
+  const [dbMembers, setDbMembers] = useState<MemberData[]>(() => {
+    const cached = dataCache.get<MemberData[]>("public_team") || [];
+    return cached.filter(m => !isParticipantUser(m));
+  });
   const [configuredRoles, setConfiguredRoles] = useState<string[]>([]);
   const [loading, setLoading] = useState<boolean>(() => !dataCache.get<MemberData[]>("public_team"));
 
@@ -123,8 +189,9 @@ const TeamPage: React.FC = () => {
 
         // 1. Process Supabase users
         if (supaRes.status === "fulfilled" && Array.isArray(supaRes.value)) {
-          supaRes.value.forEach((u) => {
+          supaRes.value.forEach((u: any) => {
             const email = (u.email || "").toLowerCase().trim();
+            if (isParticipantUser(u)) return;
             if (email) seenEmails.add(email);
             combinedList.push({
               id: u.id,
@@ -133,13 +200,17 @@ const TeamPage: React.FC = () => {
               personal_email: u.personal_email || "",
               role: u.role || "Student Member",
               position: u.position || u.role || "",
+              sub_role: u.sub_role || "",
               roleType: u.role || "Organizer",
               status: u.status || "Active",
               image: u.image || "",
               bio: u.bio || "",
               linkedin: u.linkedin || "",
               github: u.github || "",
-              phone: u.phone || ""
+              phone: u.phone || "",
+              registration_id: u.registration_id || "",
+              team_name: u.team_name || "",
+              event_title: u.event_title || ""
             });
           });
         }
@@ -148,6 +219,8 @@ const TeamPage: React.FC = () => {
         if (usersRes.status === "fulfilled" && Array.isArray(usersRes.value)) {
           usersRes.value.forEach((data: any) => {
             const email = (data.email || "").toLowerCase().trim();
+            if (isParticipantUser(data)) return;
+
             if (email && seenEmails.has(email)) {
               const idx = combinedList.findIndex(item => (item.email || "").toLowerCase().trim() === email);
               if (idx >= 0) {
@@ -158,7 +231,11 @@ const TeamPage: React.FC = () => {
                   linkedin: combinedList[idx].linkedin || data.linkedin || "",
                   github: combinedList[idx].github || data.github || "",
                   position: combinedList[idx].position || data.position || data.role || "",
+                  sub_role: combinedList[idx].sub_role || data.sub_role || "",
                   order: data.order !== undefined ? data.order : combinedList[idx].order,
+                  registration_id: combinedList[idx].registration_id || data.registration_id || "",
+                  team_name: combinedList[idx].team_name || data.team_name || "",
+                  event_title: combinedList[idx].event_title || data.event_title || ""
                 };
               }
             } else if (email) {
@@ -170,6 +247,7 @@ const TeamPage: React.FC = () => {
                 personal_email: data.personal_email || data.personalEmail || "",
                 role: data.role || "Student Member",
                 position: data.position || data.role || "",
+                sub_role: data.sub_role || "",
                 roleType: data.roleType || data.role || "Organizer",
                 status: data.status || "Active",
                 order: data.order,
@@ -177,7 +255,10 @@ const TeamPage: React.FC = () => {
                 bio: data.bio || "",
                 linkedin: data.linkedin || "",
                 github: data.github || "",
-                phone: data.phone || ""
+                phone: data.phone || "",
+                registration_id: data.registration_id || "",
+                team_name: data.team_name || "",
+                event_title: data.event_title || ""
               });
             }
           });
@@ -187,6 +268,8 @@ const TeamPage: React.FC = () => {
         if (orgsRes.status === "fulfilled" && Array.isArray(orgsRes.value)) {
           orgsRes.value.forEach((data: any) => {
             const email = (data.email || "").toLowerCase().trim();
+            if (isParticipantUser(data)) return;
+
             if (email && seenEmails.has(email)) {
               const idx = combinedList.findIndex(item => (item.email || "").toLowerCase().trim() === email);
               if (idx >= 0) {
@@ -197,6 +280,7 @@ const TeamPage: React.FC = () => {
                   linkedin: combinedList[idx].linkedin || data.linkedin || "",
                   github: combinedList[idx].github || data.github || "",
                   position: combinedList[idx].position || data.position || data.roleType || "",
+                  sub_role: combinedList[idx].sub_role || data.sub_role || "",
                   order: data.order !== undefined ? data.order : combinedList[idx].order,
                 };
               }
@@ -209,6 +293,7 @@ const TeamPage: React.FC = () => {
                 personal_email: data.personal_email || data.personalEmail || "",
                 role: data.role || data.roleType || "Organizer",
                 position: data.position || data.sub_role || data.role || "",
+                sub_role: data.sub_role || "",
                 roleType: data.roleType || data.role || "Organizer",
                 status: data.status || "Active",
                 order: data.order,
@@ -222,13 +307,11 @@ const TeamPage: React.FC = () => {
           });
         }
 
-        // 4. Filter out excluded system accounts and participant accounts
+        // 4. Final filter to strictly exclude system staff accounts and any participant accounts
         const validMembers = combinedList.filter((m) => {
           const email = (m.email || "").toLowerCase().trim();
           const name = (m.name || "").toLowerCase().trim();
           const role = (m.role || "").toLowerCase().trim();
-          const pos = (m.position || "").toLowerCase().trim();
-          const roleType = (m.roleType || "").toLowerCase().trim();
           const status = (m.status || "Active").toLowerCase().trim();
 
           if (EXCLUDED_SYSTEM_EMAILS.includes(email)) return false;
@@ -236,17 +319,7 @@ const TeamPage: React.FC = () => {
           if (role === "system admin" || role === "jury evaluator") return false;
           if (status === "deactivated") return false;
 
-          // Exclude all participants & event team accounts from the public team page
-          if (
-            role === "participant" || 
-            pos === "participant" || 
-            roleType === "participant" ||
-            role.includes("participant") || 
-            pos.includes("participant") || 
-            roleType.includes("participant") || 
-            email.includes("participant") ||
-            email.startsWith("team")
-          ) {
+          if (isParticipantUser(m)) {
             return false;
           }
 
@@ -353,16 +426,26 @@ const TeamPage: React.FC = () => {
   };
 
   const compareMembersByRank = (a: MemberData, b: MemberData): number => {
-    // If explicit order is set via Team Roles Graph, respect it
+    // 1. If explicit order is set via Team Roles Graph, respect it strictly
     if (a.order !== undefined && b.order !== undefined && a.order !== b.order) {
       return a.order - b.order;
     }
     if (a.order !== undefined && b.order === undefined) return -1;
     if (a.order === undefined && b.order !== undefined) return 1;
 
+    // 2. For Club Organizers without explicit order, compare by organizer rank
+    if (isClubOrganizer(a) && isClubOrganizer(b)) {
+      const orgRankA = getOrganizerRank(a);
+      const orgRankB = getOrganizerRank(b);
+      if (orgRankA !== orgRankB) return orgRankA - orgRankB;
+    }
+
+    // 3. Fallback to sub-role hierarchy rank
     const rankA = getSubRoleRank(a);
     const rankB = getSubRoleRank(b);
     if (rankA !== rankB) return rankA - rankB;
+
+    // 4. Fallback to name
     return (a.name || "").localeCompare(b.name || "");
   };
 
@@ -431,98 +514,20 @@ const TeamPage: React.FC = () => {
     return formatRoleLabel(member.position || member.role || member.roleType || "Member");
   };
 
-  // Group members with "Faculty Coordinators" (Faculty & Staff) and "Club Organizers" at the very starting of the page
+  // Group members dynamically in the exact order configured from the Team Roles Graph
   const groupedSections = useMemo(() => {
     const activeRolesList = configuredRoles.length > 0 ? configuredRoles : DEFAULT_ROLE_HIERARCHY;
     const assignedMemberIds = new Set<string>();
     const activeSections: Array<{ definition: { id: string; title: string; order: number }; members: MemberData[] }> = [];
 
-    // =========================================================================
-    // STEP 1: Faculty Coordinators & Staff Members (Displayed together in Faculty Coordinators)
-    // =========================================================================
-    const facultyMembers = dbMembers.filter(m => {
-      const combined = `${m.position || ""} ${m.role || ""} ${m.roleType || ""}`.toLowerCase();
-      return combined.includes("faculty") || combined.includes("convener") || combined.includes("advisor");
-    });
-    facultyMembers.sort(compareMembersByRank);
+    // Normalize and filter role columns list (merge duplicate technical variations)
+    const normalizedRoleSequence: string[] = [];
+    let techWebAdded = false;
 
-    const staffMembers = dbMembers.filter(m => {
-      const combined = `${m.position || ""} ${m.role || ""} ${m.roleType || ""}`.toLowerCase();
-      if (combined.includes("faculty") || combined.includes("convener") || combined.includes("advisor")) return false;
-      return combined.includes("staff");
-    });
-    staffMembers.sort(compareMembersByRank);
+    activeRolesList.forEach(roleName => {
+      const rLower = (roleName || "").trim().toLowerCase();
+      if (!rLower) return;
 
-    const combinedFacultyAndStaff = [...facultyMembers, ...staffMembers];
-
-    if (combinedFacultyAndStaff.length > 0) {
-      combinedFacultyAndStaff.forEach(m => assignedMemberIds.add(m.id || m.email || `${m.name}-${m.role}`));
-      activeSections.push({
-        definition: {
-          id: "faculty-coordinators",
-          title: "Faculty Coordinators",
-          order: 1
-        },
-        members: combinedFacultyAndStaff
-      });
-    }
-
-    // =========================================================================
-    // STEP 2: CLUB ORGANIZERS (Organizer, Co-Organizer, Secretary, Facilitator)
-    // Displayed at the starting / top of the public team page
-    // =========================================================================
-    const clubOrganizersList = dbMembers.filter(m => {
-      const memId = m.id || m.email || `${m.name}-${m.role}`;
-      if (assignedMemberIds.has(memId)) return false;
-      return isClubOrganizer(m);
-    });
-
-    if (clubOrganizersList.length > 0) {
-      // Sort inside Club Organizers by hierarchy: Organizer -> Co-Organizer -> Secretary -> Facilitator
-      clubOrganizersList.sort((a, b) => getOrganizerRank(a) - getOrganizerRank(b));
-      clubOrganizersList.forEach(m => assignedMemberIds.add(m.id || m.email || `${m.name}-${m.role}`));
-
-      activeSections.push({
-        definition: {
-          id: "club-organizers",
-          title: "Club Organizers",
-          order: 2
-        },
-        members: clubOrganizersList
-      });
-    }
-
-    // =========================================================================
-    // STEP 3: Department Roles in Configured Hierarchy Order
-    // (Excluding individual leadership titles that are already in Club Organizers / Faculty)
-    // =========================================================================
-    const leadershipRoleKeywords = [
-      "organizer", 
-      "co-organizer", 
-      "co organizer", 
-      "secretary", 
-      "facilitator", 
-      "club organizer", 
-      "club organizers", 
-      "faculty coordinator", 
-      "faculty coordinators",
-      "faculty",
-      "staff",
-      "staff member",
-      "staff members"
-    ];
-
-    const rawDepartmentRoles = activeRolesList.filter(roleName => {
-      const rLower = roleName.toLowerCase().trim();
-      return !leadershipRoleKeywords.includes(rLower);
-    });
-
-    // Consolidate Technical and Web Dev into one single section
-    const departmentRoles: string[] = [];
-    let technicalAndWebDevAdded = false;
-
-    rawDepartmentRoles.forEach(roleName => {
-      const rLower = roleName.toLowerCase().trim();
       if (
         rLower === "technical" ||
         rLower === "web dev" ||
@@ -531,36 +536,50 @@ const TeamPage: React.FC = () => {
         rLower === "technical and webdev" ||
         rLower === "technical & web dev"
       ) {
-        if (!technicalAndWebDevAdded) {
-          departmentRoles.push("Technical and Web Dev");
-          technicalAndWebDevAdded = true;
+        if (!techWebAdded) {
+          normalizedRoleSequence.push("Technical and Web Dev");
+          techWebAdded = true;
         }
-      } else {
-        departmentRoles.push(roleName);
+      } else if (!normalizedRoleSequence.some(r => r.toLowerCase() === rLower)) {
+        normalizedRoleSequence.push(roleName.trim());
       }
     });
 
-    if (!technicalAndWebDevAdded) {
-      departmentRoles.unshift("Technical and Web Dev");
-    }
+    let currentOrder = 1;
 
-    let currentOrder = 3;
-    departmentRoles.forEach(roleName => {
-      const groupMembers: MemberData[] = [];
+    // Process each configured role section in sequence
+    normalizedRoleSequence.forEach(roleName => {
+      const rLower = roleName.toLowerCase();
+      let sectionMembers: MemberData[] = [];
 
-      dbMembers.forEach(member => {
-        const memId = member.id || member.email || `${member.name}-${member.role}`;
-        if (!assignedMemberIds.has(memId)) {
-          if (matchMemberToRole(member, roleName)) {
-            groupMembers.push(member);
-            assignedMemberIds.add(memId);
-          }
-        }
-      });
+      if (rLower.includes("faculty") || rLower.includes("convener")) {
+        // Faculty Coordinators & Staff
+        sectionMembers = dbMembers.filter(m => {
+          const memId = m.id || m.email || `${m.name}-${m.role}`;
+          if (assignedMemberIds.has(memId)) return false;
+          const combined = `${m.position || ""} ${m.role || ""} ${m.roleType || ""}`.toLowerCase();
+          return combined.includes("faculty") || combined.includes("convener") || combined.includes("advisor") || combined.includes("staff");
+        });
+      } else if (rLower.includes("club organizer") || rLower === "organizers" || rLower === "club organizers") {
+        // Club Organizers (leadership)
+        sectionMembers = dbMembers.filter(m => {
+          const memId = m.id || m.email || `${m.name}-${m.role}`;
+          if (assignedMemberIds.has(memId)) return false;
+          return isClubOrganizer(m);
+        });
+      } else {
+        // Department / Specialized roles
+        sectionMembers = dbMembers.filter(m => {
+          const memId = m.id || m.email || `${m.name}-${m.role}`;
+          if (assignedMemberIds.has(memId)) return false;
+          return matchMemberToRole(m, roleName);
+        });
+      }
 
-      if (groupMembers.length > 0) {
-        // Sort inside each department by Sub-Role hierarchy: Lead (1) -> Co-Lead (2) -> Associate (3) -> Other (4)
-        groupMembers.sort(compareMembersByRank);
+      if (sectionMembers.length > 0) {
+        // Sort section members strictly by rank & saved order
+        sectionMembers.sort(compareMembersByRank);
+        sectionMembers.forEach(m => assignedMemberIds.add(m.id || m.email || `${m.name}-${m.role}`));
 
         activeSections.push({
           definition: {
@@ -568,17 +587,22 @@ const TeamPage: React.FC = () => {
             title: roleName,
             order: currentOrder++
           },
-          members: groupMembers
+          members: sectionMembers
         });
       }
     });
 
-    // =========================================================================
-    // STEP 4: Unassigned / Additional Team Members
-    // =========================================================================
+    // Unassigned / Additional Team Members: only display genuine club members with valid non-generic roles
     const unassignedMembers = dbMembers.filter(member => {
       const memId = member.id || member.email || `${member.name}-${member.role}`;
-      return !assignedMemberIds.has(memId);
+      if (assignedMemberIds.has(memId)) return false;
+      if (isParticipantUser(member)) return false;
+      const r = (member.role || "").toLowerCase().trim();
+      const p = (member.position || "").toLowerCase().trim();
+      if (r === "guest" || r === "user" || r === "participant" || p === "participant" || r === "" || r === "student member") {
+        return false;
+      }
+      return true;
     });
 
     if (unassignedMembers.length > 0) {
@@ -587,7 +611,7 @@ const TeamPage: React.FC = () => {
         definition: {
           id: "other-members",
           title: "Additional Team Members",
-          order: 999
+          order: currentOrder++
         },
         members: unassignedMembers
       });

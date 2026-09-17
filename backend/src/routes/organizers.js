@@ -35,8 +35,9 @@ router.post(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const rawPayload = req.body || {};
-    const allowedFields = ['name', 'role', 'organization', 'image', 'linkedin', 'twitter', 'github', 'order'];
+    const allowedFields = ['name', 'role', 'organization', 'image', 'photo', 'linkedin', 'twitter', 'github', 'order', 'position', 'sub_role', 'bio', 'email', 'phone', 'department', 'year'];
     const payload = pick(rawPayload, allowedFields);
+    if (payload.order !== undefined) payload.order = Number(payload.order);
     const id = rawPayload._id || rawPayload.id || new mongoose.Types.ObjectId().toString();
     const now = Date.now();
 
@@ -59,8 +60,9 @@ router.put(
   asyncHandler(async (req, res) => {
     const id = req.params.id;
     const rawPayload = req.body || {};
-    const allowedFields = ['name', 'role', 'organization', 'image', 'linkedin', 'twitter', 'github', 'order'];
+    const allowedFields = ['name', 'role', 'organization', 'image', 'photo', 'linkedin', 'twitter', 'github', 'order', 'position', 'sub_role', 'bio', 'email', 'phone', 'department', 'year'];
     const payload = pick(rawPayload, allowedFields);
+    if (payload.order !== undefined) payload.order = Number(payload.order);
     payload.updatedAt = Date.now();
 
     const updated = await Organizer.findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true }).lean();
