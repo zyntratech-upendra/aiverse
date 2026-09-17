@@ -345,6 +345,45 @@ const EventsPage: React.FC = () => {
     return false;
   };
 
+  const isRegistrationEnded = (event: Event): boolean => {
+    if (event.allowRegistrations === false) return true;
+    if ((event as any).registrationOpen === false) return true;
+    if (event.status === "Completed" || event.status === "Closed" || event.isPastEvent) return true;
+
+    const deadlineDateStr = event.regDeadline || event.registrationDeadline;
+    const deadlineTimeStr = event.regDeadlineTime || event.registrationDeadlineTime;
+
+    if (deadlineDateStr && deadlineDateStr.trim() && deadlineDateStr.trim() !== "TBD") {
+      const d = parseEventDateHelper(deadlineDateStr);
+      if (d) {
+        if (deadlineTimeStr && deadlineTimeStr.trim()) {
+          const parts = deadlineTimeStr.split("-");
+          const target = (parts[parts.length - 1] || "").trim();
+          const match = target.match(/(\d{1,2}):(\d{2})(?:\s*([ap]m))?/i);
+          if (match) {
+            let hours = parseInt(match[1], 10);
+            const minutes = parseInt(match[2], 10);
+            const meridian = match[3]?.toLowerCase();
+            if (meridian === "pm" && hours < 12) hours += 12;
+            if (meridian === "am" && hours === 12) hours = 0;
+            d.setHours(hours, minutes, 59, 999);
+          } else {
+            d.setHours(23, 59, 59, 999);
+          }
+        } else {
+          d.setHours(23, 59, 59, 999);
+        }
+        if (Date.now() > d.getTime()) {
+          return true;
+        }
+      }
+    }
+
+    if (isCompletedEvent(event)) return true;
+
+    return false;
+  };
+
   const timelineEvents = events.slice(0, 5).map(e => ({
     date: e.date,
     title: e.title,
@@ -578,11 +617,7 @@ const EventsPage: React.FC = () => {
                             <Button variant="secondary" size="sm" disabled className="rounded-lg font-bold text-xs px-5 py-2 text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed">
                               Event Completed
                             </Button>
-                          ) : event.allowRegistrations === false ? (
-                            <Button variant="secondary" size="sm" disabled className="rounded-lg font-bold text-xs px-5 py-2 text-slate-400 bg-slate-100 border border-slate-200 cursor-not-allowed">
-                              Registration Closed
-                            </Button>
-                          ) : (
+                          ) : isRegistrationEnded(event) ? null : (
                             <Link to={`/events/${event.id}/register`}>
                               <Button variant="gradient" size="sm" className="rounded-lg font-bold text-xs px-5 py-2 hover:scale-102 transition-transform">
                                 Register Now
@@ -610,11 +645,15 @@ const EventsPage: React.FC = () => {
                           <span className={`text-[10px] font-bold tracking-wider px-2.5 py-1 rounded-lg uppercase shadow-sm ${getCategoryStyles(event.type)}`}>
                             {event.type}
                           </span>
-                          {isCompleted && (
+                          {isCompleted ? (
                             <span className="bg-emerald-50 text-emerald-600 border border-emerald-100 text-[10px] font-bold tracking-wider px-2.5 py-1 rounded-lg uppercase shadow-sm">
                               Completed
                             </span>
-                          )}
+                          ) : isRegistrationEnded(event) ? (
+                            <span className="bg-rose-50 text-rose-600 border border-rose-100 text-[10px] font-bold tracking-wider px-2.5 py-1 rounded-lg uppercase shadow-sm">
+                              Registration Closed
+                            </span>
+                          ) : null}
                         </div>
                       </div>
                     </div>

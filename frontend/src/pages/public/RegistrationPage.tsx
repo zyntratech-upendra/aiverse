@@ -54,6 +54,12 @@ interface EventData {
   paymentQrImagePreview?: string;
   upiId?: string;
   allowRegistrations?: boolean;
+  status?: string;
+  isPastEvent?: boolean;
+  regDeadline?: string;
+  regDeadlineTime?: string;
+  registrationDeadline?: string;
+  registrationDeadlineTime?: string;
 }
 
 const RegistrationPage: React.FC = () => {
@@ -115,6 +121,102 @@ const RegistrationPage: React.FC = () => {
       : perPersonFee * totalTeamMembers;
   const requiresPaymentProof = !isQuiz && !isVishnuDomain && totalRegistrationFee > 0;
 
+  const parseDeadlineDate = (dateStr?: string, defaultYear = new Date().getFullYear()): Date | null => {
+    if (!dateStr) return null;
+    const trimmed = dateStr.trim();
+    if (!trimmed || trimmed === "TBD") return null;
+
+    const isoMatch = trimmed.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/);
+    if (isoMatch) {
+      const year = parseInt(isoMatch[1], 10);
+      const month = parseInt(isoMatch[2], 10) - 1;
+      const day = parseInt(isoMatch[3], 10);
+      return new Date(year, month, day);
+    }
+
+    const dmyMatch = trimmed.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})/);
+    if (dmyMatch) {
+      const day = parseInt(dmyMatch[1], 10);
+      const month = parseInt(dmyMatch[2], 10) - 1;
+      const year = parseInt(dmyMatch[3], 10);
+      return new Date(year, month, day);
+    }
+
+    const yearMatch = trimmed.match(/\b(20\d\d)\b/);
+    const year = yearMatch ? parseInt(yearMatch[1], 10) : defaultYear;
+
+    const monthNames: Record<string, number> = {
+      jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2,
+      apr: 3, april: 3, may: 4, jun: 5, june: 5, jul: 6, july: 6,
+      aug: 7, august: 7, sep: 8, sept: 8, september: 8, oct: 9, october: 9,
+      nov: 10, november: 10, dec: 11, december: 11
+    };
+
+    const tokens = trimmed.toLowerCase().replace(/[^a-z0-9]/g, " ").split(/\s+/).filter(Boolean);
+    let foundMonth = -1;
+    let foundDay = -1;
+
+    for (const t of tokens) {
+      if (monthNames[t] !== undefined) {
+        foundMonth = monthNames[t];
+      } else {
+        const n = parseInt(t, 10);
+        if (!isNaN(n) && n >= 1 && n <= 31 && foundDay === -1) {
+          foundDay = n;
+        }
+      }
+    }
+
+    if (foundMonth !== -1 && foundDay !== -1) {
+      return new Date(year, foundMonth, foundDay);
+    }
+
+    const direct = Date.parse(`${trimmed}, ${year}`);
+    if (!isNaN(direct)) {
+      return new Date(direct);
+    }
+
+    return null;
+  };
+
+  const isRegistrationClosed = (eventData: EventData | null): boolean => {
+    if (!eventData) return false;
+    if (eventData.allowRegistrations === false) return true;
+    if ((eventData as any).registrationOpen === false) return true;
+    if (eventData.status === "Completed" || eventData.status === "Closed" || eventData.isPastEvent) return true;
+
+    const deadlineDateStr = eventData.regDeadline || eventData.registrationDeadline;
+    const deadlineTimeStr = eventData.regDeadlineTime || eventData.registrationDeadlineTime;
+
+    if (deadlineDateStr && deadlineDateStr.trim() && deadlineDateStr.trim() !== "TBD") {
+      const d = parseDeadlineDate(deadlineDateStr);
+      if (d) {
+        if (deadlineTimeStr && deadlineTimeStr.trim()) {
+          const parts = deadlineTimeStr.split("-");
+          const target = (parts[parts.length - 1] || "").trim();
+          const match = target.match(/(\d{1,2}):(\d{2})(?:\s*([ap]m))?/i);
+          if (match) {
+            let hours = parseInt(match[1], 10);
+            const minutes = parseInt(match[2], 10);
+            const meridian = match[3]?.toLowerCase();
+            if (meridian === "pm" && hours < 12) hours += 12;
+            if (meridian === "am" && hours === 12) hours = 0;
+            d.setHours(hours, minutes, 59, 999);
+          } else {
+            d.setHours(23, 59, 59, 999);
+          }
+        } else {
+          d.setHours(23, 59, 59, 999);
+        }
+        if (Date.now() > d.getTime()) {
+          return true;
+        }
+      }
+    }
+
+    return false;
+  };
+
   useEffect(() => {
     const fetchEvent = async () => {
       if (!id) return;
@@ -162,6 +264,12 @@ const RegistrationPage: React.FC = () => {
               paymentQrImagePreview: backendEvent.paymentQrImagePreview || backendEvent.paymentQr || "",
               upiId: backendEvent.upiId || "",
               allowRegistrations: backendEvent.allowRegistrations !== undefined ? backendEvent.allowRegistrations : (backendEvent.registrationOpen !== false),
+              status: backendEvent.status,
+              isPastEvent: backendEvent.isPastEvent,
+              regDeadline: backendEvent.regDeadline || backendEvent.registrationDeadline,
+              regDeadlineTime: backendEvent.regDeadlineTime || backendEvent.registrationDeadlineTime,
+              registrationDeadline: backendEvent.registrationDeadline || backendEvent.regDeadline,
+              registrationDeadlineTime: backendEvent.registrationDeadlineTime || backendEvent.regDeadlineTime,
             });
 
             const initialTeammatesCount = Math.max(0, minT - 1);
@@ -221,7 +329,13 @@ const RegistrationPage: React.FC = () => {
             isPaidEvent: data.isPaidEvent !== undefined ? Boolean(data.isPaidEvent) : (Number(data.registrationFee) > 0),
             paymentQrImagePreview: data.paymentQrImagePreview || data.paymentQr || "",
             upiId: data.upiId || "",
-            allowRegistrations: data.allowRegistrations !== undefined ? data.allowRegistrations : true
+            allowRegistrations: data.allowRegistrations !== undefined ? data.allowRegistrations : true,
+            status: data.status,
+            isPastEvent: data.isPastEvent,
+            regDeadline: data.regDeadline || data.registrationDeadline,
+            regDeadlineTime: data.regDeadlineTime || data.registrationDeadlineTime,
+            registrationDeadline: data.registrationDeadline || data.regDeadline,
+            registrationDeadlineTime: data.registrationDeadlineTime || data.regDeadlineTime,
           });
 
           // Initialize members array to satisfy minTeamSize (excluding lead)
@@ -419,7 +533,7 @@ const RegistrationPage: React.FC = () => {
 
   const handleSubmit = async () => {
     if (!id || !event) return;
-    if (event.allowRegistrations === false) {
+    if (isRegistrationClosed(event)) {
       alert("Registrations for this event are currently closed.");
       return;
     }
@@ -668,13 +782,13 @@ const RegistrationPage: React.FC = () => {
     );
   }
 
-  if (event.allowRegistrations === false) {
+  if (isRegistrationClosed(event)) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center font-sans text-center px-4">
         <Info className="h-10 w-10 text-amber-500 mb-4" />
         <h2 className="text-xl font-bold text-slate-800">Registrations Closed</h2>
         <p className="text-xs text-slate-500 mt-1 max-w-md leading-relaxed font-medium">
-          Registrations for <span className="font-bold text-slate-700">"{event.title}"</span> are currently closed or paused by the event coordinators.
+          Registrations for <span className="font-bold text-slate-700">"{event.title}"</span> are closed because the registration deadline has passed or registrations are disabled.
         </p>
         <Link to={`/events/${event.id}`} className="mt-5">
           <Button variant="gradient" className="rounded-xl text-xs font-bold px-6 py-2.5">View Event Details</Button>
