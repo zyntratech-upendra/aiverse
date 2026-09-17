@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, X } from "lucide-react";
 
 interface DatePickerProps {
@@ -9,6 +9,8 @@ interface DatePickerProps {
   id?: string;
   minDate?: string;
   maxDate?: string;
+  minYear?: number;
+  maxYear?: number;
   align?: "left" | "right";
   disabled?: boolean;
 }
@@ -28,6 +30,8 @@ export const DatePicker: React.FC<DatePickerProps> = ({
   id,
   minDate,
   maxDate,
+  minYear,
+  maxYear,
   align = "left",
   disabled = false
 }) => {
@@ -162,9 +166,23 @@ export const DatePicker: React.FC<DatePickerProps> = ({
     );
   };
 
-  // Year options for dropdown: 5 years past to 10 years ahead
+  // Year options for dropdown: all years from past decades to future
   const currentYearNow = new Date().getFullYear();
-  const yearOptions = Array.from({ length: 15 }, (_, i) => currentYearNow - 2 + i);
+  const yearOptions = useMemo(() => {
+    const defaultMinYear = minYear ?? 1950;
+    const defaultMaxYear = maxYear ?? (currentYearNow + 30);
+    const minCalculated = minDate ? parseDate(minDate).getFullYear() : defaultMinYear;
+    const maxCalculated = maxDate ? parseDate(maxDate).getFullYear() : defaultMaxYear;
+
+    const start = Math.min(defaultMinYear, minCalculated, viewYear);
+    const end = Math.max(defaultMaxYear, maxCalculated, viewYear);
+
+    const years: number[] = [];
+    for (let y = start; y <= end; y++) {
+      years.push(y);
+    }
+    return years;
+  }, [minDate, maxDate, minYear, maxYear, viewYear, currentYearNow]);
 
   return (
     <div ref={containerRef} className="relative w-full">
