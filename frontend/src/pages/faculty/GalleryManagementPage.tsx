@@ -1,6 +1,7 @@
 import React, { useState, useMemo, useEffect, useRef } from "react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
+import DatePicker from "../../components/ui/DatePicker";
 import { fetchAlbums, createAlbum, bulkCreateAlbums, updateAlbum, deleteAlbum, fetchEvents } from "../../services/apiClient";
 import { dataCache } from "../../utils/dataCache";
 import { 
@@ -18,10 +19,12 @@ import {
   Info, 
   Pencil, 
   AlertTriangle,
-  Eye,
-  Calendar,
-  Layers,
-  RefreshCw
+  Eye, 
+  Calendar, 
+  Layers, 
+  RefreshCw,
+  ChevronLeft,
+  ChevronRight
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -38,6 +41,7 @@ export interface GalleryPhotoItem {
   title: string;
   imageUrl: string;
   coverImage?: string;
+  bannerImage?: string;
   category: "Workshops" | "Hackathons" | "Symposiums" | "Socials";
   date: string;
   status: "Published" | "Draft";
@@ -48,6 +52,20 @@ export interface GalleryPhotoItem {
   eventTitle?: string;
   createdAt?: number;
   size?: string;
+}
+
+export interface GalleryEventAlbum {
+  groupKey: string;
+  title: string;
+  category: GalleryPhotoItem["category"];
+  date: string;
+  status: "Published" | "Draft";
+  coverImage: string;
+  photos: GalleryPhotoItem[];
+  caption?: string;
+  tags?: string[];
+  eventId?: string;
+  createdAt: number;
 }
 
 interface ToastMessage {
@@ -82,8 +100,12 @@ export const GalleryManagementPage: React.FC = () => {
   // Modals
   const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [editingAlbum, setEditingAlbum] = useState<GalleryEventAlbum | null>(null);
   const [editingPhoto, setEditingPhoto] = useState<GalleryPhotoItem | null>(null);
+  const [lightboxAlbum, setLightboxAlbum] = useState<GalleryEventAlbum | null>(null);
+  const [lightboxIndex, setLightboxIndex] = useState<number>(0);
   const [lightboxPhoto, setLightboxPhoto] = useState<GalleryPhotoItem | null>(null);
+  const [deleteConfirmAlbum, setDeleteConfirmAlbum] = useState<GalleryEventAlbum | null>(null);
   const [deleteConfirmPhoto, setDeleteConfirmPhoto] = useState<GalleryPhotoItem | null>(null);
 
   // Single / Batch Upload State
@@ -234,6 +256,7 @@ export const GalleryManagementPage: React.FC = () => {
           title: raw.title || "Untitled Photo",
           imageUrl: photoUrl,
           coverImage: photoUrl,
+          bannerImage: photoUrl,
           category: (raw.category as any) || "Workshops",
           date: raw.date || new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
           status: (raw.status as any) || "Published",
@@ -455,16 +478,17 @@ export const GalleryManagementPage: React.FC = () => {
     }
   };
 
-  // Open Edit Modal
-  const handleOpenEdit = (photo: GalleryPhotoItem) => {
-    setEditingPhoto(photo);
-    setEditTitle(photo.title || "");
-    setEditCategory(photo.category || "Workshops");
-    setEditCaption(photo.caption || photo.description || "");
-    setEditDate(photo.date || "");
-    setEditStatus(photo.status || "Published");
-    setEditTags(photo.tags || [photo.category || "Workshops"]);
-    setEditImagePreview(photo.imageUrl);
+  // Open Edit Modal for an Event Album
+  const handleOpenEdit = (album: GalleryEventAlbum) => {
+    setEditingAlbum(album);
+    setEditingPhoto(album.photos[0] || null);
+    setEditTitle(album.title || "");
+    setEditCategory(album.category || "Workshops");
+    setEditCaption(album.caption || "");
+    setEditDate(album.date || "");
+    setEditStatus(album.status || "Published");
+    setEditTags(album.tags || [album.category || "Workshops"]);
+    setEditImagePreview(album.coverImage);
     setIsEditModalOpen(true);
   };
 
@@ -477,106 +501,182 @@ export const GalleryManagementPage: React.FC = () => {
     setEditImagePreview(compressed);
   };
 
-  // Save Edited Photo
+  // Save Edited Event Album
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!editingPhoto) return;
+    if (!editingAlbum) return;
 
     if (!editTitle.trim()) {
-      addToast("Photo title is required!", "warning");
+      addToast("Event / Album title is required!", "warning");
       return;
     }
 
     const cleanEvent = editTitle.trim().replace(/\s*\(\d+\)$/, "").replace(/\s*#\d+$/, "").trim();
-    const payload = {
-      title: editTitle.trim(),
-      eventTitle: cleanEvent,
-      category: editCategory,
-      caption: editCaption.trim(),
-      description: editCaption.trim(),
-      date: editDate || editingPhoto.date,
-      status: editStatus,
-      tags: editTags,
-      imageUrl: editImagePreview || editingPhoto.imageUrl,
-      coverImage: editImagePreview || editingPhoto.imageUrl,
-      bannerImage: editImagePreview || editingPhoto.imageUrl,
-      updatedAt: Date.now()
-    };
-
-    addToast("Saving photo updates...", "info");
+    addToast("Saving event updates...", "info");
 
     try {
-      await updateAlbum(editingPhoto.id, payload);
-      dataCache.invalidate("public_gallery_photos");
-      setPhotos((prev) =>
-        prev.map((p) => (p.id === editingPhoto.id ? { ...p, ...payload } : p))
+      await Promise.all(
+        editingAlbum.photos.map((p, idx) => {
+          const payload = {
+            title: editingAlbum.photos.length > 1 ? `${cleanEvent} (${idx + 1})` : cleanEvent,
+            eventTitle: cleanEvent,
+            category: editCategory,
+            caption: editCaption.trim(),
+            description: editCaption.trim(),
+            date: editDate || p.date,
+            status: editStatus,
+            tags: editTags,
+            imageUrl: idx === 0 && editImagePreview ? editImagePreview : p.imageUrl,
+            coverImage: idx === 0 && editImagePreview ? editImagePreview : p.coverImage,
+            bannerImage: idx === 0 && editImagePreview ? editImagePreview : p.bannerImage,
+            updatedAt: Date.now()
+          };
+          return updateAlbum(p.id, payload);
+        })
       );
+
+      dataCache.invalidate("public_gallery_photos");
+      await loadPhotos();
       setIsEditModalOpen(false);
+      setEditingAlbum(null);
       setEditingPhoto(null);
-      addToast("Photo details updated successfully!", "success");
+      addToast("Event album updated successfully!", "success");
     } catch (err) {
-      console.error("Error updating photo:", err);
-      addToast("Failed to update photo.", "warning");
+      console.error("Error updating event album:", err);
+      addToast("Failed to update event album.", "warning");
     }
   };
 
-  // Toggle Publish / Draft status
-  const handleToggleStatus = async (photo: GalleryPhotoItem) => {
-    const newStatus: "Published" | "Draft" = photo.status === "Published" ? "Draft" : "Published";
+  // Toggle Publish / Draft status for all photos in an event album
+  const handleToggleAlbumStatus = async (album: GalleryEventAlbum) => {
+    const newStatus: "Published" | "Draft" = album.status === "Published" ? "Draft" : "Published";
     try {
-      await updateAlbum(photo.id, { status: newStatus });
+      await Promise.all(album.photos.map((p) => updateAlbum(p.id, { status: newStatus })));
       dataCache.invalidate("public_gallery_photos");
       setPhotos((prev) =>
-        prev.map((p) => (p.id === photo.id ? { ...p, status: newStatus } : p))
+        prev.map((p) => (album.photos.some((ap) => ap.id === p.id) ? { ...p, status: newStatus } : p))
       );
-      addToast(`"${photo.title}" changed to ${newStatus.toUpperCase()}`, "info");
+      addToast(`"${album.title}" album marked as ${newStatus.toUpperCase()}`, "info");
     } catch (err) {
       console.error("Error updating status:", err);
       addToast("Failed to toggle status.", "warning");
     }
   };
 
-  // Delete photo
-  const handleDeletePhoto = async () => {
-    if (!deleteConfirmPhoto) return;
+  // Delete all photos belonging to an event album
+  const handleDeleteAlbum = async () => {
+    if (!deleteConfirmAlbum) return;
     try {
-      await deleteAlbum(deleteConfirmPhoto.id);
+      await Promise.all(deleteConfirmAlbum.photos.map((p) => deleteAlbum(p.id)));
       dataCache.invalidate("public_gallery_photos");
-      setPhotos((prev) => prev.filter((p) => p.id !== deleteConfirmPhoto.id));
-      addToast(`Photo "${deleteConfirmPhoto.title}" deleted.`, "info");
-      setDeleteConfirmPhoto(null);
+      setPhotos((prev) => prev.filter((p) => !deleteConfirmAlbum.photos.some((dp) => dp.id === p.id)));
+      addToast(`Event "${deleteConfirmAlbum.title}" (${deleteConfirmAlbum.photos.length} photos) deleted.`, "info");
+      setDeleteConfirmAlbum(null);
     } catch (err) {
-      console.error("Error deleting photo:", err);
-      addToast("Failed to delete photo.", "warning");
+      console.error("Error deleting album:", err);
+      addToast("Failed to delete event.", "warning");
     }
   };
 
-  // Filtered photos list
-  const filteredPhotos = useMemo(() => {
-    return photos.filter((p) => {
-      const matchesSearch =
-        p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (p.caption && p.caption.toLowerCase().includes(searchQuery.toLowerCase())) ||
-        p.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        (p.tags && p.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase())));
+  // Lightbox handlers
+  const openLightbox = (album: GalleryEventAlbum, index = 0) => {
+    setLightboxAlbum(album);
+    setLightboxIndex(index);
+    setLightboxPhoto(album.photos[index] || null);
+  };
 
-      const matchesCategory = selectedCategory === "All" || p.category === selectedCategory;
-      const matchesStatus = statusFilter === "All" || p.status === statusFilter;
+  const nextLightboxPhoto = () => {
+    if (!lightboxAlbum || lightboxAlbum.photos.length <= 1) return;
+    const nextIdx = (lightboxIndex + 1) % lightboxAlbum.photos.length;
+    setLightboxIndex(nextIdx);
+    setLightboxPhoto(lightboxAlbum.photos[nextIdx]);
+  };
+
+  const prevLightboxPhoto = () => {
+    if (!lightboxAlbum || lightboxAlbum.photos.length <= 1) return;
+    const prevIdx = (lightboxIndex - 1 + lightboxAlbum.photos.length) % lightboxAlbum.photos.length;
+    setLightboxIndex(prevIdx);
+    setLightboxPhoto(lightboxAlbum.photos[prevIdx]);
+  };
+
+  // Group photos by Event / Album Name
+  const groupedAlbums = useMemo<GalleryEventAlbum[]>(() => {
+    const groupMap = new Map<string, GalleryEventAlbum>();
+
+    photos.forEach((photo) => {
+      // Clean title: remove sequential markers like "(1)", "(2)", "#1", etc.
+      const cleanTitle = (photo.eventTitle || photo.title)
+        .replace(/\s*\(\d+\)$/, "")
+        .replace(/\s*#\d+$/, "")
+        .trim() || "Visual Moment";
+
+      const groupKey = photo.eventId
+        ? `event_${photo.eventId}`
+        : `${cleanTitle.toLowerCase()}___${photo.category}___${photo.date}`;
+
+      if (!groupMap.has(groupKey)) {
+        groupMap.set(groupKey, {
+          groupKey,
+          title: cleanTitle,
+          category: photo.category,
+          date: photo.date,
+          status: photo.status,
+          coverImage: photo.imageUrl,
+          photos: [photo],
+          caption: photo.caption || photo.description || "",
+          tags: photo.tags || [],
+          eventId: photo.eventId,
+          createdAt: photo.createdAt || 0
+        });
+      } else {
+        const group = groupMap.get(groupKey)!;
+        if (!group.photos.some((p) => p.id === photo.id)) {
+          group.photos.push(photo);
+        }
+        if (photo.status === "Published") {
+          group.status = "Published";
+        }
+        if (!group.caption && photo.caption) {
+          group.caption = photo.caption;
+        }
+      }
+    });
+
+    return Array.from(groupMap.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }, [photos]);
+
+  // Filtered event albums list
+  const filteredAlbums = useMemo(() => {
+    return groupedAlbums.filter((album) => {
+      const matchesSearch =
+        album.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (album.caption && album.caption.toLowerCase().includes(searchQuery.toLowerCase())) ||
+        album.category.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (album.tags && album.tags.some((t) => t.toLowerCase().includes(searchQuery.toLowerCase()))) ||
+        album.photos.some(
+          (p) =>
+            p.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
+            (p.caption && p.caption.toLowerCase().includes(searchQuery.toLowerCase()))
+        );
+
+      const matchesCategory = selectedCategory === "All" || album.category === selectedCategory;
+      const matchesStatus = statusFilter === "All" || album.status === statusFilter;
 
       return matchesSearch && matchesCategory && matchesStatus;
     });
-  }, [photos, searchQuery, selectedCategory, statusFilter]);
+  }, [groupedAlbums, searchQuery, selectedCategory, statusFilter]);
 
   // Statistics
+  const totalAlbumsCount = groupedAlbums.length;
   const totalPhotosCount = photos.length;
-  const publishedCount = photos.filter((p) => p.status === "Published").length;
-  const draftsCount = photos.filter((p) => p.status === "Draft").length;
-  const recentCount = useMemo(() => {
-    return photos.filter((p) => {
-      const created = p.createdAt || 0;
+  const publishedAlbumsCount = groupedAlbums.filter((a) => a.status === "Published").length;
+  const draftsAlbumsCount = groupedAlbums.filter((a) => a.status === "Draft").length;
+  const recentAlbumsCount = useMemo(() => {
+    return groupedAlbums.filter((a) => {
+      const created = a.createdAt || 0;
       return Date.now() - created < 604800000; // 7 days
     }).length;
-  }, [photos]);
+  }, [groupedAlbums]);
 
   const getCategoryBadgeClass = (category: string) => {
     switch (category) {
@@ -595,7 +695,7 @@ export const GalleryManagementPage: React.FC = () => {
     <div className="p-6 max-w-7xl mx-auto space-y-6 animate-in fade-in duration-200">
       <SEO
         title="Gallery Management | AI Verse Faculty Hub"
-        description="Upload and manage individual event photos, symposium visual records, and community milestones."
+        description="Upload and manage event albums, symposium visual records, and community milestones."
       />
 
       {/* Toast Notifications */}
@@ -624,13 +724,13 @@ export const GalleryManagementPage: React.FC = () => {
         <div className="space-y-1">
           <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-blue-50 text-blue-700 border border-blue-200/60 text-[10px] font-black uppercase tracking-wider">
             <ImageIcon className="w-3.5 h-3.5" />
-            <span>Single Photo Gallery Architecture</span>
+            <span>Event Album Architecture</span>
           </div>
           <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-[#0F172A]">
             Gallery Management
           </h1>
           <p className="text-xs sm:text-sm text-slate-500 font-medium">
-            Upload and organize individual photos, moments, and event visuals across AI Verse.
+            Upload and organize photos grouped by events, workshops, and milestones.
           </p>
         </div>
 
@@ -638,7 +738,7 @@ export const GalleryManagementPage: React.FC = () => {
           <button
             onClick={loadPhotos}
             className="p-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition-all cursor-pointer"
-            title="Refresh gallery photos"
+            title="Refresh gallery albums"
           >
             <RefreshCw className={`w-4 h-4 ${loading ? "animate-spin text-blue-600" : ""}`} />
           </button>
@@ -664,13 +764,13 @@ export const GalleryManagementPage: React.FC = () => {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
         <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-2xs">
           <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[10px] font-extrabold uppercase tracking-wider">Total Photos</span>
+            <span className="text-[10px] font-extrabold uppercase tracking-wider">Total Events</span>
             <div className="p-2 rounded-xl bg-blue-50 text-blue-600">
               <ImageIcon className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-[#0F172A]">{totalPhotosCount}</div>
-          <div className="text-[11px] text-slate-400 font-medium mt-0.5">Separate single assets</div>
+          <div className="text-2xl sm:text-3xl font-black text-[#0F172A]">{totalAlbumsCount}</div>
+          <div className="text-[11px] text-slate-400 font-medium mt-0.5">{totalPhotosCount} total photos</div>
         </div>
 
         <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-2xs">
@@ -680,18 +780,18 @@ export const GalleryManagementPage: React.FC = () => {
               <CheckCircle className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-emerald-600">{publishedCount}</div>
+          <div className="text-2xl sm:text-3xl font-black text-emerald-600">{publishedAlbumsCount}</div>
           <div className="text-[11px] text-emerald-700 font-medium mt-0.5">Live on public gallery</div>
         </div>
 
         <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-2xs">
           <div className="flex items-center justify-between text-slate-400 mb-2">
-            <span className="text-[10px] font-extrabold uppercase tracking-wider">Recent Uploads</span>
+            <span className="text-[10px] font-extrabold uppercase tracking-wider">Recent Events</span>
             <div className="p-2 rounded-xl bg-indigo-50 text-indigo-600">
               <Clock className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-indigo-600">{recentCount}</div>
+          <div className="text-2xl sm:text-3xl font-black text-indigo-600">{recentAlbumsCount}</div>
           <div className="text-[11px] text-slate-400 font-medium mt-0.5">In the past 7 days</div>
         </div>
 
@@ -702,8 +802,8 @@ export const GalleryManagementPage: React.FC = () => {
               <Layers className="w-4 h-4" />
             </div>
           </div>
-          <div className="text-2xl sm:text-3xl font-black text-amber-600">{draftsCount}</div>
-          <div className="text-[11px] text-slate-400 font-medium mt-0.5">Unpublished items</div>
+          <div className="text-2xl sm:text-3xl font-black text-amber-600">{draftsAlbumsCount}</div>
+          <div className="text-[11px] text-slate-400 font-medium mt-0.5">Unpublished albums</div>
         </div>
       </div>
 
@@ -719,10 +819,10 @@ export const GalleryManagementPage: React.FC = () => {
                 : "bg-slate-100 text-slate-600 hover:bg-slate-200"
             }`}
           >
-            All ({photos.length})
+            All ({groupedAlbums.length})
           </button>
           {CATEGORY_OPTIONS.map((cat) => {
-            const count = photos.filter((p) => p.category === cat).length;
+            const count = groupedAlbums.filter((a) => a.category === cat).length;
             const isSelected = selectedCategory === cat;
             return (
               <button
@@ -749,7 +849,7 @@ export const GalleryManagementPage: React.FC = () => {
             <Search className="w-4 h-4 text-slate-400 absolute left-3 top-1/2 -translate-y-1/2" />
             <input
               type="text"
-              placeholder="Search photo title, tags..."
+              placeholder="Search event title, tags..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               className="w-full bg-slate-50 border border-slate-200 rounded-xl pl-9 pr-7 py-1.5 text-xs font-bold text-[#0F172A] placeholder-slate-400 outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
@@ -791,18 +891,18 @@ export const GalleryManagementPage: React.FC = () => {
       {loading ? (
         <div className="bg-white rounded-3xl p-16 border border-slate-200/80 text-center space-y-3">
           <RefreshCw className="w-8 h-8 text-blue-600 animate-spin mx-auto" />
-          <p className="text-xs font-bold text-slate-500">Loading gallery photos from database...</p>
+          <p className="text-xs font-bold text-slate-500">Loading gallery albums from database...</p>
         </div>
-      ) : filteredPhotos.length === 0 ? (
+      ) : filteredAlbums.length === 0 ? (
         <div className="bg-white rounded-3xl p-16 border border-dashed border-slate-300 text-center space-y-4">
           <div className="w-16 h-16 rounded-full bg-blue-50 text-blue-600 flex items-center justify-center mx-auto shadow-inner">
             <ImageIcon className="w-8 h-8" />
           </div>
           <div className="space-y-1 max-w-sm mx-auto">
-            <h3 className="text-base font-black text-[#0F172A]">No Photos Found</h3>
+            <h3 className="text-base font-black text-[#0F172A]">No Events Found</h3>
             <p className="text-xs text-slate-400 font-medium">
               {searchQuery || selectedCategory !== "All"
-                ? "No gallery images match your current filter criteria."
+                ? "No gallery events match your current filter criteria."
                 : "Your gallery is currently empty. Upload your first event photo now!"}
             </p>
           </div>
@@ -822,7 +922,7 @@ export const GalleryManagementPage: React.FC = () => {
           </Button>
         </div>
       ) : viewMode === "grid" ? (
-        /* GRID VIEW (Visual Cards) */
+        /* GRID VIEW (Event Album Cards) */
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-5">
           {/* Quick Upload Tile */}
           <div
@@ -846,112 +946,154 @@ export const GalleryManagementPage: React.FC = () => {
             </p>
           </div>
 
-          {filteredPhotos.map((photo) => {
+          {filteredAlbums.map((album) => {
             return (
               <div
-                key={photo.id}
-                className="group bg-white rounded-3xl border border-slate-200/90 shadow-2xs hover:shadow-xl hover:border-blue-200 transition-all duration-300 overflow-hidden flex flex-col"
+                key={album.groupKey}
+                className="group bg-white rounded-3xl border border-slate-200/90 shadow-2xs hover:shadow-xl hover:border-blue-200 transition-all duration-300 overflow-hidden flex flex-col justify-between"
               >
-                {/* Photo Thumbnail */}
-                <div className="relative aspect-[4/3] bg-slate-900 overflow-hidden">
-                  <img
-                    src={photo.imageUrl}
-                    alt={photo.title}
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
-                    loading="lazy"
-                  />
-                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-3.5" />
+                <div>
+                  {/* Photo Thumbnail with Photo Count */}
+                  <div
+                    className="relative aspect-[4/3] bg-slate-900 overflow-hidden cursor-pointer"
+                    onClick={() => openLightbox(album, 0)}
+                  >
+                    <img
+                      src={album.coverImage}
+                      alt={album.title}
+                      className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                      loading="lazy"
+                    />
+                    <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-3.5" />
 
-                  {/* Top Badges */}
-                  <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none">
-                    <span
-                      className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border shadow-xs backdrop-blur-md ${getCategoryBadgeClass(
-                        photo.category
-                      )}`}
-                    >
-                      {photo.category}
-                    </span>
+                    {/* Top Badges */}
+                    <div className="absolute top-3 left-3 right-3 flex items-center justify-between pointer-events-none">
+                      <span
+                        className={`text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border shadow-xs backdrop-blur-md ${getCategoryBadgeClass(
+                          album.category
+                        )}`}
+                      >
+                        {album.category}
+                      </span>
 
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleToggleStatus(photo);
-                      }}
-                      className={`pointer-events-auto text-[10px] font-black uppercase px-2 py-0.5 rounded-full border cursor-pointer transition-all shadow-xs ${
-                        photo.status === "Published"
-                          ? "bg-emerald-500 text-white border-emerald-400"
-                          : "bg-amber-400 text-slate-900 border-amber-300"
-                      }`}
-                      title="Click to toggle Published / Draft"
-                    >
-                      {photo.status}
-                    </button>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-slate-950/80 text-white border border-white/20 backdrop-blur-md flex items-center gap-1 shadow-xs">
+                          <ImageIcon className="w-3 h-3 text-blue-400" />
+                          <span>{album.photos.length}</span>
+                        </span>
+
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleToggleAlbumStatus(album);
+                          }}
+                          className={`pointer-events-auto text-[10px] font-black uppercase px-2 py-0.5 rounded-full border cursor-pointer transition-all shadow-xs ${
+                            album.status === "Published"
+                              ? "bg-emerald-500 text-white border-emerald-400"
+                              : "bg-amber-400 text-slate-900 border-amber-300"
+                          }`}
+                          title="Click to toggle Published / Draft"
+                        >
+                          {album.status}
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Quick Action Overlay on Hover */}
+                    <div className="absolute bottom-3 right-3 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-auto">
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          openLightbox(album, 0);
+                        }}
+                        className="p-2 bg-white/90 hover:bg-white text-slate-800 rounded-xl shadow-md transition-transform hover:scale-110 cursor-pointer"
+                        title="View All Photos"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleOpenEdit(album);
+                        }}
+                        className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md transition-transform hover:scale-110 cursor-pointer"
+                        title="Edit Event Details"
+                      >
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteConfirmAlbum(album);
+                        }}
+                        className="p-2 bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-md transition-transform hover:scale-110 cursor-pointer"
+                        title="Delete Event Album"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
 
-                  {/* Quick Action Overlay on Hover */}
-                  <div className="absolute bottom-3 right-3 flex items-center gap-1.5 opacity-0 group-hover:opacity-100 transition-opacity">
-                    <button
-                      onClick={() => setLightboxPhoto(photo)}
-                      className="p-2 bg-white/90 hover:bg-white text-slate-800 rounded-xl shadow-md transition-transform hover:scale-110 cursor-pointer"
-                      title="View Full Resolution"
-                    >
-                      <Eye className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => handleOpenEdit(photo)}
-                      className="p-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl shadow-md transition-transform hover:scale-110 cursor-pointer"
-                      title="Edit Photo Details"
-                    >
-                      <Pencil className="w-3.5 h-3.5" />
-                    </button>
-                    <button
-                      onClick={() => setDeleteConfirmPhoto(photo)}
-                      className="p-2 bg-red-600 hover:bg-red-700 text-white rounded-xl shadow-md transition-transform hover:scale-110 cursor-pointer"
-                      title="Delete Photo"
-                    >
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                  {/* Thumbnail preview strip if multiple photos */}
+                  {album.photos.length > 1 && (
+                    <div className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 border-t border-slate-100 overflow-x-auto [scrollbar-width:none]">
+                      {album.photos.slice(0, 5).map((p, idx) => (
+                        <div
+                          key={p.id || idx}
+                          onClick={() => openLightbox(album, idx)}
+                          className="w-8 h-8 rounded-lg overflow-hidden border border-slate-200 cursor-pointer hover:ring-2 hover:ring-blue-500 shrink-0 transition-all"
+                          title={`View Photo ${idx + 1}`}
+                        >
+                          <img src={p.imageUrl} alt="" className="w-full h-full object-cover" />
+                        </div>
+                      ))}
+                      {album.photos.length > 5 && (
+                        <span className="text-[10px] font-black text-slate-500 pl-1">
+                          +{album.photos.length - 5}
+                        </span>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Album Details */}
+                  <div className="p-4 space-y-2">
+                    <div className="space-y-1">
+                      <h3
+                        className="font-black text-sm text-[#0F172A] line-clamp-1 leading-snug hover:text-blue-600 cursor-pointer transition-colors"
+                        onClick={() => openLightbox(album, 0)}
+                        title={album.title}
+                      >
+                        {album.title}
+                      </h3>
+                      {album.caption && (
+                        <p className="text-xs text-slate-500 font-medium line-clamp-2 leading-relaxed">
+                          {album.caption}
+                        </p>
+                      )}
+                    </div>
                   </div>
                 </div>
 
-                {/* Photo Details */}
-                <div className="p-4 flex-1 flex flex-col justify-between space-y-3">
-                  <div className="space-y-1">
-                    <h3
-                      className="font-black text-sm text-[#0F172A] line-clamp-1 leading-snug hover:text-blue-600 cursor-pointer transition-colors"
-                      onClick={() => setLightboxPhoto(photo)}
-                      title={photo.title}
+                <div className="px-4 pb-4 pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400 font-medium">
+                  <span className="flex items-center gap-1">
+                    <Calendar className="w-3 h-3 text-slate-400" />
+                    {album.date}
+                  </span>
+
+                  <div className="flex items-center gap-1">
+                    <button
+                      onClick={() => handleOpenEdit(album)}
+                      className="text-blue-600 hover:text-blue-700 font-bold hover:underline cursor-pointer"
                     >
-                      {photo.title}
-                    </h3>
-                    {photo.caption && (
-                      <p className="text-xs text-slate-500 font-medium line-clamp-2 leading-relaxed">
-                        {photo.caption}
-                      </p>
-                    )}
-                  </div>
-
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] text-slate-400 font-medium">
-                    <span className="flex items-center gap-1">
-                      <Calendar className="w-3 h-3 text-slate-400" />
-                      {photo.date}
-                    </span>
-
-                    <div className="flex items-center gap-1">
-                      <button
-                        onClick={() => handleOpenEdit(photo)}
-                        className="text-blue-600 hover:text-blue-700 font-bold hover:underline cursor-pointer"
-                      >
-                        Edit
-                      </button>
-                      <span>•</span>
-                      <button
-                        onClick={() => setDeleteConfirmPhoto(photo)}
-                        className="text-red-500 hover:text-red-600 font-bold hover:underline cursor-pointer"
-                      >
-                        Delete
-                      </button>
-                    </div>
+                      Edit
+                    </button>
+                    <span>•</span>
+                    <button
+                      onClick={() => setDeleteConfirmAlbum(album)}
+                      className="text-red-500 hover:text-red-600 font-bold hover:underline cursor-pointer"
+                    >
+                      Delete
+                    </button>
                   </div>
                 </div>
               </div>
@@ -959,14 +1101,14 @@ export const GalleryManagementPage: React.FC = () => {
           })}
         </div>
       ) : (
-        /* LIST VIEW (Table) */
+        /* LIST VIEW (Table of Event Albums) */
         <div className="bg-white rounded-3xl border border-slate-200/80 shadow-2xs overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-xs border-collapse">
               <thead className="bg-slate-50 text-slate-500 font-extrabold uppercase text-[10px] tracking-wider border-b border-slate-200/80 select-none">
                 <tr>
-                  <th className="py-3.5 px-4">Photo Preview</th>
-                  <th className="py-3.5 px-4 min-w-[200px]">Title & Caption</th>
+                  <th className="py-3.5 px-4">Cover & Photos</th>
+                  <th className="py-3.5 px-4 min-w-[200px]">Event Title & Caption</th>
                   <th className="py-3.5 px-4">Category</th>
                   <th className="py-3.5 px-4">Date</th>
                   <th className="py-3.5 px-4 text-center">Status</th>
@@ -974,32 +1116,37 @@ export const GalleryManagementPage: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 font-medium">
-                {filteredPhotos.map((photo) => (
-                  <tr key={photo.id} className="hover:bg-slate-50/80 transition-colors">
+                {filteredAlbums.map((album) => (
+                  <tr key={album.groupKey} className="hover:bg-slate-50/80 transition-colors">
                     <td className="py-3 px-4">
-                      <div
-                        onClick={() => setLightboxPhoto(photo)}
-                        className="w-14 h-11 rounded-xl bg-slate-900 overflow-hidden shadow-2xs cursor-pointer border border-slate-200"
-                      >
-                        <img
-                          src={photo.imageUrl}
-                          alt={photo.title}
-                          className="w-full h-full object-cover hover:scale-110 transition-transform"
-                        />
+                      <div className="flex items-center gap-2">
+                        <div
+                          onClick={() => openLightbox(album, 0)}
+                          className="w-14 h-11 rounded-xl bg-slate-900 overflow-hidden shadow-2xs cursor-pointer border border-slate-200 shrink-0"
+                        >
+                          <img
+                            src={album.coverImage}
+                            alt={album.title}
+                            className="w-full h-full object-cover hover:scale-110 transition-transform"
+                          />
+                        </div>
+                        <span className="text-[10px] font-bold px-2 py-0.5 rounded-full bg-blue-50 text-blue-700 border border-blue-100">
+                          {album.photos.length} {album.photos.length === 1 ? "photo" : "photos"}
+                        </span>
                       </div>
                     </td>
 
                     <td className="py-3 px-4">
                       <div className="space-y-0.5 max-w-md">
                         <div
-                          onClick={() => setLightboxPhoto(photo)}
+                          onClick={() => openLightbox(album, 0)}
                           className="font-black text-[#0F172A] hover:text-blue-600 cursor-pointer transition-colors"
                         >
-                          {photo.title}
+                          {album.title}
                         </div>
-                        {photo.caption && (
+                        {album.caption && (
                           <div className="text-[11px] text-slate-500 line-clamp-1">
-                            {photo.caption}
+                            {album.caption}
                           </div>
                         )}
                       </div>
@@ -1008,50 +1155,50 @@ export const GalleryManagementPage: React.FC = () => {
                     <td className="py-3 px-4">
                       <span
                         className={`text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${getCategoryBadgeClass(
-                          photo.category
+                          album.category
                         )}`}
                       >
-                        {photo.category}
+                        {album.category}
                       </span>
                     </td>
 
                     <td className="py-3 px-4 text-slate-600 font-medium">
-                      {photo.date}
+                      {album.date}
                     </td>
 
                     <td className="py-3 px-4 text-center">
                       <button
-                        onClick={() => handleToggleStatus(photo)}
+                        onClick={() => handleToggleAlbumStatus(album)}
                         className={`text-[10px] font-black uppercase px-2.5 py-0.5 rounded-full border cursor-pointer transition-all ${
-                          photo.status === "Published"
+                          album.status === "Published"
                             ? "bg-emerald-50 text-emerald-700 border-emerald-200 hover:bg-emerald-100"
                             : "bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100"
                         }`}
                       >
-                        {photo.status}
+                        {album.status}
                       </button>
                     </td>
 
                     <td className="py-3 px-4 text-right">
                       <div className="flex items-center justify-end gap-1">
                         <button
-                          onClick={() => setLightboxPhoto(photo)}
+                          onClick={() => openLightbox(album, 0)}
                           className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                          title="Preview"
+                          title="Preview All Photos"
                         >
                           <Eye className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => handleOpenEdit(photo)}
+                          onClick={() => handleOpenEdit(album)}
                           className="p-1.5 text-slate-500 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                          title="Edit"
+                          title="Edit Event"
                         >
                           <Pencil className="w-4 h-4" />
                         </button>
                         <button
-                          onClick={() => setDeleteConfirmPhoto(photo)}
+                          onClick={() => setDeleteConfirmAlbum(album)}
                           className="p-1.5 text-slate-500 hover:text-red-600 hover:bg-red-50 rounded-lg transition-colors cursor-pointer"
-                          title="Delete"
+                          title="Delete Event Album"
                         >
                           <Trash2 className="w-4 h-4" />
                         </button>
@@ -1215,21 +1362,27 @@ export const GalleryManagementPage: React.FC = () => {
                       <label className="text-[10px] font-extrabold text-slate-500 uppercase block mb-1">
                         Date
                       </label>
-                      <input
-                        type="date"
+                      <DatePicker
                         value={batchDate}
-                        onChange={(e) => {
-                          setBatchDate(e.target.value);
-                          const formatted = new Date(e.target.value).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                            year: "numeric"
-                          });
+                        onChange={(val) => {
+                          setBatchDate(val);
+                          let formatted = val;
+                          if (val) {
+                            const [y, m, d] = val.split("-").map(Number);
+                            const parsedDate = new Date(y, m - 1, d);
+                            if (!isNaN(parsedDate.getTime())) {
+                              formatted = parsedDate.toLocaleDateString("en-US", {
+                                month: "short",
+                                day: "numeric",
+                                year: "numeric"
+                              });
+                            }
+                          }
                           setPendingUploads((prev) =>
                             prev.map((p) => ({ ...p, date: formatted }))
                           );
                         }}
-                        className="w-full bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-[#0F172A] outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 shadow-2xs"
+                        placeholder="Select event date"
                       />
                     </div>
 
@@ -1490,12 +1643,37 @@ export const GalleryManagementPage: React.FC = () => {
                   <label className="text-xs font-black text-slate-700 block mb-1">
                     Event Date
                   </label>
-                  <input
-                    type="text"
-                    value={editDate}
-                    onChange={(e) => setEditDate(e.target.value)}
-                    placeholder="E.g. Oct 24, 2026"
-                    className="w-full bg-slate-50 border border-slate-200 rounded-xl px-3.5 py-2 text-xs font-bold text-[#0F172A] outline-none focus:bg-white focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  <DatePicker
+                    value={(() => {
+                      if (!editDate) return "";
+                      if (/^\d{4}-\d{2}-\d{2}$/.test(editDate)) return editDate;
+                      const parsed = new Date(editDate);
+                      if (!isNaN(parsed.getTime())) {
+                        const y = parsed.getFullYear();
+                        const m = String(parsed.getMonth() + 1).padStart(2, "0");
+                        const d = String(parsed.getDate()).padStart(2, "0");
+                        return `${y}-${m}-${d}`;
+                      }
+                      return editDate;
+                    })()}
+                    onChange={(val) => {
+                      if (val) {
+                        const [y, m, d] = val.split("-").map(Number);
+                        const parsedDate = new Date(y, m - 1, d);
+                        if (!isNaN(parsedDate.getTime())) {
+                          setEditDate(
+                            parsedDate.toLocaleDateString("en-US", {
+                              month: "short",
+                              day: "numeric",
+                              year: "numeric"
+                            })
+                          );
+                          return;
+                        }
+                      }
+                      setEditDate(val);
+                    }}
+                    placeholder="Select event date"
                   />
                 </div>
 
@@ -1596,9 +1774,12 @@ export const GalleryManagementPage: React.FC = () => {
       {/* MODAL 3: LIGHTBOX / FULL IMAGE PREVIEW */}
       {/* ========================================================= */}
       <AnimatePresence>
-        {lightboxPhoto && (
+        {(lightboxAlbum || lightboxPhoto) && (
           <div
-            onClick={() => setLightboxPhoto(null)}
+            onClick={() => {
+              setLightboxAlbum(null);
+              setLightboxPhoto(null);
+            }}
             className="fixed inset-0 bg-slate-950/90 backdrop-blur-md z-[80] flex items-center justify-center p-4 md:p-8"
           >
             <motion.div
@@ -1614,28 +1795,44 @@ export const GalleryManagementPage: React.FC = () => {
                   <div className="flex items-center gap-2">
                     <span
                       className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full border ${getCategoryBadgeClass(
-                        lightboxPhoto.category
+                        lightboxAlbum?.category || lightboxPhoto?.category || "Workshops"
                       )}`}
                     >
-                      {lightboxPhoto.category}
+                      {lightboxAlbum?.category || lightboxPhoto?.category}
                     </span>
                     <span className="text-xs text-slate-400 font-mono">
-                      {lightboxPhoto.date}
+                      {lightboxAlbum?.date || lightboxPhoto?.date}
                     </span>
+                    {lightboxAlbum && lightboxAlbum.photos.length > 1 && (
+                      <span className="text-xs text-blue-400 font-bold bg-blue-500/10 border border-blue-500/20 px-2 py-0.5 rounded-full">
+                        Photo {lightboxIndex + 1} of {lightboxAlbum.photos.length}
+                      </span>
+                    )}
                   </div>
-                  <h3 className="text-base font-black text-white">{lightboxPhoto.title}</h3>
+                  <h3 className="text-base font-black text-white">
+                    {lightboxAlbum?.title || lightboxPhoto?.title}
+                  </h3>
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {lightboxAlbum && (
+                    <button
+                      onClick={() => {
+                        handleOpenEdit(lightboxAlbum);
+                        setLightboxAlbum(null);
+                        setLightboxPhoto(null);
+                      }}
+                      className="p-2 text-slate-300 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
+                      title="Edit Details"
+                    >
+                      <Pencil className="w-4 h-4" />
+                    </button>
+                  )}
                   <button
-                    onClick={() => handleOpenEdit(lightboxPhoto)}
-                    className="p-2 text-slate-300 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
-                    title="Edit Details"
-                  >
-                    <Pencil className="w-4 h-4" />
-                  </button>
-                  <button
-                    onClick={() => setLightboxPhoto(null)}
+                    onClick={() => {
+                      setLightboxAlbum(null);
+                      setLightboxPhoto(null);
+                    }}
                     className="p-2 text-slate-300 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
                   >
                     <X className="w-5 h-5" />
@@ -1643,19 +1840,70 @@ export const GalleryManagementPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Full Image Container */}
-              <div className="flex-1 bg-black flex items-center justify-center overflow-hidden p-2">
+              {/* Full Image Container with Carousel Arrows */}
+              <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden p-2 min-h-[300px]">
+                {lightboxAlbum && lightboxAlbum.photos.length > 1 && (
+                  <>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        prevLightboxPhoto();
+                      }}
+                      className="absolute left-4 z-10 p-2.5 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white border border-white/20 transition-all cursor-pointer shadow-xl hover:scale-110"
+                      title="Previous Photo"
+                    >
+                      <ChevronLeft className="w-5 h-5" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        nextLightboxPhoto();
+                      }}
+                      className="absolute right-4 z-10 p-2.5 rounded-full bg-slate-900/80 hover:bg-slate-800 text-white border border-white/20 transition-all cursor-pointer shadow-xl hover:scale-110"
+                      title="Next Photo"
+                    >
+                      <ChevronRight className="w-5 h-5" />
+                    </button>
+                  </>
+                )}
+
                 <img
-                  src={lightboxPhoto.imageUrl}
-                  alt={lightboxPhoto.title}
-                  className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl shadow-2xl"
+                  src={
+                    lightboxAlbum
+                      ? lightboxAlbum.photos[lightboxIndex]?.imageUrl || lightboxAlbum.coverImage
+                      : lightboxPhoto?.imageUrl
+                  }
+                  alt={lightboxAlbum?.title || lightboxPhoto?.title}
+                  className="max-h-[60vh] w-auto max-w-full object-contain rounded-xl shadow-2xl transition-all duration-200"
                 />
               </div>
 
+              {/* Thumbnail selector strip in lightbox */}
+              {lightboxAlbum && lightboxAlbum.photos.length > 1 && (
+                <div className="p-2 bg-slate-950/90 border-t border-white/10 flex items-center justify-center gap-2 overflow-x-auto [scrollbar-width:none]">
+                  {lightboxAlbum.photos.map((p, idx) => (
+                    <button
+                      key={p.id || idx}
+                      onClick={() => {
+                        setLightboxIndex(idx);
+                        setLightboxPhoto(p);
+                      }}
+                      className={`w-12 h-10 rounded-lg overflow-hidden border-2 transition-all cursor-pointer shrink-0 ${
+                        lightboxIndex === idx
+                          ? "border-blue-500 scale-105 shadow-md"
+                          : "border-white/20 opacity-60 hover:opacity-100"
+                      }`}
+                    >
+                      <img src={p.imageUrl} alt="" className="w-full h-full object-cover" />
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {/* Caption Footer */}
-              {lightboxPhoto.caption && (
-                <div className="p-4 bg-slate-950/90 border-t border-white/10 text-xs text-slate-300 font-medium">
-                  {lightboxPhoto.caption}
+              {(lightboxAlbum?.caption || lightboxPhoto?.caption) && (
+                <div className="p-4 bg-slate-950/95 border-t border-white/10 text-xs text-slate-300 font-medium">
+                  {lightboxAlbum?.caption || lightboxPhoto?.caption}
                 </div>
               )}
             </motion.div>
@@ -1667,7 +1915,7 @@ export const GalleryManagementPage: React.FC = () => {
       {/* MODAL 4: DELETE CONFIRMATION */}
       {/* ========================================================= */}
       <AnimatePresence>
-        {deleteConfirmPhoto && (
+        {(deleteConfirmAlbum || deleteConfirmPhoto) && (
           <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-[90] flex items-center justify-center p-4">
             <motion.div
               initial={{ opacity: 0, scale: 0.95 }}
@@ -1680,24 +1928,32 @@ export const GalleryManagementPage: React.FC = () => {
               </div>
 
               <div className="space-y-1">
-                <h3 className="text-base font-black text-[#0F172A]">Delete Photo?</h3>
+                <h3 className="text-base font-black text-[#0F172A]">Delete Event Album?</h3>
                 <p className="text-xs text-slate-500 font-medium leading-relaxed">
                   Are you sure you want to permanently delete{" "}
-                  <strong className="text-slate-800">"{deleteConfirmPhoto.title}"</strong>? This action cannot be undone.
+                  <strong className="text-slate-800">
+                    "{deleteConfirmAlbum?.title || deleteConfirmPhoto?.title}"
+                  </strong>
+                  {deleteConfirmAlbum && deleteConfirmAlbum.photos.length > 1
+                    ? ` (${deleteConfirmAlbum.photos.length} photos)`
+                    : ""}? This action cannot be undone.
                 </p>
               </div>
 
               <div className="flex items-center justify-center gap-2.5 pt-2">
                 <button
                   type="button"
-                  onClick={() => setDeleteConfirmPhoto(null)}
+                  onClick={() => {
+                    setDeleteConfirmAlbum(null);
+                    setDeleteConfirmPhoto(null);
+                  }}
                   className="px-5 py-2.5 text-xs font-bold text-slate-600 hover:bg-slate-100 rounded-xl transition-colors cursor-pointer"
                 >
                   Cancel
                 </button>
                 <button
                   type="button"
-                  onClick={handleDeletePhoto}
+                  onClick={handleDeleteAlbum}
                   className="px-6 py-2.5 text-xs font-black text-white bg-red-600 hover:bg-red-700 rounded-xl shadow-md transition-all cursor-pointer"
                 >
                   Confirm Delete

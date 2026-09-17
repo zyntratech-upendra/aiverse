@@ -18,13 +18,27 @@ const formatRoleLabel = (role: string): string => {
   if (rLower === "conviner" || rLower === "convener") return "Convener";
   if (rLower === "media handing") return "Media Handling";
   if (rLower === "pr and marketing") return "PR & Marketing";
-  if (rLower === "video and photography") return "Video & Photography";
+  if (
+    rLower === "video and photography" ||
+    rLower === "photography and videography" ||
+    rLower === "photography and video" ||
+    rLower === "photo and video" ||
+    rLower === "photography & videography" ||
+    rLower === "video & photography" ||
+    rLower === "photography" ||
+    rLower === "videography"
+  ) {
+    return "Photography and Videography";
+  }
   if (rLower === "student organizer") return "Student Organizer";
   if (rLower === "student co-organizer") return "Student Co-Organizer";
   if (rLower === "faculty coordinator") return "Faculty Coordinator";
   if (rLower === "mobile app developer") return "Mobile App Developer";
-  if (rLower === "web app developer" || rLower === "wed dev" || rLower === "web dev") return "Web Developer";
-  if (rLower === "event manager") return "Event Manager";
+  if (rLower === "web app developer" || rLower === "wed dev" || rLower === "web dev" || rLower === "technical" || rLower === "technical and web dev" || rLower === "technical & web dev") return "Technical and Web Dev";
+  if (rLower === "event manager" || rLower === "event management") return "Event Management";
+  if (rLower === "pr and hr" || rLower === "pr & hr") return "PR and HR";
+  if (rLower === "logistics and operations" || rLower === "logistics & operations" || rLower === "logistics") return "Logistics and Operations";
+  if (rLower === "content and media" || rLower === "content & media") return "Content and Media";
   if (rLower === "volunteer") return "Volunteer";
   if (rLower === "student member") return "Student Member";
   if (rLower === "jury evaluator") return "Jury Evaluator";
@@ -34,6 +48,39 @@ const formatRoleLabel = (role: string): string => {
     .split(" ")
     .map(w => w.charAt(0).toUpperCase() + w.slice(1))
     .join(" ");
+};
+
+const formatSectionTitle = (roleName: string, members: MemberData[]): string => {
+  // If members have an explicit non-generic role assigned in the database, prioritize the actual updated role
+  const nonGenericRoles = members
+    .map(m => (m.role || "").trim())
+    .filter(r => r && !["member", "student member", "organizer", "co-organizer", "lead", "co-lead", "guest", "user", "participant"].includes(r.toLowerCase()));
+
+  if (nonGenericRoles.length > 0) {
+    const roleCounts: Record<string, number> = {};
+    nonGenericRoles.forEach(r => {
+      roleCounts[r] = (roleCounts[r] || 0) + 1;
+    });
+    const topRole = Object.entries(roleCounts).sort((a, b) => b[1] - a[1])[0][0];
+    const topLower = topRole.toLowerCase();
+    const targetLower = roleName.toLowerCase();
+
+    if (
+      topLower.includes(targetLower) ||
+      targetLower.includes(topLower) ||
+      (topLower.includes("photo") && targetLower.includes("photo")) ||
+      (topLower.includes("video") && targetLower.includes("photo")) ||
+      (topLower.includes("tech") && targetLower.includes("tech")) ||
+      (topLower.includes("media") && targetLower.includes("media")) ||
+      (topLower.includes("pr") && targetLower.includes("pr")) ||
+      (topLower.includes("event") && targetLower.includes("event")) ||
+      (topLower.includes("logistic") && targetLower.includes("logistic"))
+    ) {
+      return formatRoleLabel(topRole);
+    }
+  }
+
+  return formatRoleLabel(roleName);
 };
 
 // Import local assets
@@ -507,6 +554,23 @@ const TeamPage: React.FC = () => {
       );
     }
 
+    // Special handling for Photography and Videography
+    if (
+      target === "photography" ||
+      target === "videography" ||
+      target === "video and photography" ||
+      target === "photography and videography" ||
+      target === "photography & videography" ||
+      target.includes("photo") ||
+      target.includes("video")
+    ) {
+      return (
+        combined.includes("photo") ||
+        combined.includes("video") ||
+        combined.includes("camera")
+      );
+    }
+
     // Exact matches
     if (mRole === target || mPos === target || mType === target) return true;
     if (combined === target) return true;
@@ -616,10 +680,12 @@ const TeamPage: React.FC = () => {
         sectionMembers.sort(comparator);
         sectionMembers.forEach(m => assignedMemberIds.add(m.id || m.email || `${m.name}-${m.role}`));
 
+        const formattedTitle = formatSectionTitle(roleName, sectionMembers);
+
         activeSections.push({
           definition: {
             id: roleName.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
-            title: roleName,
+            title: formattedTitle,
             order: currentOrder++
           },
           members: sectionMembers
@@ -627,7 +693,7 @@ const TeamPage: React.FC = () => {
       }
     });
 
-    // Unassigned / Additional Team Members: only display genuine club members with valid non-generic roles
+    // Unassigned / Custom Team Roles: dynamically group by their specific role name
     const unassignedMembers = dbMembers.filter(member => {
       const memId = member.id || member.email || `${member.name}-${member.role}`;
       if (assignedMemberIds.has(memId)) return false;
@@ -641,14 +707,27 @@ const TeamPage: React.FC = () => {
     });
 
     if (unassignedMembers.length > 0) {
-      unassignedMembers.sort(createSectionMemberComparator("Additional Team Members"));
-      activeSections.push({
-        definition: {
-          id: "other-members",
-          title: "Additional Team Members",
-          order: currentOrder++
-        },
-        members: unassignedMembers
+      const remainingGroups: Record<string, MemberData[]> = {};
+      unassignedMembers.forEach(member => {
+        const rawRole = member.role || member.position || "Additional Team Members";
+        const roleKey = formatRoleLabel(rawRole);
+        if (!remainingGroups[roleKey]) {
+          remainingGroups[roleKey] = [];
+        }
+        remainingGroups[roleKey].push(member);
+        assignedMemberIds.add(member.id || member.email || `${member.name}-${member.role}`);
+      });
+
+      Object.entries(remainingGroups).forEach(([roleTitle, membersList]) => {
+        membersList.sort(createSectionMemberComparator(roleTitle));
+        activeSections.push({
+          definition: {
+            id: roleTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-"),
+            title: roleTitle,
+            order: currentOrder++
+          },
+          members: membersList
+        });
       });
     }
 
