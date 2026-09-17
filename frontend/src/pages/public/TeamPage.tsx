@@ -701,116 +701,131 @@ const TeamPage: React.FC = () => {
 
       {/* ================= ROLE-WISE SECTIONS ================= */}
       {!loading && groupedSections.length > 0 && (
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12 space-y-10 sm:space-y-16">
-          {groupedSections.map((section) => {
-            const { definition, members } = section;
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-12">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8 items-start">
+            {groupedSections.map((section) => {
+              const { definition, members } = section;
 
-            return (
-              <section key={definition.id} id={definition.id} className="text-left">
-                {/* Clean, Simple Role Header */}
-                <div className="flex items-center justify-between gap-3 mb-4 sm:mb-8 pb-3 border-b border-slate-200/80">
-                  <div className="flex items-center gap-2 sm:gap-3">
-                    <h2 className="text-xl sm:text-2xl font-black text-slate-900 tracking-tight">
-                      {definition.title}
-                    </h2>
-                    <span className="text-[11px] sm:text-xs font-bold text-blue-600 bg-blue-50 border border-blue-100 px-2 sm:px-2.5 py-0.5 rounded-full">
-                      {members.length}
-                    </span>
+              // Compute responsive column spans based on member count
+              let sectionSpanClass = "col-span-1 sm:col-span-2 lg:col-span-4";
+              let innerGridClass = "grid-cols-2 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4";
+
+              if (members.length === 1) {
+                sectionSpanClass = "col-span-1 sm:col-span-1 lg:col-span-1";
+                innerGridClass = "grid-cols-1";
+              } else if (members.length === 2) {
+                sectionSpanClass = "col-span-1 sm:col-span-2 lg:col-span-2";
+                innerGridClass = "grid-cols-2";
+              } else if (members.length === 3) {
+                sectionSpanClass = "col-span-1 sm:col-span-2 lg:col-span-3";
+                innerGridClass = "grid-cols-2 sm:grid-cols-3";
+              }
+
+              return (
+                <section
+                  key={definition.id}
+                  id={definition.id}
+                  className={`text-left ${sectionSpanClass}`}
+                >
+                  {/* Clean, Simple Role Header */}
+                  <div className="flex items-center justify-between gap-2 mb-4 sm:mb-6 pb-3 border-b border-slate-200/80">
+                    <div className="flex items-center gap-2 sm:gap-3 min-w-0">
+                      <h2 className="text-base sm:text-lg lg:text-xl font-black text-slate-900 tracking-tight truncate">
+                        {definition.title}
+                      </h2>
+                      <span className="text-[11px] sm:text-xs font-bold text-blue-600 bg-blue-50 border border-blue-100 px-2 sm:px-2.5 py-0.5 rounded-full shrink-0">
+                        {members.length}
+                      </span>
+                    </div>
                   </div>
 
-                  {members.length > 1 && (
-                    <span className="sm:hidden text-[10px] font-bold text-slate-400 tracking-wider uppercase flex items-center gap-1 bg-slate-100/80 px-2 py-0.5 rounded-md">
-                      Swipe &rarr;
-                    </span>
-                  )}
-                </div>
+                  {/* Team Cards */}
+                  <div className={`grid gap-3 sm:gap-5 ${innerGridClass}`}>
+                    {members.map((member, idx) => {
+                      const formattedRole = getMemberDisplayRole(member);
 
-                {/* Team Cards: Horizontally scrollable on mobile with Swipe ->, wrapped flex on desktop with equal card sizes */}
-                <div className="flex overflow-x-auto snap-x snap-mandatory scroll-pl-4 gap-3 sm:gap-7 pb-5 sm:pb-2 -mx-4 px-4 sm:mx-0 sm:px-0 sm:flex-wrap sm:overflow-visible [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
-                  {members.map((member, idx) => {
-                    const formattedRole = getMemberDisplayRole(member);
-
-                    return (
-                      <div
-                        key={member.id || idx}
-                        className="w-[190px] xs:w-[210px] sm:w-[260px] shrink-0 snap-start bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-3 sm:p-5 flex flex-col justify-between shadow-xs hover:shadow-xl hover:border-blue-200 hover:-translate-y-1.5 transition-all duration-300 group"
-                      >
-                        <div>
-                          {/* Profile Image Frame (Compact on Mobile) */}
-                          <div className="w-full aspect-[1/1] sm:aspect-[4/4.2] rounded-xl sm:rounded-2xl overflow-hidden bg-slate-100 border border-slate-100/80 shadow-2xs relative mb-2.5 sm:mb-4">
-                            <img
-                              src={member.image || BLANK_AVATAR}
-                              alt={member.name}
-                              className={`w-full h-full ${member.image ? 'object-cover object-top group-hover:scale-105' : 'object-contain p-6 sm:p-8'
-                                } transition-transform duration-500`}
-                            />
-                          </div>
-
-                          {/* Member Details */}
-                          <div className="space-y-1 sm:space-y-1.5 px-0.5 sm:px-1">
-                            <h3 className="text-sm sm:text-lg font-black text-slate-900 leading-tight group-hover:text-blue-600 transition-colors line-clamp-1 sm:line-clamp-2">
-                              {member.name}
-                            </h3>
-
-                            <div>
-                              <span className="inline-block text-[10px] sm:text-xs font-bold text-blue-600 bg-blue-50/80 border border-blue-100/70 px-2 sm:px-2.5 py-0.5 rounded-full line-clamp-1">
-                                {formattedRole}
-                              </span>
+                      return (
+                        <div
+                          key={member.id || idx}
+                          className="w-full bg-white rounded-2xl sm:rounded-3xl border border-slate-200/90 p-2.5 sm:p-5 flex flex-col justify-between shadow-xs hover:shadow-xl hover:border-blue-200 hover:-translate-y-1.5 transition-all duration-300 group"
+                        >
+                          <div>
+                            {/* Profile Image Frame */}
+                            <div className="w-full aspect-[1/1] sm:aspect-[4/4.2] rounded-xl sm:rounded-2xl overflow-hidden bg-slate-100 border border-slate-100/80 shadow-2xs relative mb-2 sm:mb-4">
+                              <img
+                                src={member.image || BLANK_AVATAR}
+                                alt={member.name}
+                                className={`w-full h-full ${member.image ? 'object-cover object-top group-hover:scale-105' : 'object-contain p-4 sm:p-8'
+                                  } transition-transform duration-500`}
+                              />
                             </div>
 
-                            {member.bio && (
-                              <p className="text-[11px] sm:text-xs text-slate-500 pt-0.5 sm:pt-1 line-clamp-2 leading-relaxed font-normal">
-                                {member.bio}
-                              </p>
-                            )}
+                            {/* Member Details */}
+                            <div className="space-y-1 sm:space-y-1.5 px-0.5 sm:px-1">
+                              <h3 className="text-xs sm:text-base md:text-lg font-black text-slate-900 leading-tight group-hover:text-blue-600 transition-colors line-clamp-1 sm:line-clamp-2">
+                                {member.name}
+                              </h3>
+
+                              <div>
+                                <span className="inline-block text-[9px] sm:text-xs font-bold text-blue-600 bg-blue-50/80 border border-blue-100/70 px-1.5 sm:px-2.5 py-0.5 rounded-full line-clamp-1">
+                                  {formattedRole}
+                                </span>
+                              </div>
+
+                              {member.bio && (
+                                <p className="text-[10px] sm:text-xs text-slate-500 pt-0.5 sm:pt-1 line-clamp-2 leading-relaxed font-normal">
+                                  {member.bio}
+                                </p>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Social & Contact Buttons */}
+                          <div className="pt-2 mt-2 sm:pt-4 sm:mt-4 border-t border-slate-100 flex items-center justify-between px-0.5 sm:px-1">
+                            <span className="text-[9px] sm:text-[11px] font-semibold text-slate-400">Connect</span>
+
+                            <div className="flex items-center gap-1 sm:gap-1.5 text-slate-400">
+                              {member.github && (
+                                <a
+                                  href={member.github}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="p-1 sm:p-2 rounded-lg sm:rounded-xl bg-slate-50 hover:bg-slate-900 hover:text-white transition-all shadow-2xs"
+                                  title="GitHub"
+                                >
+                                  <GithubIcon className="h-2.5 w-2.5 sm:h-3.5 sm:w-3.5" />
+                                </a>
+                              )}
+                              {member.linkedin && (
+                                <a
+                                  href={member.linkedin}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="p-1 sm:p-2 rounded-lg sm:rounded-xl bg-slate-50 hover:bg-blue-600 hover:text-white transition-all shadow-2xs"
+                                  title="LinkedIn"
+                                >
+                                  <LinkedinIcon className="h-2.5 w-2.5 sm:h-3.5 sm:w-3.5" />
+                                </a>
+                              )}
+                              {member.email && (
+                                <a
+                                  href={`mailto:${member.email}`}
+                                  className="p-1 sm:p-2 rounded-lg sm:rounded-xl bg-slate-50 hover:bg-sky-500 hover:text-white transition-all shadow-2xs"
+                                  title="Email"
+                                >
+                                  <Mail className="h-2.5 w-2.5 sm:h-3.5 sm:w-3.5" />
+                                </a>
+                              )}
+                            </div>
                           </div>
                         </div>
-
-                        {/* Social & Contact Buttons */}
-                        <div className="pt-2.5 mt-2.5 sm:pt-4 sm:mt-4 border-t border-slate-100 flex items-center justify-between px-0.5 sm:px-1">
-                          <span className="text-[10px] sm:text-[11px] font-semibold text-slate-400">Connect</span>
-
-                          <div className="flex items-center gap-1 sm:gap-1.5 text-slate-400">
-                            {member.github && (
-                              <a
-                                href={member.github}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-slate-50 hover:bg-slate-900 hover:text-white transition-all shadow-2xs"
-                                title="GitHub"
-                              >
-                                <GithubIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                              </a>
-                            )}
-                            {member.linkedin && (
-                              <a
-                                href={member.linkedin}
-                                target="_blank"
-                                rel="noreferrer"
-                                className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-slate-50 hover:bg-blue-600 hover:text-white transition-all shadow-2xs"
-                                title="LinkedIn"
-                              >
-                                <LinkedinIcon className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                              </a>
-                            )}
-                            {member.email && (
-                              <a
-                                href={`mailto:${member.email}`}
-                                className="p-1.5 sm:p-2 rounded-lg sm:rounded-xl bg-slate-50 hover:bg-sky-500 hover:text-white transition-all shadow-2xs"
-                                title="Email"
-                              >
-                                <Mail className="h-3 w-3 sm:h-3.5 sm:w-3.5" />
-                              </a>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              </section>
-            );
-          })}
+                      );
+                    })}
+                  </div>
+                </section>
+              );
+            })}
+          </div>
         </div>
       )}
 
