@@ -381,9 +381,8 @@ const RegistrationsManagementPage: React.FC = () => {
       const targetEmail = (reg.teamLeadPersonalEmail || reg.teamLeadEmail || reg.teamLeadCollegeEmail || "").trim();
 
       if (targetEmail && !isQuizReg) {
-        const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-        const siteBaseUrl = isLocal ? "https://aiversevitb.in" : window.location.origin;
-        const ticketUrl = `${siteBaseUrl}/ticket/${reg.id}`;
+        const regIdentifier = reg.id || (reg as any)._id || (reg as any).backendId;
+        const ticketUrl = `https://aiversevitb.in/ticket/${regIdentifier}`;
 
         const emailContent = buildRegistrationConfirmationEmail({
           teamLeadName: reg.teamLeadName || (reg as any).name || "Participant",

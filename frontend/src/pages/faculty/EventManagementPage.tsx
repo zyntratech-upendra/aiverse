@@ -322,18 +322,29 @@ const EventManagementPage: React.FC = () => {
         });
 
         const mapped = rawList.map((data: any) => {
-          let image = data.image || "";
-          if (!image) {
+          let poster = 
+            data.posterPreview || 
+            (Array.isArray(data.posterImages) && data.posterImages[0]?.preview) ||
+            data.image || 
+            data.imageUrl || 
+            data.poster || 
+            data.coverImage || 
+            data.bannerImage || 
+            data.banner || 
+            "";
+
+          if (!poster) {
             const cat = (data.category || "").toUpperCase();
-            if (cat.includes("HACKATHON")) image = hackathonImg;
-            else if (cat.includes("SPARK")) image = sparkImg;
-            else image = seminarImg;
+            if (cat.includes("HACKATHON")) poster = hackathonImg;
+            else if (cat.includes("SPARK")) poster = sparkImg;
+            else poster = seminarImg;
           }
 
           const evId = String(data._id || data.id || "").trim();
           const evTitle = String(data.title || "").trim().toLowerCase();
           const liveSeats = liveSeatCountMap[evId] || liveSeatCountMap[evId.toLowerCase()] || (evTitle ? liveSeatCountMap[evTitle] : 0) || 0;
-          const currentReg = Math.max(Number(data.currentReg) || 0, liveSeats);
+          // Use live seats count from non-deleted registrations when list is available, otherwise backend count
+          const currentReg = Array.isArray(rawRegs) ? liveSeats : (Number(data.currentReg) || 0);
 
           return {
             ...data,
@@ -345,7 +356,8 @@ const EventManagementPage: React.FC = () => {
             status: data.status || "Draft",
             currentReg,
             maxReg: data.maxReg || 100,
-            image
+            image: poster,
+            posterPreview: data.posterPreview || (Array.isArray(data.posterImages) && data.posterImages[0]?.preview) || poster,
           } as EventItem;
         });
         setEvents(mapped);
@@ -3216,6 +3228,7 @@ const EventManagementPage: React.FC = () => {
         const savedDoc = res?.event || payload;
 
         const existingReg = events.find(e => e.id === editingEventId)?.currentReg || 0;
+        const posterImg = formPosterImages[0]?.preview || safePosterPreview || imageFile;
         const updatedEvent: EventItem = {
           ...savedDoc,
           id: editingEventId,
@@ -3227,7 +3240,9 @@ const EventManagementPage: React.FC = () => {
           status: formStatus || "Opened",
           currentReg: existingReg,
           maxReg: formMaxParticipants ? Number(formMaxParticipants) : 100,
-          image: formPosterImages[0]?.preview || imageFile
+          image: posterImg,
+          posterPreview: posterImg,
+          posterImages: safePosterImages,
         };
         setEvents(prev => prev.map(e => e.id === editingEventId ? { ...e, ...updatedEvent } : e));
         setEditingEventId(null);
@@ -3237,6 +3252,7 @@ const EventManagementPage: React.FC = () => {
         const createdId = res?.id || res?.event?.id || res?.event?._id;
         targetEventId = createdId;
 
+        const posterImg = formPosterImages[0]?.preview || safePosterPreview || imageFile;
         const newEvent: EventItem = {
           id: targetEventId || `event_${Date.now()}`,
           title: formTitle,
@@ -3246,7 +3262,9 @@ const EventManagementPage: React.FC = () => {
           status: formStatus || "Opened",
           currentReg: 0,
           maxReg: formMaxParticipants ? Number(formMaxParticipants) : 100,
-          image: formPosterImages[0]?.preview || imageFile
+          image: posterImg,
+          posterPreview: posterImg,
+          posterImages: safePosterImages,
         };
         setEvents(prev => [newEvent, ...prev]);
       }
@@ -3532,7 +3550,12 @@ const EventManagementPage: React.FC = () => {
         setFormRegDeadlineTime(data.regDeadlineTime || data.registrationDeadlineTime || "");
         setFormMaxParticipants(data.maxReg ? String(data.maxReg) : "");
         setFormEnableWaitlist(data.enableWaitlist || false);
-        setFormPosterImages(data.posterImages || (data.posterPreview ? [{ filename: data.posterFilename || "poster.png", preview: data.posterPreview }] : []));
+        const loadedPosters = (Array.isArray(data.posterImages) && data.posterImages.length > 0)
+          ? data.posterImages
+          : (data.posterPreview || (data.image && !data.image.startsWith("/assets/")) || data.imageUrl || data.coverImage)
+            ? [{ filename: data.posterFilename || "poster.png", preview: data.posterPreview || data.image || data.imageUrl || data.coverImage }]
+            : [];
+        setFormPosterImages(loadedPosters);
         setFormVisibility(data.visibility || "Public");
         setFormIsFeatured(data.isFeatured || false);
         setFormSendEmail(data.sendEmail !== undefined ? data.sendEmail : true);
@@ -3938,7 +3961,7 @@ const EventManagementPage: React.FC = () => {
                                 <div className="flex items-center gap-3">
                                   <div className="w-12 h-12 rounded-xl bg-slate-55 overflow-hidden shrink-0 border border-slate-100 flex items-center justify-center">
                                     <img
-                                      src={event.image || sparkImg}
+                                      src={event.posterPreview || (Array.isArray(event.posterImages) && event.posterImages[0]?.preview) || event.image || sparkImg}
                                       alt={event.title}
                                       className="w-full h-full object-cover"
                                       onError={(e) => {

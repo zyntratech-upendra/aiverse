@@ -7,13 +7,14 @@ const { optionalAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { pick } = require('../utils/sanitize');
 
-// Helper to compute registration counts for events
+// Helper to compute registration counts for events (only counting active, non-deleted registrations)
 async function getRegistrationCountsMap() {
   try {
     const regCounts = await Registration.aggregate([
       {
         $project: {
           eventId: 1,
+          eventTitle: 1,
           seatCount: {
             $cond: {
               if: { $and: [{ $isArray: '$members' }, { $gt: [{ $size: '$members' }, 0] }] },
@@ -25,21 +26,30 @@ async function getRegistrationCountsMap() {
       },
       {
         $group: {
-          _id: '$eventId',
+          _id: {
+            eventId: '$eventId',
+            eventTitle: { $toLower: { $trim: { input: { $ifNull: ['$eventTitle', ''] } } } }
+          },
           totalSeats: { $sum: '$seatCount' }
         }
       }
     ]);
-    const map = {};
+    const idMap = {};
+    const titleMap = {};
     regCounts.forEach((r) => {
-      if (r._id) {
-        map[String(r._id).trim()] = r.totalSeats;
+      const eid = r._id?.eventId ? String(r._id.eventId).trim() : '';
+      const etitle = r._id?.eventTitle ? String(r._id.eventTitle).trim().toLowerCase() : '';
+      if (eid) {
+        idMap[eid] = (idMap[eid] || 0) + r.totalSeats;
+      }
+      if (etitle) {
+        titleMap[etitle] = (titleMap[etitle] || 0) + r.totalSeats;
       }
     });
-    return map;
+    return { idMap, titleMap };
   } catch (err) {
     console.warn('[events route] Error calculating registration counts:', err.message);
-    return {};
+    return { idMap: {}, titleMap: {} };
   }
 }
 
@@ -54,19 +64,20 @@ router.get(
     if (track) filter.track = track;
     if (isLive !== undefined) filter.isLive = isLive === 'true';
 
-    const [events, regMap] = await Promise.all([
+    const [events, { idMap, titleMap }] = await Promise.all([
       Event.find(filter).sort({ createdAt: -1 }).lean(),
       getRegistrationCountsMap()
     ]);
 
     res.json(
       events.map((e) => {
-        const id = e._id;
-        const computedSeats = regMap[String(id).trim()] || regMap[String(e.id || '').trim()] || 0;
+        const id = String(e._id || e.id || '').trim();
+        const title = String(e.title || '').trim().toLowerCase();
+        const computedSeats = (id && idMap[id]) || (title && titleMap[title]) || 0;
         return {
           ...e,
           id: e._id,
-          currentReg: Math.max(Number(e.currentReg) || 0, computedSeats)
+          currentReg: computedSeats
         };
       })
     );
@@ -84,13 +95,15 @@ router.get(
       return res.status(404).json({ success: false, error: 'Event not found' });
     }
 
-    const regMap = await getRegistrationCountsMap();
-    const computedSeats = regMap[String(event._id).trim()] || regMap[String(event.id || id).trim()] || 0;
+    const { idMap, titleMap } = await getRegistrationCountsMap();
+    const evId = String(event._id || event.id || id).trim();
+    const evTitle = String(event.title || '').trim().toLowerCase();
+    const computedSeats = (evId && idMap[evId]) || (evTitle && titleMap[evTitle]) || 0;
 
     res.json({
       ...event,
       id: event._id,
-      currentReg: Math.max(Number(event.currentReg) || 0, computedSeats)
+      currentReg: computedSeats
     });
   })
 );

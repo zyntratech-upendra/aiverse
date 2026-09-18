@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
-import { fetchRegistrations, fetchEvents } from "../../services/apiClient";
+import { fetchRegistrations, fetchRegistrationById, fetchEvents, fetchEventById } from "../../services/apiClient";
 import SEO from "../../components/layout/SEO";
 import { 
   Download, 
@@ -94,15 +94,40 @@ const TicketPage: React.FC = () => {
         return;
       }
       try {
-        const regs = await fetchRegistrations();
-        const reg = (regs || []).find((r: any) => (r.id || r._id || "") === registrationId || r._id === registrationId || r.id === registrationId);
+        let reg: any = null;
+        // 1. Try direct fetch by ID
+        try {
+          const directReg = await fetchRegistrationById(registrationId);
+          if (directReg && (directReg._id || directReg.id)) {
+            reg = directReg;
+          }
+        } catch (e) {}
+
+        // 2. Fallback to list search
+        if (!reg) {
+          const regs = await fetchRegistrations().catch(() => []);
+          reg = (regs || []).find(
+            (r: any) =>
+              (r.id || r._id || "") === registrationId ||
+              r._id === registrationId ||
+              r.id === registrationId ||
+              r.backendId === registrationId ||
+              r.ticketCode === registrationId ||
+              r.qrCodeData === registrationId ||
+              r.transactionId === registrationId
+          );
+        }
+
         if (reg) {
           setRegistration(reg);
 
           if (reg.eventId) {
             try {
-              const events = await fetchEvents();
-              const ev = (events || []).find((e: any) => (e.id || e._id || "") === reg.eventId || e._id === reg.eventId || e.id === reg.eventId);
+              let ev = await fetchEventById(reg.eventId).catch(() => null);
+              if (!ev) {
+                const events = await fetchEvents().catch(() => []);
+                ev = (events || []).find((e: any) => (e.id || e._id || "") === reg.eventId || e._id === reg.eventId || e.id === reg.eventId);
+              }
               if (ev) setEvent(ev);
             } catch (e) {
               console.error("Error fetching event for ticket via API:", e);

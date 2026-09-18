@@ -33,7 +33,20 @@ router.get(
   '/:id',
   optionalAuth,
   asyncHandler(async (req, res) => {
-    const doc = await Registration.findById(req.params.id).lean();
+    const rawId = req.params.id;
+    let doc = await Registration.findById(rawId).lean().catch(() => null);
+    if (!doc) {
+      doc = await Registration.findOne({
+        $or: [
+          { _id: rawId },
+          { id: rawId },
+          { backendId: rawId },
+          { ticketCode: rawId },
+          { qrCodeData: rawId },
+          { transactionId: rawId },
+        ],
+      }).lean().catch(() => null);
+    }
     if (!doc) {
       return res.status(404).json({ success: false, error: 'Registration not found' });
     }
