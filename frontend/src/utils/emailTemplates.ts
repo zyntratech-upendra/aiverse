@@ -16,6 +16,9 @@ interface RegistrationEmailData {
   transactionId?: string;
   members?: Array<{ name: string; studentId?: string; email?: string }>;
   ticketUrl: string;
+  whatsGroupLink?: string;
+  whatsappGroupLink?: string;
+  whatsappGroupUrl?: string;
 }
 
 interface CredentialsEmailData {
@@ -44,7 +47,13 @@ export function buildRegistrationConfirmationEmail(data: RegistrationEmailData):
     transactionId,
     members,
     ticketUrl,
+    whatsGroupLink,
+    whatsappGroupLink,
+    whatsappGroupUrl,
   } = data;
+
+  const rawWhatsLink = (whatsGroupLink || whatsappGroupLink || whatsappGroupUrl || "").trim();
+  const whatsLink = rawWhatsLink.length > 5 ? rawWhatsLink : "";
 
   const isTeam = !!groupName && groupName !== "Individual RSVP";
   const displayTeam = isTeam ? groupName : "Individual Entry";
@@ -172,8 +181,8 @@ export function buildRegistrationConfirmationEmail(data: RegistrationEmailData):
               </div>
               ` : ""}
 
-              <!-- Call to Action Button -->
-              <div style="text-align: center; margin: 32px 0 16px 0;">
+              <!-- Call to Action Button: Entry Pass -->
+              <div style="text-align: center; margin: 28px 0 16px 0;">
                 <a href="${ticketUrl}" target="_blank" style="display: inline-block; background-color: #2563eb; color: #ffffff; font-size: 15px; font-weight: 800; text-decoration: none; padding: 14px 32px; border-radius: 12px; box-shadow: 0 4px 12px rgba(37,99,235,0.25);">
                   View Entry Pass & QR Code &rarr;
                 </a>
@@ -181,6 +190,33 @@ export function buildRegistrationConfirmationEmail(data: RegistrationEmailData):
               <p style="font-size: 12px; color: #94a3b8; text-align: center; margin: 8px 0 0 0;">
                 Present your QR code pass at the venue entrance desk.
               </p>
+
+              ${whatsLink ? `
+              <!-- Official WhatsApp Community / Group Card -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="margin-top: 28px; background-color: #f0fdf4; border: 1.5px solid #86efac; border-radius: 14px; overflow: hidden;">
+                <tr>
+                  <td style="padding: 22px 20px; text-align: center;">
+                    <div style="font-size: 11px; font-weight: 800; letter-spacing: 1.5px; color: #15803d; text-transform: uppercase; margin-bottom: 6px;">
+                      💬 OFFICIAL PARTICIPANT COMMUNITY
+                    </div>
+                    <div style="font-size: 16px; font-weight: 800; color: #14532d; margin-bottom: 8px;">
+                      Join ${eventTitle} WhatsApp Group
+                    </div>
+                    <p style="font-size: 13px; line-height: 1.5; color: #166534; margin: 0 0 16px 0;">
+                      Connect with coordinators and fellow participants to receive real-time schedules, venue details, and live round updates.
+                    </p>
+                    <div style="margin: 0 0 12px 0;">
+                      <a href="${whatsLink}" target="_blank" style="display: inline-block; background-color: #25D366; color: #ffffff; font-size: 14px; font-weight: 800; text-decoration: none; padding: 12px 28px; border-radius: 10px; box-shadow: 0 3px 10px rgba(37,211,102,0.3);">
+                        💬 Join WhatsApp Group &rarr;
+                      </a>
+                    </div>
+                    <p style="font-size: 11px; color: #15803d; margin: 0; word-break: break-all;">
+                      Or use direct invite link: <a href="${whatsLink}" target="_blank" style="color: #15803d; text-decoration: underline; font-weight: 600;">${whatsLink}</a>
+                    </p>
+                  </td>
+                </tr>
+              </table>
+              ` : ""}
             </td>
           </tr>
 
@@ -226,6 +262,7 @@ export function buildRegistrationConfirmationEmail(data: RegistrationEmailData):
     `VIEW YOUR ENTRY PASS:`,
     `${ticketUrl}`,
     ``,
+    whatsLink ? `OFFICIAL WHATSAPP GROUP:\nJoin the official group for live announcements and event updates:\n${whatsLink}\n\n` : "",
     `Please present your digital entry pass at the event check-in desk.`,
     ``,
     `Regards,`,

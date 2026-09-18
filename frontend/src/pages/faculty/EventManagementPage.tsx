@@ -1608,6 +1608,14 @@ const EventManagementPage: React.FC = () => {
       });
 
       try {
+        const resolvedEventWhatsLink = 
+          eventAccessEvent?.whatsGroupLink || 
+          (eventAccessEvent as any)?.whatsappGroupLink || 
+          (eventAccessEvent as any)?.whatsappGroupUrl || 
+          (eventAccessEvent as any)?.whatsappLink || 
+          recipient.rawRegistration?.whatsGroupLink || 
+          "";
+
         const emailData = buildRegistrationConfirmationEmail({
           teamLeadName: recipient.name,
           eventTitle: eventAccessEvent?.title || "AI Verse Event",
@@ -1617,6 +1625,7 @@ const EventManagementPage: React.FC = () => {
           transactionId: recipient.transactionId,
           members: recipient.rawRegistration?.members,
           ticketUrl: ticketUrl,
+          whatsGroupLink: resolvedEventWhatsLink,
         });
 
         const emailRes = await sendResendEmail({
@@ -1707,6 +1716,14 @@ const EventManagementPage: React.FC = () => {
     const ticketUrl = `${siteBaseUrl}/ticket/${recipient.regId}`;
 
     try {
+      const resolvedEventWhatsLink = 
+        eventAccessEvent?.whatsGroupLink || 
+        (eventAccessEvent as any)?.whatsappGroupLink || 
+        (eventAccessEvent as any)?.whatsappGroupUrl || 
+        (eventAccessEvent as any)?.whatsappLink || 
+        recipient.rawRegistration?.whatsGroupLink || 
+        "";
+
       const emailData = buildRegistrationConfirmationEmail({
         teamLeadName: recipient.name,
         eventTitle: eventAccessEvent?.title || "AI Verse Event",
@@ -1716,6 +1733,7 @@ const EventManagementPage: React.FC = () => {
         transactionId: recipient.transactionId,
         members: recipient.rawRegistration?.members,
         ticketUrl: ticketUrl,
+        whatsGroupLink: resolvedEventWhatsLink,
       });
 
       const res = await sendResendEmail({
@@ -1779,6 +1797,13 @@ const EventManagementPage: React.FC = () => {
     const ticketUrl = `${siteBaseUrl}/ticket/${sampleRegId}`;
 
     try {
+      const resolvedEventWhatsLink = 
+        eventAccessEvent?.whatsGroupLink || 
+        (eventAccessEvent as any)?.whatsappGroupLink || 
+        (eventAccessEvent as any)?.whatsappGroupUrl || 
+        (eventAccessEvent as any)?.whatsappLink || 
+        "https://chat.whatsapp.com/sampleInviteLink";
+
       const emailData = buildRegistrationConfirmationEmail({
         teamLeadName: "Faculty Coordinator (Test Recipient)",
         eventTitle: eventAccessEvent?.title || "AI Verse Event",
@@ -1787,6 +1812,7 @@ const EventManagementPage: React.FC = () => {
         teamSize: 3,
         transactionId: "TXN_TEST_9999",
         ticketUrl: ticketUrl,
+        whatsGroupLink: resolvedEventWhatsLink,
         members: [
           { name: "Sample Member 1", studentId: "23PA1A0502", email: "member1@test.com" },
           { name: "Sample Member 2", studentId: "23PA1A0503", email: "member2@test.com" },

@@ -25,6 +25,7 @@ import {
 import SEO from "../../components/layout/SEO";
 import { 
   fetchRegistrations as apiFetchRegistrations, 
+  fetchEvents as apiFetchEvents,
   updateRegistration,
   deleteParticipantCascade 
 } from "../../services/apiClient";
@@ -63,11 +64,13 @@ interface RegistrationItem {
   foodOption?: string;
   needsFood?: boolean;
   isVishnuStudent?: boolean;
+  whatsGroupLink?: string;
   createdAt: number;
 }
 
 const RegistrationsManagementPage: React.FC = () => {
   const [registrations, setRegistrations] = useState<RegistrationItem[]>([]);
+  const [eventsList, setEventsList] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   
   // Filters
@@ -264,7 +267,13 @@ const RegistrationsManagementPage: React.FC = () => {
   const loadRegistrations = async () => {
     try {
       setLoading(true);
-      const docs = await apiFetchRegistrations();
+      const [docs, evs] = await Promise.all([
+        apiFetchRegistrations().catch(() => []),
+        apiFetchEvents().catch(() => []),
+      ]);
+      if (Array.isArray(evs)) {
+        setEventsList(evs);
+      }
       const list: RegistrationItem[] = [];
       (docs || []).forEach((docSnap: any) => {
         const data = docSnap || {};
@@ -287,6 +296,23 @@ const RegistrationsManagementPage: React.FC = () => {
         const teamName = data.groupName || data.teamName || "";
         const leadName = data.teamLeadName || data.fullName || data.name || data.userName || (data.members && data.members[0]?.name) || "Student Registrant";
         const studentId = data.teamLeadStudentId || data.studentId || data.rollNo || data.registrationNumber || (data.members && data.members[0]?.registrationNumber) || "";
+
+        const matchedEvent = Array.isArray(evs) ? evs.find((e: any) => 
+          (e.id && e.id === data.eventId) || 
+          (e._id && e._id === data.eventId) || 
+          (e.title && e.title.trim().toLowerCase() === (data.eventTitle || "").trim().toLowerCase())
+        ) : null;
+
+        const resolvedWhatsLink = 
+          data.whatsGroupLink || 
+          data.whatsappGroupLink || 
+          data.whatsappGroupUrl || 
+          data.whatsappLink || 
+          matchedEvent?.whatsGroupLink || 
+          matchedEvent?.whatsappGroupLink || 
+          matchedEvent?.whatsappGroupUrl || 
+          matchedEvent?.whatsappLink || 
+          "";
 
         list.push({
           id: docSnap.id || docSnap._id || (docSnap._doc && docSnap._doc._id) || "",
@@ -322,6 +348,7 @@ const RegistrationsManagementPage: React.FC = () => {
           utrNumber: data.utrNumber || data.transactionId || "",
           paymentStatus: data.paymentStatus || "Confirmed",
           totalFeePaid: data.totalFeePaid || 0,
+          whatsGroupLink: resolvedWhatsLink,
           createdAt: data.createdAt || Date.now()
         });
       });
@@ -384,6 +411,23 @@ const RegistrationsManagementPage: React.FC = () => {
         const regIdentifier = reg.id || (reg as any)._id || (reg as any).backendId;
         const ticketUrl = `https://aiversevitb.in/ticket/${regIdentifier}`;
 
+        const matchedEvent = eventsList.find((e: any) => 
+          (e.id && e.id === reg.eventId) || 
+          (e._id && e._id === reg.eventId) || 
+          (e.title && e.title.trim().toLowerCase() === (reg.eventTitle || "").trim().toLowerCase())
+        );
+
+        const resolvedWhatsLink = 
+          reg.whatsGroupLink || 
+          (reg as any).whatsappGroupLink || 
+          (reg as any).whatsappGroupUrl || 
+          (reg as any).whatsappLink || 
+          matchedEvent?.whatsGroupLink || 
+          matchedEvent?.whatsappGroupLink || 
+          matchedEvent?.whatsappGroupUrl || 
+          matchedEvent?.whatsappLink || 
+          "";
+
         const emailContent = buildRegistrationConfirmationEmail({
           teamLeadName: reg.teamLeadName || (reg as any).name || "Participant",
           eventTitle: reg.eventTitle || "AI Verse Event",
@@ -393,6 +437,7 @@ const RegistrationsManagementPage: React.FC = () => {
           transactionId: reg.transactionId,
           members: reg.members,
           ticketUrl,
+          whatsGroupLink: resolvedWhatsLink,
         });
 
         const emailResult = await sendResendEmail({
