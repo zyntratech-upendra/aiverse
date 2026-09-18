@@ -394,13 +394,12 @@ export const ParticipantDashboardPage: React.FC = () => {
                   setIsQuizParticipant(true);
                   setActiveTab("quizzes");
                 }
-                // Update cRound to track the global event's currentRound to pair with Submission Monitoring
-                const globalRound = ev.currentRound || targetReg.currentRound || targetReg.promotedToRound || 1;
-                setCurrentRound(globalRound);
-                const cRoundForType = globalRound;
+                // Set participant's current round accurately based on registration data
+                const participantRound = Number(targetReg.currentRound || targetReg.promotedToRound || 1);
+                setCurrentRound(participantRound);
                 if (Array.isArray(ev.rounds) && ev.rounds.length > 0) {
                   setTotalRounds(ev.rounds.length);
-                  const currentRDef = ev.rounds.find((r: any) => r.roundNumber === cRoundForType);
+                  const currentRDef = ev.rounds.find((r: any) => r.roundNumber === participantRound) || ev.rounds.find((r: any) => r.roundNumber === (ev.currentRound || 1));
                   if (currentRDef?.name) setActiveRoundName(currentRDef.name);
                   if (currentRDef?.type) setActiveRoundType(currentRDef.type);
                 } else if (ev.totalRounds) {

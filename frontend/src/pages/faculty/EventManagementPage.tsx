@@ -2022,7 +2022,7 @@ const EventManagementPage: React.FC = () => {
   const [promoteToRound, setPromoteToRound] = useState<number>(2);
   const [promotionMode, setPromotionMode] = useState<"quiz" | "jury" | "manual">("quiz");
   const [promotionSearchQuery, setPromotionSearchQuery] = useState("");
-  const [promotionStatusFilter, setPromotionStatusFilter] = useState<"all" | "selected" | "qualified" | "pending" | "eliminated">("all");
+  const [promotionStatusFilter, setPromotionStatusFilter] = useState<"active" | "all" | "selected" | "qualified" | "unpromoted" | "eliminated">("active");
 
   // Quiz Promotion Criteria
   const [eventQuizzesList, setEventQuizzesList] = useState<any[]>([]);
@@ -2190,6 +2190,7 @@ const EventManagementPage: React.FC = () => {
     }
     setPromoteFromRound(currRound);
     setPromoteToRound(Math.min((existingRounds.length || 3), currRound + 1));
+    setPromotionStatusFilter("active");
     setRoundModalTab("promotion");
     fetchPromotionData();
     setIsEventRoundsModalOpen(true);
@@ -2286,8 +2287,9 @@ const EventManagementPage: React.FC = () => {
 
       const juryScore = matchedJury ? Number(matchedJury.totalScore) || 0 : null;
 
-      const currentTeamRound = Number(reg.currentRound) || 1;
-      const roundStatus = reg.roundStatus || (currentTeamRound > 1 ? "Qualified" : "Pending");
+      const currentTeamRound = Number(reg.currentRound || reg.promotedToRound) || 1;
+      const isEliminated = reg.roundStatus === "Eliminated" || Boolean(reg.eliminatedInRound && reg.eliminatedInRound <= promoteFromRound);
+      const roundStatus = isEliminated ? "Eliminated" : (reg.roundStatus || (currentTeamRound > 1 ? "Qualified" : "Active"));
 
       return {
         ...reg,
@@ -2301,14 +2303,18 @@ const EventManagementPage: React.FC = () => {
         juryScore,
         juryEvaluation: matchedJury || null,
         isQualifiedForTarget: currentTeamRound >= promoteToRound && roundStatus === "Qualified",
-        isEliminated: roundStatus === "Eliminated" || (reg.eliminatedInRound && reg.eliminatedInRound <= promoteFromRound)
+        isEliminated,
+        isInPromoteFromRound: currentTeamRound === promoteFromRound && !isEliminated,
+        isUnpromotedPreviousRound: currentTeamRound < promoteFromRound && !isEliminated
       };
     });
   }, [eventAccessRegistrations, allQuizSubmissions, allJuryEvaluations, selectedPromotionQuizId, eventQuizzesList, quizCutoffPercentage, promoteFromRound, promoteToRound]);
 
-  // Auto-compute eligible teams based on selected criteria
+  // Auto-compute eligible teams based on selected criteria (STRICTLY within promoteFromRound)
   const eligibleTeamIds = useMemo(() => {
-    const activeCandidates = promotionRoster.filter((t) => !t.isEliminated);
+    const activeCandidates = promotionRoster.filter(
+      (t) => t.currentTeamRound === promoteFromRound && !t.isEliminated
+    );
 
     if (promotionMode === "quiz") {
       if (quizCutoffType === "score") {
@@ -2343,25 +2349,34 @@ const EventManagementPage: React.FC = () => {
       }
     }
     return [];
-  }, [promotionRoster, promotionMode, quizCutoffType, quizCutoffScore, quizCutoffPercentage, quizTopNCount, juryCutoffType, juryCutoffScore, juryTopNCount]);
+  }, [promotionRoster, promotionMode, quizCutoffType, quizCutoffScore, quizCutoffPercentage, quizTopNCount, juryCutoffType, juryCutoffScore, juryTopNCount, promoteFromRound]);
 
-  // When criteria changes in quiz/jury mode, sync selectedPromoteRegIds
+  // When criteria or promoteFromRound changes in quiz/jury mode, sync selectedPromoteRegIds
   useEffect(() => {
     if (promotionMode === "quiz" || promotionMode === "jury") {
       setSelectedPromoteRegIds(eligibleTeamIds);
+    } else {
+      // In manual mode, strip any selected IDs that aren't in promoteFromRound
+      setSelectedPromoteRegIds((prev) =>
+        prev.filter((id) => {
+          const t = promotionRoster.find((r) => r.id === id);
+          return t && t.currentTeamRound === promoteFromRound && !t.isEliminated;
+        })
+      );
     }
-  }, [eligibleTeamIds, promotionMode]);
+  }, [eligibleTeamIds, promotionMode, promoteFromRound]);
 
   const handleApplyQuizAutoSelect = () => {
     const matched = promotionRoster
       .filter((t) => {
         if (t.isEliminated) return false;
+        if (t.currentTeamRound !== promoteFromRound) return false;
         if (t.quizScore === null || t.quizScore === undefined) return false;
         if (quizCutoffType === "score") return Number(t.quizScore) >= Number(quizCutoffScore);
         if (quizCutoffType === "percentage") return Number(t.quizPercentage ?? 0) >= Number(quizCutoffPercentage);
         if (quizCutoffType === "topN") {
           const sorted = [...promotionRoster]
-            .filter(r => !r.isEliminated && r.quizScore !== null && r.quizScore !== undefined)
+            .filter(r => !r.isEliminated && r.currentTeamRound === promoteFromRound && r.quizScore !== null && r.quizScore !== undefined)
             .sort((a, b) => (b.quizScore || 0) - (a.quizScore || 0));
           return sorted.slice(0, quizTopNCount).map(r => r.id).includes(t.id);
         }
@@ -2376,11 +2391,12 @@ const EventManagementPage: React.FC = () => {
     const matched = promotionRoster
       .filter((t) => {
         if (t.isEliminated) return false;
+        if (t.currentTeamRound !== promoteFromRound) return false;
         if (t.juryScore === null || t.juryScore === undefined) return false;
         if (juryCutoffType === "score") return Number(t.juryScore) >= Number(juryCutoffScore);
         if (juryCutoffType === "topN") {
           const sorted = [...promotionRoster]
-            .filter(r => !r.isEliminated && r.juryScore !== null && r.juryScore !== undefined)
+            .filter(r => !r.isEliminated && r.currentTeamRound === promoteFromRound && r.juryScore !== null && r.juryScore !== undefined)
             .sort((a, b) => (b.juryScore || 0) - (a.juryScore || 0));
           return sorted.slice(0, juryTopNCount).map(r => r.id).includes(t.id);
         }
@@ -2392,12 +2408,18 @@ const EventManagementPage: React.FC = () => {
   };
 
   const handleExecuteBatchPromotion = async () => {
-    if (selectedPromoteRegIds.length === 0) {
+    // Filter selectedPromoteRegIds to strictly include only teams in promoteFromRound
+    const validCandidateIds = selectedPromoteRegIds.filter((id) => {
+      const t = promotionRoster.find((r) => r.id === id);
+      return t && t.currentTeamRound === promoteFromRound && !t.isEliminated;
+    });
+
+    if (validCandidateIds.length === 0) {
       await showAlert({
-        title: "No Eligible Teams Selected",
+        title: "No Eligible Teams in Round " + promoteFromRound,
         message: promotionMode === "quiz" 
-          ? `No teams currently meet the minimum quiz cutoff threshold (${quizCutoffType === "score" ? `${quizCutoffScore} marks` : `${quizCutoffPercentage}%`}). Only participants with score equal or greater than the cutoff can be selected to promote.`
-          : "Please select at least one team to promote to the next round.",
+          ? `No teams currently in Round ${promoteFromRound} meet the minimum quiz cutoff threshold (${quizCutoffType === "score" ? `${quizCutoffScore} marks` : `${quizCutoffPercentage}%`}). Only participants active in Round ${promoteFromRound} with score equal or greater than the cutoff can be selected to promote.`
+          : `Please select at least one active team in Round ${promoteFromRound} to promote to Round ${promoteToRound}.`,
         type: "warning",
         icon: "alert"
       });
@@ -2406,7 +2428,7 @@ const EventManagementPage: React.FC = () => {
 
     // Strict validation: In quiz mode, ensure every selected team has score >= cutoff
     if (promotionMode === "quiz") {
-      const belowCutoffTeams = selectedPromoteRegIds
+      const belowCutoffTeams = validCandidateIds
         .map(id => promotionRoster.find(t => t.id === id))
         .filter(t => {
           if (!t) return true;
@@ -2430,8 +2452,8 @@ const EventManagementPage: React.FC = () => {
 
     const confirmed = await showConfirm({
       title: `Promote Teams to Round ${promoteToRound}?`,
-      message: `Are you sure you want to promote ${selectedPromoteRegIds.length} qualified team(s) from Round ${promoteFromRound} to Round ${promoteToRound}?`,
-      confirmText: `Promote ${selectedPromoteRegIds.length} Qualified Team(s)`,
+      message: `Are you sure you want to promote ${validCandidateIds.length} qualified team(s) from Round ${promoteFromRound} to Round ${promoteToRound}?`,
+      confirmText: `Promote ${validCandidateIds.length} Qualified Team(s)`,
       cancelText: "Cancel",
       type: "primary",
       icon: "play"
@@ -2441,7 +2463,7 @@ const EventManagementPage: React.FC = () => {
     setIsExecutingPromotion(true);
     try {
       const now = Date.now();
-      const promotePromises = selectedPromoteRegIds.map(async (regId) => {
+      const promotePromises = validCandidateIds.map(async (regId) => {
         const teamInfo = promotionRoster.find((t) => t.id === regId);
         const scoreUsed = promotionMode === "quiz" 
           ? teamInfo?.quizScore ?? 0 
@@ -2492,7 +2514,7 @@ const EventManagementPage: React.FC = () => {
       let eliminatePromises: Promise<any>[] = [];
       if (markUnselectedAsEliminated) {
         const unselectedTeams = promotionRoster.filter(
-          (t) => t.currentTeamRound === promoteFromRound && !selectedPromoteRegIds.includes(t.id)
+          (t) => t.currentTeamRound === promoteFromRound && !validCandidateIds.includes(t.id)
         );
         eliminatePromises = unselectedTeams.map(async (t) => {
           await updateRegistration(t.id, {
@@ -2513,7 +2535,7 @@ const EventManagementPage: React.FC = () => {
       const dashboardUrl = `${siteBaseUrl}/participant`;
 
       let emailsSentCount = 0;
-      const emailPromises = selectedPromoteRegIds.map(async (regId) => {
+      const emailPromises = validCandidateIds.map(async (regId) => {
         try {
           const teamInfo = promotionRoster.find((t) => t.id === regId);
           if (!teamInfo) return;
@@ -2571,7 +2593,7 @@ const EventManagementPage: React.FC = () => {
       // Update local eventAccessRegistrations state
       setEventAccessRegistrations((prev) =>
         prev.map((r) => {
-          if (selectedPromoteRegIds.includes(r.id)) {
+          if (validCandidateIds.includes(r.id)) {
             const teamInfo = promotionRoster.find((t) => t.id === r.id);
             const scoreUsed = promotionMode === "quiz" ? teamInfo?.quizScore ?? 0 : promotionMode === "jury" ? teamInfo?.juryScore ?? 0 : null;
             return {
@@ -2596,7 +2618,8 @@ const EventManagementPage: React.FC = () => {
         })
       );
 
-      setRoundsSuccessMsg(`🎉 Successfully promoted ${selectedPromoteRegIds.length} team(s) to Round ${promoteToRound} & dispatched congratulations emails!`);
+      setSelectedPromoteRegIds([]);
+      setRoundsSuccessMsg(`🎉 Successfully promoted ${validCandidateIds.length} team(s) to Round ${promoteToRound} & dispatched congratulations emails!`);
       setTimeout(() => setRoundsSuccessMsg(null), 7000);
     } catch (err) {
       console.error("Error executing batch round promotion:", err);
@@ -9493,30 +9516,44 @@ const EventManagementPage: React.FC = () => {
                       </div>
 
                       {/* Filter Tabs */}
-                      <div className="flex items-center gap-2 overflow-x-auto w-full lg:w-auto">
-                        {[
-                          { id: "all", label: "All Teams", count: promotionRoster.length },
-                          { id: "selected", label: "Selected", count: selectedPromoteRegIds.length },
-                          { id: "qualified", label: `In Round ${promoteToRound}+`, count: promotionRoster.filter(t => t.currentTeamRound >= promoteToRound).length },
-                          { id: "pending", label: `In Round ${promoteFromRound}`, count: promotionRoster.filter(t => t.currentTeamRound === promoteFromRound && !t.isEliminated).length },
-                          { id: "eliminated", label: "Eliminated", count: promotionRoster.filter(t => t.isEliminated).length }
-                        ].map((tab) => (
-                          <button
-                            key={tab.id}
-                            type="button"
-                            onClick={() => setPromotionStatusFilter(tab.id as any)}
-                            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
-                              promotionStatusFilter === tab.id
-                                ? "bg-slate-900 text-white shadow-xs"
-                                : "bg-slate-100 hover:bg-slate-200 text-slate-700"
-                            }`}
-                          >
-                            <span>{tab.label}</span>
-                            <span className="px-1.5 py-0.2 rounded-md bg-white/20 text-[10px]">
-                              {tab.count}
-                            </span>
-                          </button>
-                        ))}
+                      <div className="flex items-center gap-2 overflow-x-auto w-full lg:w-auto pb-1">
+                        {(() => {
+                          const activeCount = promotionRoster.filter(t => t.currentTeamRound === promoteFromRound && !t.isEliminated).length;
+                          const qualifiedCount = promotionRoster.filter(t => t.currentTeamRound >= promoteToRound).length;
+                          const unpromotedCount = promotionRoster.filter(t => t.currentTeamRound < promoteFromRound && !t.isEliminated).length;
+                          const eliminatedCount = promotionRoster.filter(t => t.isEliminated).length;
+
+                          const tabs: { id: "active" | "selected" | "qualified" | "unpromoted" | "eliminated" | "all"; label: string; count: number; badgeColor?: string }[] = [
+                            { id: "active", label: `In Round ${promoteFromRound} (Active)`, count: activeCount },
+                            { id: "selected", label: "Selected", count: selectedPromoteRegIds.length },
+                            { id: "qualified", label: `In Round ${promoteToRound}+`, count: qualifiedCount },
+                            ...(promoteFromRound > 1 ? [{ id: "unpromoted" as const, label: `Unpromoted (R < ${promoteFromRound})`, count: unpromotedCount, badgeColor: "bg-amber-100 text-amber-800" }] : []),
+                            { id: "eliminated", label: "Eliminated", count: eliminatedCount, badgeColor: "bg-red-100 text-red-800" },
+                            { id: "all", label: "All Teams", count: promotionRoster.length }
+                          ];
+
+                          return tabs.map((tab) => (
+                            <button
+                              key={tab.id}
+                              type="button"
+                              onClick={() => setPromotionStatusFilter(tab.id)}
+                              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${
+                                promotionStatusFilter === tab.id
+                                  ? "bg-slate-900 text-white shadow-xs"
+                                  : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                              }`}
+                            >
+                              <span>{tab.label}</span>
+                              <span className={`px-1.5 py-0.2 rounded-md text-[10px] font-extrabold ${
+                                promotionStatusFilter === tab.id
+                                  ? "bg-white/20 text-white"
+                                  : (tab.badgeColor || "bg-slate-200 text-slate-700")
+                              }`}>
+                                {tab.count}
+                              </span>
+                            </button>
+                          ));
+                        })()}
                       </div>
 
                       {/* Export Shortlist Button */}
@@ -9544,23 +9581,63 @@ const EventManagementPage: React.FC = () => {
 
                             if (!matchQuery) return false;
 
+                            if (promotionStatusFilter === "active") return team.currentTeamRound === promoteFromRound && !team.isEliminated;
                             if (promotionStatusFilter === "selected") return selectedPromoteRegIds.includes(team.id);
                             if (promotionStatusFilter === "qualified") return team.currentTeamRound >= promoteToRound;
-                            if (promotionStatusFilter === "pending") return team.currentTeamRound === promoteFromRound && !team.isEliminated;
+                            if (promotionStatusFilter === "unpromoted") return team.currentTeamRound < promoteFromRound && !team.isEliminated;
                             if (promotionStatusFilter === "eliminated") return team.isEliminated;
                             return true;
                           });
 
+                          const unpromotedTotal = promotionRoster.filter(t => t.currentTeamRound < promoteFromRound && !t.isEliminated).length;
+
                           if (filteredRoster.length === 0) {
                             return (
-                              <div className="py-16 text-center text-slate-400 space-y-2 bg-slate-50/50">
-                                <Users className="w-8 h-8 mx-auto text-slate-300" />
-                                <p className="text-xs font-bold text-slate-600">No teams match your filter or search query.</p>
+                              <div className="py-16 text-center text-slate-400 space-y-3 bg-slate-50/50 p-6">
+                                <Users className="w-10 h-10 mx-auto text-slate-300" />
+                                <p className="text-xs font-bold text-slate-700">
+                                  {promotionStatusFilter === "active"
+                                    ? `No teams are currently active in Round ${promoteFromRound}.`
+                                    : "No teams match your filter or search query."}
+                                </p>
+                                {promotionStatusFilter === "active" && promoteFromRound > 1 && unpromotedTotal > 0 && (
+                                  <div className="space-y-3 pt-2 max-w-md mx-auto">
+                                    <p className="text-xs text-amber-800 font-semibold bg-amber-50 px-4 py-2.5 rounded-2xl border border-amber-200">
+                                      ⚠️ There are <b>{unpromotedTotal}</b> registered team(s) currently in earlier rounds that have not yet been promoted to Round {promoteFromRound}.
+                                    </p>
+                                    <div>
+                                      <button
+                                        type="button"
+                                        onClick={() => {
+                                          setPromoteFromRound(1);
+                                          setPromoteToRound(promoteFromRound);
+                                          setPromotionStatusFilter("active");
+                                        }}
+                                        className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-md shadow-blue-500/20 active:scale-95"
+                                      >
+                                        ➔ Switch Source to Round 1 (Promote Round 1 ➔ Round {promoteFromRound})
+                                      </button>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             );
                           }
 
-                          const allFilteredSelected = filteredRoster.every((t) => selectedPromoteRegIds.includes(t.id));
+                          // Candidate teams eligible for selection in the currently filtered view
+                          const candidateTeamsInView = filteredRoster.filter(
+                            t => t.currentTeamRound === promoteFromRound && !t.isEliminated &&
+                            (promotionMode === "quiz" ? (
+                              t.quizScore !== null &&
+                              (quizCutoffType === "score" ? Number(t.quizScore) >= Number(quizCutoffScore) :
+                               quizCutoffType === "percentage" ? Number(t.quizPercentage ?? 0) >= Number(quizCutoffPercentage) :
+                               eligibleTeamIds.includes(t.id))
+                            ) : promotionMode === "jury" ? (
+                              eligibleTeamIds.includes(t.id)
+                            ) : true)
+                          );
+
+                          const allCandidateSelected = candidateTeamsInView.length > 0 && candidateTeamsInView.every(t => selectedPromoteRegIds.includes(t.id));
 
                           return (
                             <table className="w-full text-left text-xs border-collapse min-w-[900px]">
@@ -9569,31 +9646,21 @@ const EventManagementPage: React.FC = () => {
                                   <th className="py-4 px-4 w-12 text-center">
                                     <input
                                       type="checkbox"
-                                      checked={allFilteredSelected && filteredRoster.length > 0}
+                                      checked={allCandidateSelected}
+                                      disabled={candidateTeamsInView.length === 0}
                                       onChange={() => {
-                                        if (allFilteredSelected) {
-                                          const filteredIds = new Set(filteredRoster.map(t => t.id));
-                                          setSelectedPromoteRegIds(prev => prev.filter(id => !filteredIds.has(id)));
+                                        if (allCandidateSelected) {
+                                          const candidateIds = new Set(candidateTeamsInView.map(t => t.id));
+                                          setSelectedPromoteRegIds(prev => prev.filter(id => !candidateIds.has(id)));
                                         } else {
-                                          const qualifiedIds = filteredRoster
-                                            .filter(t => {
-                                              if (promotionMode === "quiz") {
-                                                if (t.quizScore === null) return false;
-                                                if (quizCutoffType === "score") return Number(t.quizScore) >= Number(quizCutoffScore);
-                                                if (quizCutoffType === "percentage") return Number(t.quizPercentage ?? 0) >= Number(quizCutoffPercentage);
-                                                if (quizCutoffType === "topN") return eligibleTeamIds.includes(t.id);
-                                                return false;
-                                              }
-                                              if (promotionMode === "jury") {
-                                                return eligibleTeamIds.includes(t.id);
-                                              }
-                                              return t.currentTeamRound === promoteFromRound && !t.isEliminated;
-                                            })
-                                            .map(t => t.id);
-                                          setSelectedPromoteRegIds(Array.from(new Set([...selectedPromoteRegIds, ...qualifiedIds])));
+                                          const candidateIds = candidateTeamsInView.map(t => t.id);
+                                          setSelectedPromoteRegIds(Array.from(new Set([...selectedPromoteRegIds, ...candidateIds])));
                                         }
                                       }}
-                                      className="w-4 h-4 rounded text-blue-600 cursor-pointer"
+                                      className={`w-4 h-4 rounded text-blue-600 ${
+                                        candidateTeamsInView.length === 0 ? "cursor-not-allowed opacity-30" : "cursor-pointer"
+                                      }`}
+                                      title={candidateTeamsInView.length === 0 ? `No eligible teams in Round ${promoteFromRound} meeting criteria` : "Select/Deselect all eligible teams in this round"}
                                     />
                                   </th>
                                   <th className="py-4 px-3 w-12 text-center">#</th>
@@ -9613,7 +9680,11 @@ const EventManagementPage: React.FC = () => {
                                   const displayTeamName = isGroup ? team.groupName : (team.teamLeadName || team.name || "Participant");
                                   const isFinalSubmitted = team.submissionStatus === "Submitted" || !!team.submittedAt;
 
-                                  const meetsQuizCutoff = (() => {
+                                  const isInSourceRound = team.currentTeamRound === promoteFromRound && !team.isEliminated;
+                                  const isAlreadyPromoted = team.currentTeamRound >= promoteToRound;
+                                  const isUnpromotedFromPrev = team.currentTeamRound < promoteFromRound && !team.isEliminated;
+
+                                  const meetsQuizCutoff = isInSourceRound && (() => {
                                     if (team.quizScore === null) return false;
                                     if (quizCutoffType === "score") return Number(team.quizScore) >= Number(quizCutoffScore);
                                     if (quizCutoffType === "percentage") return Number(team.quizPercentage ?? 0) >= Number(quizCutoffPercentage);
@@ -9629,6 +9700,8 @@ const EventManagementPage: React.FC = () => {
                                           ? "bg-indigo-50/50 hover:bg-indigo-50"
                                           : team.isEliminated
                                           ? "bg-slate-50/60 opacity-60 hover:opacity-100"
+                                          : isUnpromotedFromPrev
+                                          ? "bg-amber-50/20 hover:bg-amber-50/40"
                                           : "hover:bg-slate-50"
                                       }`}
                                     >
@@ -9637,11 +9710,22 @@ const EventManagementPage: React.FC = () => {
                                         <input
                                           type="checkbox"
                                           checked={isSelected}
-                                          disabled={promotionMode === "quiz" && !meetsQuizCutoff}
+                                          disabled={!isInSourceRound || (promotionMode === "quiz" && !meetsQuizCutoff)}
                                           onChange={() => {
                                             if (isSelected) {
                                               setSelectedPromoteRegIds(prev => prev.filter(id => id !== team.id));
                                             } else {
+                                              if (!isInSourceRound) {
+                                                showAlert({
+                                                  title: "Team Not In Active Round",
+                                                  message: isUnpromotedFromPrev
+                                                    ? `Team "${displayTeamName}" is currently in Round ${team.currentTeamRound} and has not been promoted to Round ${promoteFromRound} yet. You cannot promote them to Round ${promoteToRound} directly.`
+                                                    : `Team "${displayTeamName}" is already in Round ${team.currentTeamRound}.`,
+                                                  type: "warning",
+                                                  icon: "alert"
+                                                });
+                                                return;
+                                              }
                                               if (promotionMode === "quiz" && !meetsQuizCutoff) {
                                                 showAlert({
                                                   title: "Cutoff Not Met",
@@ -9655,9 +9739,17 @@ const EventManagementPage: React.FC = () => {
                                             }
                                           }}
                                           className={`w-4 h-4 rounded text-blue-600 ${
-                                            promotionMode === "quiz" && !meetsQuizCutoff ? "cursor-not-allowed opacity-30" : "cursor-pointer"
+                                            !isInSourceRound || (promotionMode === "quiz" && !meetsQuizCutoff) ? "cursor-not-allowed opacity-30" : "cursor-pointer"
                                           }`}
-                                          title={promotionMode === "quiz" && !meetsQuizCutoff ? `Score below cutoff (${quizCutoffType === "score" ? `${quizCutoffScore} marks` : `${quizCutoffPercentage}%`})` : undefined}
+                                          title={
+                                            !isInSourceRound
+                                              ? isUnpromotedFromPrev
+                                                ? `Team is currently in Round ${team.currentTeamRound} (Not promoted to Round ${promoteFromRound})`
+                                                : `Team is already in Round ${team.currentTeamRound}`
+                                              : promotionMode === "quiz" && !meetsQuizCutoff
+                                              ? `Score below cutoff (${quizCutoffType === "score" ? `${quizCutoffScore} marks` : `${quizCutoffPercentage}%`})`
+                                              : undefined
+                                          }
                                         />
                                       </td>
 
@@ -9670,9 +9762,13 @@ const EventManagementPage: React.FC = () => {
                                       <td className="py-4 px-4">
                                         <div className="flex items-center gap-3">
                                           <div className={`w-9 h-9 rounded-2xl font-black text-xs flex items-center justify-center shrink-0 shadow-xs border ${
-                                            team.currentTeamRound >= promoteToRound
+                                            team.isEliminated
+                                              ? "bg-red-100 text-red-700 border-red-200"
+                                              : isAlreadyPromoted
                                               ? "bg-emerald-100 text-emerald-800 border-emerald-200"
-                                              : "bg-indigo-100 text-indigo-700 border-indigo-200"
+                                              : isInSourceRound
+                                              ? "bg-blue-100 text-blue-700 border-blue-200"
+                                              : "bg-amber-100 text-amber-800 border-amber-200"
                                           }`}>
                                             {displayTeamName.charAt(0).toUpperCase()}
                                           </div>
@@ -9708,7 +9804,7 @@ const EventManagementPage: React.FC = () => {
                                         {team.quizScore !== null ? (
                                           <div className="inline-flex flex-col items-center gap-1">
                                             <span className={`px-2.5 py-1 rounded-xl text-[11px] font-black inline-flex items-center gap-1.5 border shadow-2xs ${
-                                              meetsQuizCutoff
+                                              meetsQuizCutoff || (!isInSourceRound && Number(team.quizScore) >= Number(quizCutoffScore))
                                                 ? "bg-purple-50 text-purple-900 border-purple-200"
                                                 : "bg-rose-50 text-rose-900 border-rose-200"
                                             }`}>
@@ -9717,11 +9813,11 @@ const EventManagementPage: React.FC = () => {
                                               <span className="text-[9px] text-purple-700 font-extrabold">({team.quizPercentage}%)</span>
                                             </span>
                                             <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
-                                              meetsQuizCutoff
+                                              meetsQuizCutoff || (!isInSourceRound && Number(team.quizScore) >= Number(quizCutoffScore))
                                                 ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60"
                                                 : "bg-rose-50 text-rose-700 border border-rose-200/60"
                                             }`}>
-                                              {meetsQuizCutoff ? "✓ Qualified" : "Below Cutoff"}
+                                              {meetsQuizCutoff || (!isInSourceRound && Number(team.quizScore) >= Number(quizCutoffScore)) ? "✓ Qualified" : "Below Cutoff"}
                                             </span>
                                           </div>
                                         ) : (
@@ -9745,25 +9841,44 @@ const EventManagementPage: React.FC = () => {
                                       {/* Stage & Status */}
                                       <td className="py-4 px-3 text-center">
                                         <div className="space-y-1">
-                                          <span className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider block ${
-                                            team.isEliminated
-                                              ? "bg-red-100 text-red-800 border border-red-200"
-                                              : team.currentTeamRound >= promoteToRound
-                                              ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
-                                              : "bg-blue-100 text-blue-800 border border-blue-200"
-                                          }`}>
-                                            {team.isEliminated
-                                              ? `Eliminated (R${team.eliminatedInRound || team.currentTeamRound})`
-                                              : team.currentTeamRound >= promoteToRound
-                                              ? `Qualified (R${team.currentTeamRound})`
-                                              : `Round ${team.currentTeamRound}`}
-                                          </span>
+                                          {team.isEliminated ? (
+                                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider block bg-red-100 text-red-800 border border-red-200">
+                                              Eliminated (R{team.eliminatedInRound || team.currentTeamRound})
+                                            </span>
+                                          ) : isAlreadyPromoted ? (
+                                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider block bg-emerald-100 text-emerald-800 border border-emerald-200">
+                                              Qualified (R{team.currentTeamRound})
+                                            </span>
+                                          ) : isInSourceRound ? (
+                                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider block bg-blue-100 text-blue-800 border border-blue-200">
+                                              Round {team.currentTeamRound} (Active)
+                                            </span>
+                                          ) : (
+                                            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider block bg-amber-100 text-amber-800 border border-amber-200" title={`Not promoted to Round ${promoteFromRound}`}>
+                                              Round {team.currentTeamRound} (Unpromoted)
+                                            </span>
+                                          )}
                                         </div>
                                       </td>
 
                                       {/* Quick Action Button */}
                                       <td className="py-4 px-4 text-right">
-                                        {promotionMode === "quiz" && !meetsQuizCutoff ? (
+                                        {team.isEliminated ? (
+                                          <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 cursor-not-allowed inline-block">
+                                            Eliminated
+                                          </span>
+                                        ) : isAlreadyPromoted ? (
+                                          <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 cursor-not-allowed inline-block">
+                                            In Round {team.currentTeamRound} ✓
+                                          </span>
+                                        ) : isUnpromotedFromPrev ? (
+                                          <span
+                                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 cursor-not-allowed inline-block"
+                                            title={`This team is currently in Round ${team.currentTeamRound} and must be promoted to Round ${promoteFromRound} first.`}
+                                          >
+                                            In Round {team.currentTeamRound} (Unpromoted)
+                                          </span>
+                                        ) : promotionMode === "quiz" && !meetsQuizCutoff ? (
                                           <span
                                             className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed inline-block"
                                             title={`Score below required cutoff (${quizCutoffType === "score" ? `${quizCutoffScore} marks` : `${quizCutoffPercentage}%`})`}
