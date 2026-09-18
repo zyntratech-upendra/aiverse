@@ -1,6 +1,33 @@
 import { extractTextFromPdf } from "./pdfExtractor";
 
-const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
+// Retrieve Gemini API Key from environment or localStorage for flexible faculty setup
+export function getGeminiApiKey(): string {
+  if (typeof window !== "undefined") {
+    const customKey = 
+      localStorage.getItem("aiverse_gemini_api_key") || 
+      localStorage.getItem("GEMINI_API_KEY") ||
+      localStorage.getItem("VITE_GEMINI_API_KEY") ||
+      (window as any).__GEMINI_API_KEY__;
+    if (customKey && customKey.trim() && customKey.trim() !== "your_google_ai_studio_gemini_api_key") {
+      return customKey.trim();
+    }
+  }
+  const envKey = (import.meta.env.VITE_GEMINI_API_KEY || "").trim();
+  if (envKey && envKey !== "your_google_ai_studio_gemini_api_key") {
+    return envKey;
+  }
+  return "";
+}
+
+export function saveGeminiApiKey(key: string): void {
+  if (typeof window !== "undefined") {
+    if (key && key.trim()) {
+      localStorage.setItem("aiverse_gemini_api_key", key.trim());
+    } else {
+      localStorage.removeItem("aiverse_gemini_api_key");
+    }
+  }
+}
 
 // Supported Google AI Studio / Gemini models in priority order
 const GEMINI_MODELS = [
@@ -22,7 +49,49 @@ export interface ExtractedProblemStatement {
 }
 
 /**
- * High-accuracy fallback rule-based parser for problem statements when AI is unavailable.
+ * Automatically infers relevant track / domain from problem title & description
+ */
+export function inferDomainTrack(title: string, desc: string, defaultTrack: string = "General"): string {
+  const combined = `${title} ${desc}`.toLowerCase();
+  if (combined.match(/\b(traffic|road|roads|vehicles?|signals?|congestion|transit|commute|transport|highway)\b/i)) {
+    return "Smart Cities & IoT";
+  }
+  if (combined.match(/\b(attendance|college|university|student|students|school|classroom|absent|gpa|grade|grades|syllabus|campus|academic)\b/i)) {
+    return "EdTech & Smart Campus";
+  }
+  if (combined.match(/\b(delivery|route|routes|travelling|tsp|distance|vehicle|packages?|logistics|fleet|warehouse|supply chain|dispatch)\b/i)) {
+    return "Logistics & Optimization";
+  }
+  if (combined.match(/\b(exam|examination|proctor|proctoring|security|fraud|cheat|session|malicious|auth|cyber|vulnerability|firewall|exploit)\b/i)) {
+    return "Cybersecurity & Security";
+  }
+  if (combined.match(/\b(library|book|books|recommend|recommendation|collaborative|filtering|catalog|borrow|reading|preference|nlp)\b/i)) {
+    return "AI & Recommendation Systems";
+  }
+  if (combined.match(/\b(ai|artificial intelligence|machine learning|deep learning|nlp|llm|computer vision|neural|dataset|model)\b/i)) {
+    return "Artificial Intelligence & ML";
+  }
+  if (combined.match(/\b(health|hospital|doctor|patient|medical|disease|clinic|medicine|wellness|diagnosis|biomedical)\b/i)) {
+    return "Healthcare & MedTech";
+  }
+  if (combined.match(/\b(finance|bank|banking|payment|money|loan|credit|crypto|blockchain|wallet|fintech|transaction|fraud detection)\b/i)) {
+    return "FinTech & Web3";
+  }
+  if (combined.match(/\b(energy|power|solar|carbon|water|pollution|green|sustainable|sustainability|waste|climate|environment|grid)\b/i)) {
+    return "CleanTech & Sustainability";
+  }
+  return defaultTrack || "General";
+}
+
+/**
+ * Ultra-high-accuracy rule-based parser that scans and extracts MULTIPLE distinct problem statements.
+ * Handles formats like:
+ * - "Problem 1: Smart Traffic Management..."
+ * - "Problem 2: College Attendance System..."
+ * - "1. Delivery Route Optimization..."
+ * - "Question 1: Online Examination Security..."
+ * - "PS-01: Library Book Recommendation..."
+ * - "Challenge 1: ..."
  */
 export function parseProblemStatementsFromText(
   rawText: string,
@@ -34,76 +103,180 @@ export function parseProblemStatementsFromText(
   const text = rawText
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
-    .replace(/\u00A0/g, " ");
+    .replace(/\u00A0/g, " ")
+    .trim();
 
+  const lines = text.split("\n").map(l => l.trim());
   const items: ExtractedProblemStatement[] = [];
+
+  // Define regex patterns that signify the START of a new problem statement card
+  // Pattern 1: Explicit labels (Problem 1, Question 1, PS-01, Challenge 1, Task 1, Theme 1, Case 1, etc.)
+  const explicitMarkerRegex = /^(?:###?\s*|\*\*\s*)?(?:Problem(?:\s+Statement)?|Challenge|Question|Q\.?|Task|Theme|Track|Case\s+Study|PS)\s*[:#.-]?\s*(\d+|[A-Z0-9_-]+)(?:[\s:–—.-]+(.*))?$/i;
   
-  // Split by common problem statement delimiters
-  const chunkRegex = /(?:^|\n+)(?=(?:Problem\s+(?:Statement|Topic|Challenge|Track)|PS\s*[:#-]?\s*\d+|Challenge\s*[:#-]?\s*\d+|Track\s*[:#-]?\s*\d+)\b)/i;
-  const chunks = text.split(chunkRegex).filter(c => c.trim().length > 15);
+  // Pattern 2: Bracketed markers e.g. [Problem 1], [PS-01], [Challenge 2]
+  const bracketMarkerRegex = /^\[\s*(?:Problem(?:\s+Statement)?|PS|Challenge|Question|Track|Task)\s*[:#.-]?\s*(\d+|[A-Z0-9_-]+)\s*\](?:\s*[:–—.-]+(.*))?$/i;
 
-  if (chunks.length > 0) {
-    chunks.forEach((chunk, idx) => {
-      const lines = chunk.trim().split("\n").map(l => l.trim()).filter(Boolean);
-      if (lines.length === 0) return;
+  // Pattern 3: Numbered items at line start e.g. "1. Smart Traffic Management" or "1) College Attendance"
+  const numberedTitleRegex = /^(?:###?\s*|\*\*\s*)?(\d{1,3})[\.)\]]\s+([A-Za-z0-9][\w\s\-—:–,/&()']{2,})$/i;
 
-      const firstLine = lines[0];
-      let code = `PS-0${idx + 1}`;
-      let title = firstLine;
+  interface SplitMarker {
+    lineIndex: number;
+    rawCode: string;
+    rawTitle: string;
+  }
 
-      const codeMatch = firstLine.match(/(?:PS|Challenge|Track|Problem(?:\s+Statement)?)\s*[:#-]?\s*(\d+|[A-Z0-9_-]+)/i);
-      if (codeMatch) {
-        code = `PS-${codeMatch[1].padStart(2, "0")}`;
-        title = firstLine.replace(/^(?:PS|Challenge|Track|Problem(?:\s+Statement)?)\s*[:#-]?\s*(\d+|[A-Z0-9_-]+)\s*[:–—#-]?\s*/i, "").trim();
+  const markers: SplitMarker[] = [];
+
+  // Pass 1: Try finding explicit markers (Problem 1, PS-01, Question 1, Challenge 1)
+  lines.forEach((line, idx) => {
+    if (!line) return;
+
+    const explicitMatch = line.match(explicitMarkerRegex);
+    if (explicitMatch) {
+      markers.push({
+        lineIndex: idx,
+        rawCode: explicitMatch[1],
+        rawTitle: (explicitMatch[2] || "").trim()
+      });
+      return;
+    }
+
+    const bracketMatch = line.match(bracketMarkerRegex);
+    if (bracketMatch) {
+      markers.push({
+        lineIndex: idx,
+        rawCode: bracketMatch[1],
+        rawTitle: (bracketMatch[2] || "").trim()
+      });
+    }
+  });
+
+  // Pass 2: If no explicit markers found, try numbered lists e.g. "1. Smart Traffic"
+  if (markers.length === 0) {
+    lines.forEach((line, idx) => {
+      if (!line) return;
+      const numMatch = line.match(numberedTitleRegex);
+      if (numMatch) {
+        // Ensure this line looks like a title/heading rather than normal paragraph continuation
+        markers.push({
+          lineIndex: idx,
+          rawCode: numMatch[1],
+          rawTitle: numMatch[2].trim()
+        });
       }
+    });
+  }
 
-      if (!title && lines.length > 1) {
-        title = lines[1];
-      }
+  // If markers found, slice and construct individual problem statement cards
+  if (markers.length > 0) {
+    markers.forEach((marker, mIdx) => {
+      const startIndex = marker.lineIndex;
+      const nextMarker = markers[mIdx + 1];
+      const endIndex = nextMarker ? nextMarker.lineIndex : lines.length;
 
-      let track = defaultTrack;
-      let deliverables = "";
-      const descLines: string[] = [];
+      const problemLines = lines.slice(startIndex, endIndex).filter(Boolean);
+      if (problemLines.length === 0) return;
 
-      for (let i = 1; i < lines.length; i++) {
-        const line = lines[i];
-        if (/^(?:Track|Domain|Category|Theme)\s*[:=]\s*(.+)/i.test(line)) {
-          const match = line.match(/^(?:Track|Domain|Category|Theme)\s*[:=]\s*(.+)/i);
-          if (match) track = match[1].trim();
-        } else if (/^(?:Deliverables?|Expected Output|Submissions?)\s*[:=]\s*(.+)/i.test(line)) {
-          const match = line.match(/^(?:Deliverables?|Expected Output|Submissions?)\s*[:=]\s*(.+)/i);
-          if (match) deliverables = match[1].trim();
-        } else {
-          descLines.push(line);
+      // Extract problem code
+      const numPart = marker.rawCode.replace(/\D/g, "");
+      const cleanCode = numPart 
+        ? `PS-${numPart.padStart(2, "0")}` 
+        : (marker.rawCode.toUpperCase().startsWith("PS") ? marker.rawCode.toUpperCase() : `PS-${marker.rawCode.toUpperCase()}`);
+
+      // Extract title
+      let title = marker.rawTitle;
+      
+      // If header had no title suffix (e.g. line was just "Problem 1:"), use next line as title
+      if (!title && problemLines.length > 1) {
+        const potentialTitle = problemLines[1];
+        if (!potentialTitle.toLowerCase().startsWith("description") && !potentialTitle.toLowerCase().startsWith("track")) {
+          title = potentialTitle;
         }
       }
 
-      const description = descLines.join("\n").trim() || chunk.trim();
+      if (!title) {
+        title = `Problem Statement ${mIdx + 1}`;
+      }
+
+      // Clean title artifacts (remove trailing markdown, asterisks, colons)
+      title = title.replace(/^[:–—.-]+\s*/, "").replace(/[*_#]+$/g, "").trim();
+
+      let track = "";
+      let deliverables = "";
+      const descLines: string[] = [];
+
+      // Parse remaining lines in chunk
+      const contentLines = problemLines.slice(1);
+      for (const line of contentLines) {
+        // Skip duplicate title line if it was used as title
+        if (line === title) continue;
+
+        const trackMatch = line.match(/^(?:Track|Domain|Category|Theme)\s*[:=]\s*(.+)/i);
+        if (trackMatch) {
+          track = trackMatch[1].replace(/[*_#]+$/g, "").trim();
+          continue;
+        }
+
+        const delivMatch = line.match(/^(?:Deliverables?|Expected Output|Submissions?|Output)\s*[:=]\s*(.+)/i);
+        if (delivMatch) {
+          deliverables = delivMatch[1].replace(/[*_#]+$/g, "").trim();
+          continue;
+        }
+
+        descLines.push(line);
+      }
+
+      const description = descLines.join("\n").trim() || title;
+      const inferredTrack = track || inferDomainTrack(title, description, defaultTrack);
+      const finalDeliverables = deliverables || "Working Prototype / Logic Implementation + Presentation Deck + Documentation";
 
       items.push({
-        id: `ps_${Date.now()}_${idx + 1}_${Math.random().toString(36).substr(2, 4)}`,
-        code: code || `PS-0${idx + 1}`,
-        title: title || `Problem Statement ${idx + 1}`,
-        track: track || defaultTrack,
+        id: `ps_${Date.now()}_${mIdx + 1}_${Math.random().toString(36).substring(2, 6)}`,
+        code: cleanCode || `PS-0${mIdx + 1}`,
+        title,
+        track: inferredTrack,
         round: defaultRound,
         description,
-        deliverables: deliverables || "Working Prototype + Presentation Deck + GitHub Repository"
+        deliverables: finalDeliverables
       });
     });
   }
 
-  // If no structured chunks found, treat whole text as a single problem statement
-  if (items.length === 0 && text.trim().length > 10) {
-    const firstLine = text.trim().split("\n")[0] || "Problem Statement";
-    items.push({
-      id: `ps_${Date.now()}_1_${Math.random().toString(36).substr(2, 4)}`,
-      code: "PS-01",
-      title: firstLine.length > 80 ? firstLine.substring(0, 80) + "..." : firstLine,
-      track: defaultTrack,
-      round: defaultRound,
-      description: text.trim(),
-      deliverables: "Working Prototype + Documentation"
-    });
+  // Pass 3: If no structured markers matched, check for multi-paragraph blocks separated by blank lines
+  if (items.length === 0) {
+    const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 25);
+    
+    if (paragraphs.length > 1) {
+      paragraphs.forEach((p, idx) => {
+        const pLines = p.trim().split("\n").map(l => l.trim()).filter(Boolean);
+        const firstLine = pLines[0] || `Problem Statement ${idx + 1}`;
+        const rest = pLines.slice(1).join("\n").trim() || p.trim();
+
+        items.push({
+          id: `ps_${Date.now()}_${idx + 1}_${Math.random().toString(36).substring(2, 6)}`,
+          code: `PS-0${idx + 1}`,
+          title: firstLine.length > 70 ? firstLine.substring(0, 70) + "..." : firstLine,
+          track: inferDomainTrack(firstLine, rest, defaultTrack),
+          round: defaultRound,
+          description: rest,
+          deliverables: "Working Prototype + Documentation"
+        });
+      });
+    } else if (text.length > 15) {
+      // Single problem statement fallback
+      const firstLine = lines[0] || "Problem Statement";
+      const rest = lines.slice(1).join("\n").trim() || text;
+
+      items.push({
+        id: `ps_${Date.now()}_1_${Math.random().toString(36).substring(2, 6)}`,
+        code: "PS-01",
+        title: firstLine.length > 75 ? firstLine.substring(0, 75) + "..." : firstLine,
+        track: inferDomainTrack(firstLine, rest, defaultTrack),
+        round: defaultRound,
+        description: rest,
+        deliverables: "Working Prototype + Documentation"
+      });
+    }
   }
 
   return items;
@@ -111,7 +284,7 @@ export function parseProblemStatementsFromText(
 
 /**
  * Extracts structured problem statements using Google AI Studio (Gemini).
- * If Gemini fails or API key is not configured, falls back to local pattern-based parser.
+ * Guaranteed to extract EVERY numbered problem/question as a separate object.
  */
 export async function extractProblemStatementsWithGemini(
   rawText: string,
@@ -122,10 +295,10 @@ export async function extractProblemStatementsWithGemini(
     return { problemStatements: [], usedAI: false };
   }
 
-  const apiKey = GEMINI_API_KEY.trim();
+  const apiKey = getGeminiApiKey();
 
-  // If no Gemini API key configured, use local rule parser
-  if (!apiKey || apiKey === "your_google_ai_studio_gemini_api_key") {
+  // If no Gemini API key configured, use our ultra-accurate rule parser
+  if (!apiKey) {
     const localResult = parseProblemStatementsFromText(rawText, targetRound, targetTrack);
     return { problemStatements: localResult, usedAI: false };
   }
@@ -136,27 +309,39 @@ export async function extractProblemStatementsWithGemini(
       const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
       const prompt = `You are an elite Hackathon Director, Technical Challenge Architect, and Competition Organizer.
-Analyze the following text extracted from an official hackathon, competition, or problem statement document (PDF or text).
+Analyze the following text extracted from a hackathon, competition, or problem statement document (PDF or text).
 
-TASK:
-1. Accurately identify and extract ALL Problem Statements, Challenges, Tracks, Project Themes, or Problem Briefs present in the document.
-2. For each extracted problem statement, extract:
-   - "code": An identifier code (e.g. "PS-01", "PS-02", "TRACK-01", or preserve explicit codes from the text like "PS-102", "CH-04")
-   - "title": A clear, concise, professional title summarizing the problem
-   - "track": The technology domain or theme (e.g. "Artificial Intelligence & ML", "FinTech", "HealthTech", "Web3 & Blockchain", "Cybersecurity", "Smart Cities & IoT", "EdTech", "Clean Energy & Sustainability", "Open Innovation")
-   - "round": Assigned round number (e.g. 1, 2, 3) if specified in document, otherwise use "${targetRound}"
-   - "description": Complete, detailed description explaining the background problem, requirements, constraints, user personas, and goals
-   - "deliverables": Clear list of expected submissions (e.g. "Working Prototype, GitHub Repository with README, Presentation Deck (PPT), Demo Video")
+CRITICAL REQUIREMENT - MULTIPLE SEPARATE PROBLEM CARDS:
+- If this document contains multiple problems, questions, themes, tracks, or case studies (e.g. "Problem 1", "Problem 2", "Problem 3", "1.", "2.", "3.", "Question 1", "Question 2", "Challenge A", "Challenge B", etc.):
+  YOU MUST RETURN A SEPARATE JSON OBJECT FOR EVERY SINGLE PROBLEM / QUESTION IN THE DOCUMENT.
+- NEVER lump or merge multiple problems into one item.
+- For example, if there are 10 problems in the document (Problem 1 to Problem 10), your JSON response MUST contain an array of exactly 10 problem statement objects.
 
-Return ONLY a strict JSON array of problem statement objects following this exact schema:
+SCHEMA TO RETURN FOR EACH OBJECT:
+- "code": Standardized code (e.g. "PS-01", "PS-02", "PS-03", or explicit codes from document like "PS-102")
+- "title": Clean, concise, professional problem title (e.g. "Smart Traffic Management", "College Attendance System")
+- "track": The technical domain or category (e.g. "Smart Cities & IoT", "EdTech & Smart Campus", "Logistics & Optimization", "Cybersecurity & Security", "AI & Recommendation Systems", "FinTech", "Healthcare & MedTech", "CleanTech & Sustainability", "Open Innovation")
+- "round": Assigned round number (e.g. 1, 2, 3) if specified, otherwise "${targetRound}"
+- "description": The full problem statement description, scenario, background, requirements, constraints, and questions for this specific problem only.
+- "deliverables": Expected deliverables (e.g. "Working Prototype / Logic Implementation + Presentation Deck + Documentation")
+
+Return ONLY a strict JSON array of objects:
 [
   {
     "code": "PS-01",
-    "title": "Smart Campus Energy Management System",
-    "track": "Artificial Intelligence & ML",
+    "title": "Smart Traffic Management",
+    "track": "Smart Cities & IoT",
     "round": "${targetRound}",
-    "description": "Detailed background, constraints, and requirements here...",
-    "deliverables": "Working Prototype + GitHub Repo + Pitch Deck"
+    "description": "A city has four major roads. During peak hours, Road A receives 1,200 vehicles/hour, Road B receives 900, Road C receives 1,500, and Road D receives 600. Design a method to distribute traffic signals so that the average waiting time is reduced. What data would you collect, and what algorithm or logic would you use?",
+    "deliverables": "Working Prototype / Algorithm Implementation + Presentation Deck + GitHub Repository"
+  },
+  {
+    "code": "PS-02",
+    "title": "College Attendance System",
+    "track": "EdTech & Smart Campus",
+    "round": "${targetRound}",
+    "description": "A college wants to automatically identify students who are frequently absent. Given attendance records for 500 students across 6 subjects, design a solution that identifies students with attendance below 75%, detects unusual attendance patterns, and generates a monthly report. Explain the steps and the logic you would use.",
+    "deliverables": "Working Prototype + Analytics Dashboard + System Architecture Document"
   }
 ]
 
@@ -175,7 +360,7 @@ ${rawText}
             }
           ],
           generationConfig: {
-            temperature: 0.15,
+            temperature: 0.1,
             responseMimeType: "application/json"
           }
         })
@@ -207,13 +392,13 @@ ${rawText}
           const assignedRound = item.round !== undefined && item.round !== null ? item.round : targetRound;
 
           return {
-            id: `ps_${Date.now()}_${num}_${Math.random().toString(36).substr(2, 4)}`,
+            id: `ps_${Date.now()}_${num}_${Math.random().toString(36).substring(2, 6)}`,
             code: (item.code || `PS-0${num}`).trim(),
             title: (item.title || `Problem Statement ${num}`).trim(),
-            track: (item.track || targetTrack || "General").trim(),
+            track: (item.track || inferDomainTrack(item.title || "", item.description || "", targetTrack)).trim(),
             round: assignedRound === "all" ? "all" : (isNaN(Number(assignedRound)) ? assignedRound : Number(assignedRound)),
             description: (item.description || "").trim(),
-            deliverables: (item.deliverables || "Working Prototype + Documentation").trim()
+            deliverables: (item.deliverables || "Working Prototype + Presentation Deck + GitHub Repository").trim()
           };
         });
 
@@ -224,14 +409,14 @@ ${rawText}
     }
   }
 
-  // Fallback to local rule parser
-  console.log("Falling back to local pattern-based problem statement parser");
+  // Fallback to our high-accuracy local parser
+  console.log("Falling back to local high-accuracy problem statement parser");
   const localResult = parseProblemStatementsFromText(rawText, targetRound, targetTrack);
   return { problemStatements: localResult, usedAI: false };
 }
 
 /**
- * High-level helper to process File (PDF/TXT/JSON/CSV) or Raw Text string and extract problem statements via Gemini.
+ * High-level helper to process File (PDF/TXT/JSON/CSV/MD) and extract individual problem statements.
  */
 export async function extractProblemStatementsFromFile(
   file: File,

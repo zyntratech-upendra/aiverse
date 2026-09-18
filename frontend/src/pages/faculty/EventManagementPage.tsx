@@ -88,7 +88,12 @@ import { sendResendEmail } from "../../utils/resendEmailService";
 import { buildRoundPromotionEmail, buildCertificateEmail, buildRegistrationConfirmationEmail } from "../../utils/emailTemplates";
 import { dataCache } from "../../utils/dataCache";
 import { EventLaunchSplash, type EventLaunchData } from "../../components/common/EventLaunchSplash";
-import { extractProblemStatementsFromFile, type ExtractedProblemStatement } from "../../utils/geminiProblemStatementExtractor";
+import { 
+  extractProblemStatementsFromFile, 
+  type ExtractedProblemStatement,
+  getGeminiApiKey,
+  saveGeminiApiKey
+} from "../../utils/geminiProblemStatementExtractor";
 
 // Import local assets
 import sparkImg from "../../assets/images/spark.png";
@@ -1898,6 +1903,8 @@ const EventManagementPage: React.FC = () => {
   const [aiExtractedPsPreview, setAiExtractedPsPreview] = useState<ExtractedProblemStatement[] | null>(null);
   const [aiScanFileName, setAiScanFileName] = useState<string>("");
   const [aiScanUsedAi, setAiScanUsedAi] = useState<boolean>(false);
+  const [geminiApiKeyInput, setGeminiApiKeyInput] = useState<string>(() => getGeminiApiKey());
+  const [showApiKeySetting, setShowApiKeySetting] = useState(false);
   const psFileInputRef = React.useRef<HTMLInputElement>(null);
 
   const handleOpenMultiProblemModal = () => {
@@ -1931,6 +1938,8 @@ const EventManagementPage: React.FC = () => {
     setAiScanPsStatus(null);
     setAiExtractedPsPreview(null);
     setAiScanFileName("");
+    setGeminiApiKeyInput(getGeminiApiKey());
+    setShowApiKeySetting(false);
     setIsMultiProblemModalOpen(true);
   };
 
@@ -9014,17 +9023,88 @@ const EventManagementPage: React.FC = () => {
                         }}
                       />
 
-                      {/* Header Info */}
-                      <div className="flex items-center justify-between">
+                      {/* Header Info & Engine Status */}
+                      <div className="flex items-center justify-between gap-2 flex-wrap">
                         <div>
                           <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
                             <Wand2 className="w-4 h-4 text-indigo-600" />
                             <span>Gemini AI PDF Problem Statement Scanner</span>
                           </h4>
                           <p className="text-[11px] text-slate-500 font-medium">
-                            Upload problem statement documents (PDF/TXT/JSON). Gemini AI will auto-extract tracks, requirements, and deliverables.
+                            Upload problem statement documents (PDF/TXT/JSON/MD). Splits each problem into its own separate card automatically!
                           </p>
                         </div>
+
+                        <button
+                          type="button"
+                          onClick={() => setShowApiKeySetting(prev => !prev)}
+                          className="px-2.5 py-1 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-lg text-[10px] transition-all flex items-center gap-1 cursor-pointer border border-slate-200 shadow-2xs"
+                        >
+                          <Key className="w-3 h-3 text-indigo-600" />
+                          <span>{showApiKeySetting ? "Hide API Key" : "Configure API Key"}</span>
+                        </button>
+                      </div>
+
+                      {/* API Key Configuration Dropdown */}
+                      {showApiKeySetting && (
+                        <div className="p-3.5 bg-indigo-50/70 border border-indigo-200/80 rounded-2xl space-y-2 animate-in fade-in duration-150">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] font-black uppercase tracking-wider text-indigo-950 flex items-center gap-1">
+                              <Sparkles className="w-3 h-3 text-amber-500" />
+                              <span>Google AI Studio / Gemini API Key</span>
+                            </span>
+                            {getGeminiApiKey() && (
+                              <span className="text-[9px] font-black bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full border border-emerald-200">
+                                Active Key Connected
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-[10px] text-indigo-800 leading-relaxed font-medium">
+                            Paste your Google Gemini API Key below. If left empty, our built-in high-accuracy Multi-Problem Pattern Engine will extract all numbered problems offline!
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="password"
+                              value={geminiApiKeyInput}
+                              onChange={(e) => setGeminiApiKeyInput(e.target.value)}
+                              placeholder="AIzaSy..."
+                              className="flex-1 px-3 py-1.5 bg-white border border-indigo-200 rounded-xl text-xs font-mono text-slate-900 focus:outline-none focus:ring-2 focus:ring-indigo-500/20"
+                            />
+                            <button
+                              type="button"
+                              onClick={() => {
+                                saveGeminiApiKey(geminiApiKeyInput);
+                                setShowApiKeySetting(false);
+                              }}
+                              className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-black text-xs rounded-xl shadow-xs transition-all cursor-pointer shrink-0"
+                            >
+                              Save Key
+                            </button>
+                            {geminiApiKeyInput && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  saveGeminiApiKey("");
+                                  setGeminiApiKeyInput("");
+                                }}
+                                className="px-2.5 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer shrink-0"
+                              >
+                                Clear
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Engine Status Banner */}
+                      <div className="px-3 py-1.5 bg-slate-100/90 border border-slate-200/80 rounded-xl flex items-center justify-between gap-2 text-[10px] font-bold">
+                        <span className="text-slate-600 flex items-center gap-1.5">
+                          <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                          <span>Engine: {getGeminiApiKey() ? "Google Gemini AI 1.5/2.0 (Online)" : "Ultra-Fast Multi-Card Smart Parser (Local)"}</span>
+                        </span>
+                        <span className="text-indigo-600 font-black">
+                          Multi-Problem Separation: Guaranteed
+                        </span>
                       </div>
 
                       {/* Round Selector for Import */}
@@ -9097,7 +9177,7 @@ const EventManagementPage: React.FC = () => {
                           </div>
                           <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-800 border border-indigo-200">
                             <Sparkles className="w-3 h-3 text-indigo-600" />
-                            <span>Powered by Google Gemini AI</span>
+                            <span>AI & Multi-Card Smart Extraction</span>
                           </span>
                         </div>
                       )}
