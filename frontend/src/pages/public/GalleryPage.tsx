@@ -26,7 +26,7 @@ export interface EventPhoto {
   imageUrl: string;
   caption?: string;
   date: string;
-  category: "Workshops" | "Hackathons" | "Symposiums" | "Socials";
+  category: "Workshops" | "Hackathons" | "Technical Events";
   tags?: string[];
   driveLink?: string;
   createdAt?: number;
@@ -35,7 +35,7 @@ export interface EventPhoto {
 export interface EventGallerySection {
   eventKey: string;
   eventTitle: string;
-  category: "Workshops" | "Hackathons" | "Symposiums" | "Socials";
+  category: "Workshops" | "Hackathons" | "Technical Events";
   date: string;
   description?: string;
   driveLink?: string;
@@ -47,16 +47,26 @@ export interface EventGallerySection {
 const normalizeCategory = (cat?: string): EventPhoto["category"] => {
   if (!cat) return "Workshops";
   const c = cat.trim().toLowerCase();
-  if (c === "hackathons" || c === "hackathon") return "Hackathons";
-  if (c === "symposiums" || c === "symposium" || c === "seminars" || c === "seminar" || c === "lectures" || c === "talks") return "Symposiums";
-  if (c === "socials" || c === "social" || c === "community" || c === "meetups" || c === "meetup") return "Socials";
-  if (c === "workshops" || c === "workshop" || c === "bootcamps" || c === "bootcamp" || c === "training") return "Workshops";
-  if (["Workshops", "Hackathons", "Symposiums", "Socials"].includes(cat)) return cat as EventPhoto["category"];
-  return "Workshops";
+  if (c.includes("hackathon")) return "Hackathons";
+  if (c.includes("workshop") || c.includes("bootcamp") || c.includes("training")) return "Workshops";
+  if (
+    c.includes("technical") ||
+    c.includes("symposium") ||
+    c.includes("seminar") ||
+    c.includes("lecture") ||
+    c.includes("talk") ||
+    c.includes("social") ||
+    c.includes("community") ||
+    c.includes("meetup")
+  ) {
+    return "Technical Events";
+  }
+  if (["Workshops", "Hackathons", "Technical Events"].includes(cat)) return cat as EventPhoto["category"];
+  return "Technical Events";
 };
 
 const GalleryPage: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<"All" | "Workshops" | "Hackathons" | "Symposiums" | "Socials">("All");
+  const [activeTab, setActiveTab] = useState<"All" | "Workshops" | "Hackathons" | "Technical Events">("All");
   const [searchQuery, setSearchQuery] = useState("");
   const [photos, setPhotos] = useState<EventPhoto[]>(() => dataCache.get<EventPhoto[]>("public_gallery_photos") || []);
   const [loading, setLoading] = useState<boolean>(() => !dataCache.get<EventPhoto[]>("public_gallery_photos"));
@@ -224,22 +234,19 @@ const GalleryPage: React.FC = () => {
     });
   }, [groupedEvents, activeTab, searchQuery]);
 
-  const tabOptions: Array<"All" | "Workshops" | "Hackathons" | "Symposiums" | "Socials"> = [
+  const tabOptions: Array<"All" | "Workshops" | "Hackathons" | "Technical Events"> = [
     "All",
     "Workshops",
     "Hackathons",
-    "Symposiums",
-    "Socials"
+    "Technical Events"
   ];
 
   const getCategoryStyles = (category: string) => {
     switch (category) {
       case "Hackathons":
         return "bg-rose-50/90 text-rose-700 border-rose-200/80";
-      case "Symposiums":
+      case "Technical Events":
         return "bg-amber-50/90 text-amber-700 border-amber-200/80";
-      case "Socials":
-        return "bg-emerald-50/90 text-emerald-700 border-emerald-200/80";
       default:
         return "bg-blue-50/90 text-blue-700 border-blue-200/80";
     }

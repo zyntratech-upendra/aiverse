@@ -42,7 +42,7 @@ export interface GalleryPhotoItem {
   imageUrl: string;
   coverImage?: string;
   bannerImage?: string;
-  category: "Workshops" | "Hackathons" | "Symposiums" | "Socials";
+  category: "Workshops" | "Hackathons" | "Technical Events";
   date: string;
   status: "Published" | "Draft";
   caption?: string;
@@ -77,8 +77,7 @@ interface ToastMessage {
 const CATEGORY_OPTIONS: Array<GalleryPhotoItem["category"]> = [
   "Workshops",
   "Hackathons",
-  "Symposiums",
-  "Socials"
+  "Technical Events"
 ];
 
 export const GalleryManagementPage: React.FC = () => {
@@ -168,9 +167,8 @@ export const GalleryManagementPage: React.FC = () => {
       const evType = `${ev.type || ""} ${ev.category || ""}`.toLowerCase();
       let matchedCategory: GalleryPhotoItem["category"] = "Workshops";
       if (evType.includes("hackathon")) matchedCategory = "Hackathons";
-      else if (evType.includes("symposium") || evType.includes("seminar") || evType.includes("talk") || evType.includes("conference")) matchedCategory = "Symposiums";
-      else if (evType.includes("social") || evType.includes("meet") || evType.includes("network") || evType.includes("club")) matchedCategory = "Socials";
       else if (evType.includes("workshop") || evType.includes("bootcamp") || evType.includes("training") || evType.includes("quiz")) matchedCategory = "Workshops";
+      else matchedCategory = "Technical Events";
 
       setBatchCategory(matchedCategory);
 
@@ -233,11 +231,20 @@ export const GalleryManagementPage: React.FC = () => {
       return data.coverImage;
     }
     if (data?.coverImage === "galleryCoding" || data?.category === "Hackathons") return galleryCoding;
-    if (data?.coverImage === "gallerySymposium" || data?.category === "Symposiums") return gallerySymposium;
-    if (data?.coverImage === "galleryCoworking" || data?.category === "Socials") return galleryCoworking;
+    if (data?.coverImage === "gallerySymposium" || data?.category === "Technical Events" || data?.category === "Symposiums" || data?.category === "Socials") return gallerySymposium;
+    if (data?.coverImage === "galleryCoworking") return galleryCoworking;
     if (data?.coverImage === "galleryCollab") return galleryCollab;
     if (data?.coverImage === "galleryVr") return galleryVr;
     return galleryLab;
+  };
+
+  // Normalize category helper
+  const normalizeCategory = (cat?: string): GalleryPhotoItem["category"] => {
+    if (!cat) return "Workshops";
+    const c = cat.trim().toLowerCase();
+    if (c.includes("hackathon")) return "Hackathons";
+    if (c.includes("workshop") || c.includes("bootcamp") || c.includes("training") || c.includes("quiz")) return "Workshops";
+    return "Technical Events";
   };
 
   // Load photos from backend
@@ -257,7 +264,7 @@ export const GalleryManagementPage: React.FC = () => {
           imageUrl: photoUrl,
           coverImage: photoUrl,
           bannerImage: photoUrl,
-          category: (raw.category as any) || "Workshops",
+          category: normalizeCategory(raw.category),
           date: raw.date || new Date().toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
           status: (raw.status as any) || "Published",
           caption: raw.caption || raw.description || "",
@@ -711,10 +718,10 @@ export const GalleryManagementPage: React.FC = () => {
     switch (category) {
       case "Hackathons":
         return "bg-rose-50 text-rose-700 border-rose-200/80";
+      case "Technical Events":
       case "Symposiums":
-        return "bg-amber-50 text-amber-700 border-amber-200/80";
       case "Socials":
-        return "bg-emerald-50 text-emerald-700 border-emerald-200/80";
+        return "bg-amber-50 text-amber-700 border-amber-200/80";
       default:
         return "bg-blue-50 text-blue-700 border-blue-200/80";
     }
