@@ -70,6 +70,12 @@ router.post(
       'registrationFee', 'totalFeePaid', 'paymentProofPreview', 'paymentProofFilename',
       'paymentProof', 'transactionId', 'paymentStatus', 'status', 'confirmedAt',
       'sendEmail', 'sendConfirmationEmail', 'createdAt', 'qrCodeData', 'backendId',
+      'currentRound', 'roundStatus', 'promotedToRound', 'promotionMethod', 'promotionScore', 'promotedAt',
+      'attendanceMarked', 'attendanceStatus', 'checkedInAt', 'checkedInBy', 'checkedInRound',
+      'quizScore', 'quizMaxScore', 'quizPercentage', 'juryScore',
+      'submissionStatus', 'submittedAt', 'problemStatement', 'selectedProblemStatementId',
+      'srsFileName', 'srsFileUrl', 'presentationFileName', 'presentationUrl',
+      'keyFeatures', 'githubUrl', 'repoUrl', 'prototypeUrl', 'demoVideoUrl',
       'certificateIssued', 'certificateId', 'certificateType', 'certificateSentAt',
       'certificateTemplateMode', 'certificateNamePosY', 'certificateNameFontSize',
       'certificateNameColor', 'certificateTeamPosY', 'certificateTeamFontSize',
@@ -213,33 +219,54 @@ router.post(
 // PUT /api/registrations/:id - Update registration
 router.put(
   '/:id',
-  requireAdmin,
+  requireAuth,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
     const rawPayload = req.body || {};
-    
-    // Admins can update any field in registration, but we still pick to avoid complete arbitrary pollution
-    const allowedFields = [
-      'eventId', 'eventTitle', 'category', 'isQuiz', 'groupName', 'fullName',
-      'teamLeadName', 'teamLeadEmail', 'teamLeadCollegeEmail', 'teamLeadPersonalEmail',
-      'collegeEmail', 'personalEmail', 'email', 'teamLeadStudentId', 'studentId', 'rollNo',
-      'teamLeadPhone', 'phoneNumber', 'phone', 'collegeName', 'collegePlace', 'teamPassword',
-      'accessGranted', 'loginAccessGranted', 'members', 'teamSize', 'isVishnuStudent',
-      'needsFood', 'foodOption', 'foodPreference', 'isPaidEvent', 'pricingType',
-      'registrationFee', 'totalFeePaid', 'paymentProofPreview', 'paymentProofFilename',
-      'paymentProof', 'transactionId', 'paymentStatus', 'status', 'confirmedAt',
-      'sendEmail', 'sendConfirmationEmail', 'createdAt', 'qrCodeData', 'backendId',
-      'certificateIssued', 'certificateId', 'certificateType', 'certificateSentAt',
-      'certificateTemplateMode', 'certificateNamePosY', 'certificateNameFontSize',
-      'certificateNameColor', 'certificateTeamPosY', 'certificateTeamFontSize',
-      'certificateTeamColor', 'certificateShowTeamName', 'certificateRollPosY',
-      'certificateRollFontSize', 'certificateRollColor', 'certificateShowRollNo',
-      'certificateShowQrCode'
-    ];
-    const payload = pick(rawPayload, allowedFields);
-    payload.updatedAt = Date.now();
+    const { _id, id: bodyId, ...updateData } = rawPayload;
+    updateData.updatedAt = Date.now();
 
-    const updated = await Registration.findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true }).lean();
+    const userRole = (req.user?.role || '').toLowerCase();
+    const isElevated =
+      userRole.includes('admin') ||
+      userRole.includes('faculty') ||
+      userRole.includes('coordinator') ||
+      userRole.includes('advisor') ||
+      userRole.includes('super') ||
+      userRole.includes('organizer');
+
+    // If not elevated, ensure the user owns or belongs to this registration
+    if (!isElevated) {
+      const userEmail = (req.user?.email || '').toLowerCase().trim();
+      const existing = await Registration.findOne({ $or: [{ _id: id }, { id: id }] }).lean();
+      if (!existing) {
+        return res.status(404).json({ success: false, error: 'Registration not found' });
+      }
+      const isLead = [
+        existing.teamLeadEmail,
+        existing.leadEmail,
+        existing.userEmail,
+        existing.email,
+        existing.personalEmail,
+        existing.collegeEmail,
+        existing.teamLeadPersonalEmail,
+        existing.teamLeadCollegeEmail
+      ].some((e) => e && e.toLowerCase().trim() === userEmail);
+
+      const isMember = Array.isArray(existing.members) && existing.members.some((m) => m.email && m.email.toLowerCase().trim() === userEmail);
+      const isRegisteredUser = req.user?.registration_id === id || req.user?.id === existing.userId;
+
+      if (!isLead && !isMember && !isRegisteredUser) {
+        return res.status(403).json({ success: false, error: 'Forbidden: You can only update your own team registration' });
+      }
+    }
+
+    const updated = await Registration.findOneAndUpdate(
+      { $or: [{ _id: id }, { id: id }] },
+      { $set: updateData },
+      { new: true, runValidators: false }
+    ).lean();
+
     if (!updated) {
       return res.status(404).json({ success: false, error: 'Registration not found' });
     }

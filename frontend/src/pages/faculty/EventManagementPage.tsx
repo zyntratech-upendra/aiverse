@@ -2471,7 +2471,7 @@ const EventManagementPage: React.FC = () => {
             ? teamInfo?.juryScore ?? 0 
             : null;
 
-        await updateRegistration(regId, {
+        const updatePayload: Record<string, any> = {
           currentRound: promoteToRound,
           roundStatus: "Qualified",
           promotedToRound: promoteToRound,
@@ -2507,7 +2507,17 @@ const EventManagementPage: React.FC = () => {
           submittedAt: null,
           isPsSaved: false,
           isPsLocked: false
-        });
+        };
+
+        // 1. Primary MongoDB update
+        await updateRegistration(regId, updatePayload);
+
+        // 2. Dual Firestore sync for realtime listeners
+        try {
+          await setDoc(doc(db, "registrations", regId), updatePayload, { merge: true });
+        } catch (e) {
+          console.warn("Firestore sync missed for regId:", regId, e);
+        }
       });
 
       // Handle unselected elimination if checked
@@ -2517,16 +2527,25 @@ const EventManagementPage: React.FC = () => {
           (t) => t.currentTeamRound === promoteFromRound && !validCandidateIds.includes(t.id)
         );
         eliminatePromises = unselectedTeams.map(async (t) => {
-          await updateRegistration(t.id, {
+          const elimPayload = {
             roundStatus: "Eliminated",
             eliminatedInRound: promoteFromRound,
             eliminatedAt: now,
             updatedAt: now
-          });
+          };
+          await updateRegistration(t.id, elimPayload);
+          try {
+            await setDoc(doc(db, "registrations", t.id), elimPayload, { merge: true });
+          } catch (e) {}
         });
       }
 
       await Promise.all([...promotePromises, ...eliminatePromises]);
+
+      // Invalidate participant registration caches to guarantee immediate dashboard reload
+      dataCache.invalidate("participant_reg_");
+      dataCache.invalidate("all_registrations");
+      dataCache.invalidate("event_registrations");
 
       // Dispatch Congratulation & Promotion Emails via Resend to Team Leads
       const targetRoundDef = liveRoundsList.find(r => r.roundNumber === promoteToRound);

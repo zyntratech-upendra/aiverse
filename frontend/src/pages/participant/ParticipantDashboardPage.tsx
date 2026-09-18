@@ -122,7 +122,7 @@ export const ParticipantDashboardPage: React.FC = () => {
     setMembers(regMembers);
 
     // Round & Promotion Data
-    const cRound = targetReg.currentRound || targetReg.promotedToRound || 1;
+    const cRound = Number(targetReg.currentRound || targetReg.promotedToRound || 1);
     setCurrentRound(cRound);
     setRoundStatus(targetReg.roundStatus || (cRound > 1 ? "Qualified" : "Active"));
     if (targetReg.promotionScore !== undefined) setPromotionScore(targetReg.promotionScore);
