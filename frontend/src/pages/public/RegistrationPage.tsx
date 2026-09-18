@@ -893,7 +893,7 @@ const RegistrationPage: React.FC = () => {
                 </span>
                 <span className="text-sm font-black text-slate-800 mt-0.5 block">{leadName}</span>
                 <span className="text-[10px] text-slate-450 font-semibold block mt-0.5">
-                  Roll No: <span className="font-bold text-slate-750">{leadStudentId}</span> • Event: <span className="font-bold text-slate-750">{event.title}</span>
+                  Roll No: <span className="font-bold text-slate-750">{leadStudentId}</span> • Ref ID: <span className="font-mono font-bold text-blue-600">{createdRegId || "Confirmed"}</span> • Event: <span className="font-bold text-slate-750">{event.title}</span>
                 </span>
               </div>
             </div>

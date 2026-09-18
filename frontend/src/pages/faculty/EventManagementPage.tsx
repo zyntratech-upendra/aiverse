@@ -360,6 +360,7 @@ const EventManagementPage: React.FC = () => {
             category: data.category || "WORKSHOPS",
             status: data.status || "Draft",
             currentReg,
+            liveSeats,
             maxReg: data.maxReg || 100,
             image: poster,
             posterPreview: data.posterPreview || (Array.isArray(data.posterImages) && data.posterImages[0]?.preview) || poster,
