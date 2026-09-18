@@ -3248,6 +3248,7 @@ const EventManagementPage: React.FC = () => {
           image: posterImg,
           posterPreview: posterImg,
           posterImages: safePosterImages,
+          whatsGroupLink: formWhatsGroupLink.trim(),
         };
         setEvents(prev => prev.map(e => e.id === editingEventId ? { ...e, ...updatedEvent } : e));
         setEditingEventId(null);
@@ -3270,6 +3271,7 @@ const EventManagementPage: React.FC = () => {
           image: posterImg,
           posterPreview: posterImg,
           posterImages: safePosterImages,
+          whatsGroupLink: formWhatsGroupLink.trim(),
         };
         setEvents(prev => [newEvent, ...prev]);
       }
