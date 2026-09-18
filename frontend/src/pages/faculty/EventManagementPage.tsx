@@ -75,9 +75,12 @@ import {
   QrCode,
   Ticket,
   Mail,
-  Send,
   CheckCircle2,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Wand2,
+  FileUp,
+  AlertCircle,
+  RefreshCw
 } from "lucide-react";
 import DatePicker from "../../components/ui/DatePicker";
 import TimePicker from "../../components/ui/TimePicker";
@@ -86,6 +89,7 @@ import { sendResendEmail } from "../../utils/resendEmailService";
 import { buildRoundPromotionEmail, buildCertificateEmail, buildRegistrationConfirmationEmail } from "../../utils/emailTemplates";
 import { dataCache } from "../../utils/dataCache";
 import { EventLaunchSplash, type EventLaunchData } from "../../components/common/EventLaunchSplash";
+import { extractProblemStatementsFromFile, type ExtractedProblemStatement } from "../../utils/geminiProblemStatementExtractor";
 
 // Import local assets
 import sparkImg from "../../assets/images/spark.png";
@@ -1888,6 +1892,15 @@ const EventManagementPage: React.FC = () => {
   const [savingMultiProblems, setSavingMultiProblems] = useState(false);
   const [problemSuccessMsg, setProblemSuccessMsg] = useState<string | null>(null);
 
+  // Gemini AI PDF Problem Statement Scanner State
+  const [psInputMode, setPsInputMode] = useState<"manual" | "ai_pdf">("manual");
+  const [isAiScanningPs, setIsAiScanningPs] = useState(false);
+  const [aiScanPsStatus, setAiScanPsStatus] = useState<string | null>(null);
+  const [aiExtractedPsPreview, setAiExtractedPsPreview] = useState<ExtractedProblemStatement[] | null>(null);
+  const [aiScanFileName, setAiScanFileName] = useState<string>("");
+  const [aiScanUsedAi, setAiScanUsedAi] = useState<boolean>(false);
+  const psFileInputRef = React.useRef<HTMLInputElement>(null);
+
   const handleOpenMultiProblemModal = () => {
     const existing = eventAccessEvent?.problemStatements || [];
     const currR = eventAccessEvent?.currentRound || 1;
@@ -1914,7 +1927,80 @@ const EventManagementPage: React.FC = () => {
     setProblemRoundFilter("all");
     setPsDescInput("");
     setPsDeliverablesInput("");
+    setPsInputMode("manual");
+    setIsAiScanningPs(false);
+    setAiScanPsStatus(null);
+    setAiExtractedPsPreview(null);
+    setAiScanFileName("");
     setIsMultiProblemModalOpen(true);
+  };
+
+  const handleProcessPsPdfFile = async (file: File) => {
+    if (!file) return;
+    setIsAiScanningPs(true);
+    setAiScanPsStatus("Reading document text layers...");
+    setAiScanFileName(file.name);
+    setAiExtractedPsPreview(null);
+
+    try {
+      setAiScanPsStatus("✨ Google Gemini AI analyzing and extracting problem statements...");
+      const targetR = psRoundInput === "all" ? (eventAccessEvent?.currentRound || 1) : psRoundInput;
+      const targetT = psTrackInput || "General Track";
+
+      const res = await extractProblemStatementsFromFile(file, targetR, targetT);
+
+      if (res.problemStatements && res.problemStatements.length > 0) {
+        setAiExtractedPsPreview(res.problemStatements);
+        setAiScanUsedAi(res.usedAI);
+        setAiScanPsStatus(`✨ Successfully extracted ${res.problemStatements.length} problem statement(s) via ${res.usedAI ? "Google Gemini AI" : "Document Engine"}!`);
+      } else {
+        await showAlert({
+          title: "No Problem Statements Found",
+          message: res.error || "Could not detect distinct problem statements in the uploaded file. Please verify the document text or enter them manually.",
+          type: "warning",
+          icon: "alert"
+        });
+        setAiScanPsStatus(null);
+      }
+    } catch (err: any) {
+      console.error("Error extracting problem statements from PDF:", err);
+      await showAlert({
+        title: "AI Extraction Error",
+        message: err?.message || "Failed to analyze document with Gemini AI. Please check the file and try again.",
+        type: "danger",
+        icon: "alert"
+      });
+      setAiScanPsStatus(null);
+    } finally {
+      setIsAiScanningPs(false);
+    }
+  };
+
+  const handleApplyAiExtractedPs = (mode: "append" | "replace" = "append") => {
+    if (!aiExtractedPsPreview || aiExtractedPsPreview.length === 0) return;
+
+    if (mode === "replace") {
+      setProblemList(aiExtractedPsPreview);
+    } else {
+      setProblemList(prev => {
+        const existingCodes = new Set(prev.map(p => p.code));
+        const newItems = aiExtractedPsPreview.map((item, i) => {
+          let code = item.code;
+          if (existingCodes.has(code)) {
+            code = `PS-0${prev.length + i + 1}`;
+          }
+          return { ...item, code };
+        });
+        return [...prev, ...newItems];
+      });
+    }
+
+    setProblemSuccessMsg(`✨ Successfully added ${aiExtractedPsPreview.length} problem statement(s) from "${aiScanFileName}"!`);
+    setAiExtractedPsPreview(null);
+    setAiScanPsStatus(null);
+    setAiScanFileName("");
+    setPsInputMode("manual");
+    setTimeout(() => setProblemSuccessMsg(null), 5000);
   };
 
   const handleAddOrUpdateProblemItem = (e: React.FormEvent) => {
@@ -8735,18 +8821,39 @@ const EventManagementPage: React.FC = () => {
             <div className="p-6 sm:p-8 lg:p-10 overflow-y-auto flex-1 bg-slate-50/60 pb-24">
               <div className="max-w-7xl mx-auto w-full grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
 
-                {/* Left Column: Form to Add/Edit Item (Span 5) */}
+                {/* Left Column: Form to Add/Edit Item OR Gemini AI PDF Scanner (Span 5) */}
                 <div className="lg:col-span-5 bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/90 shadow-sm space-y-4 text-left">
-                  <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-8 h-8 rounded-xl bg-blue-50 text-[#2563EB] flex items-center justify-center font-bold shadow-2xs">
-                        <Plus className="w-4.5 h-4.5" />
-                      </div>
-                      <h4 className="text-base font-black text-slate-900 tracking-tight">
-                        {editingPsId ? "Edit Problem Statement" : "Add Problem Statement"}
-                      </h4>
+                  {/* Top Mode Switcher Bar */}
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3 gap-2 flex-wrap">
+                    <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-2xl border border-slate-200/80 w-full sm:w-auto">
+                      <button
+                        type="button"
+                        onClick={() => setPsInputMode("manual")}
+                        className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                          psInputMode === "manual"
+                            ? "bg-white text-slate-900 shadow-xs border border-slate-200/60"
+                            : "text-slate-600 hover:text-slate-900"
+                        }`}
+                      >
+                        <Plus className="w-3.5 h-3.5 text-blue-600" />
+                        <span>Manual Builder</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setPsInputMode("ai_pdf")}
+                        className={`flex-1 sm:flex-initial px-3.5 py-1.5 rounded-xl text-xs font-black transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
+                          psInputMode === "ai_pdf"
+                            ? "bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-xs shadow-blue-500/20"
+                            : "text-slate-600 hover:text-blue-600"
+                        }`}
+                      >
+                        <Sparkles className="w-3.5 h-3.5 text-amber-300 animate-pulse" />
+                        <span>✨ AI PDF Import</span>
+                      </button>
                     </div>
-                    {editingPsId && (
+
+                    {editingPsId && psInputMode === "manual" && (
                       <button
                         type="button"
                         onClick={() => {
@@ -8757,108 +8864,371 @@ const EventManagementPage: React.FC = () => {
                           setPsDescInput("");
                           setPsDeliverablesInput("");
                         }}
-                        className="text-xs font-extrabold text-blue-600 hover:text-blue-800 bg-blue-50 px-3 py-1 rounded-xl transition-all"
+                        className="text-xs font-extrabold text-blue-600 hover:text-blue-800 bg-blue-50 px-3 py-1 rounded-xl transition-all ml-auto"
                       >
                         Cancel Edit
                       </button>
                     )}
                   </div>
 
-                  <form onSubmit={handleAddOrUpdateProblemItem} className="space-y-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                      <div className="col-span-1 space-y-1">
-                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Assign to Round</label>
-                        <select
-                          value={psRoundInput}
-                          onChange={(e) => setPsRoundInput(e.target.value)}
-                          className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all cursor-pointer"
+                  {/* ========================================================================= */}
+                  {/* VIEW 1: ✍️ MANUAL FORM BUILDER */}
+                  {/* ========================================================================= */}
+                  {psInputMode === "manual" && (
+                    <div className="space-y-4">
+                      {/* AI Quick Banner */}
+                      <div
+                        onClick={() => setPsInputMode("ai_pdf")}
+                        className="p-3 bg-gradient-to-r from-blue-50 via-indigo-50 to-purple-50 hover:from-blue-100 hover:to-indigo-100 border border-blue-200/80 rounded-2xl cursor-pointer transition-all flex items-center justify-between gap-3 group"
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          <div className="w-7 h-7 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0 shadow-xs group-hover:scale-105 transition-transform">
+                            <Sparkles className="w-4 h-4 text-amber-300" />
+                          </div>
+                          <div className="min-w-0">
+                            <p className="text-xs font-black text-slate-900 leading-tight">
+                              Have a Problem Statement PDF?
+                            </p>
+                            <p className="text-[10px] text-blue-700 font-semibold truncate">
+                              Let Google Gemini AI scan and extract all tracks automatically
+                            </p>
+                          </div>
+                        </div>
+                        <span className="text-[10px] font-black uppercase text-blue-700 bg-white px-2.5 py-1 rounded-xl border border-blue-200 shrink-0 shadow-2xs group-hover:bg-blue-600 group-hover:text-white transition-colors">
+                          Upload PDF →
+                        </span>
+                      </div>
+
+                      <form onSubmit={handleAddOrUpdateProblemItem} className="space-y-3">
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          <div className="col-span-1 space-y-1">
+                            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Assign to Round</label>
+                            <select
+                              value={psRoundInput}
+                              onChange={(e) => setPsRoundInput(e.target.value)}
+                              className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all cursor-pointer"
+                            >
+                              <option value="all">All Rounds (General)</option>
+                              {(() => {
+                                const rounds = eventAccessEvent?.rounds || liveRoundsList || [];
+                                if (rounds.length > 0) {
+                                  return rounds.map((r: any, rIdx: number) => {
+                                    const rNum = Number(r.roundNumber) || rIdx + 1;
+                                    return (
+                                      <option key={rNum} value={rNum}>
+                                        Round {rNum} — {r.name || `Stage ${rNum}`}
+                                      </option>
+                                    );
+                                  });
+                                }
+                                return [1, 2, 3].map(n => (
+                                  <option key={n} value={n}>Round {n}</option>
+                                ));
+                              })()}
+                            </select>
+                          </div>
+                          <div className="col-span-1 space-y-1">
+                            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">PS Code</label>
+                            <input
+                              type="text"
+                              value={psCodeInput}
+                              onChange={(e) => setPsCodeInput(e.target.value)}
+                              placeholder="PS-01"
+                              className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all"
+                              required
+                            />
+                          </div>
+                          <div className="col-span-1 space-y-1">
+                            <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Track / Category</label>
+                            <input
+                              type="text"
+                              value={psTrackInput}
+                              onChange={(e) => setPsTrackInput(e.target.value)}
+                              placeholder="e.g. AI & ML / FinTech"
+                              className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all"
+                              required
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Problem Title</label>
+                          <input
+                            type="text"
+                            value={psTitleInput}
+                            onChange={(e) => setPsTitleInput(e.target.value)}
+                            placeholder="e.g. Smart Campus Resource Optimizer"
+                            className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all"
+                            required
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Detailed Description & Requirements</label>
+                          <textarea
+                            rows={4}
+                            value={psDescInput}
+                            onChange={(e) => setPsDescInput(e.target.value)}
+                            placeholder="Paste or type detailed description, problem statement background, constraints, requirements, and target users..."
+                            className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all leading-relaxed whitespace-pre-wrap min-h-[95px] resize-y"
+                            required
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Expected Deliverables (Optional)</label>
+                          <input
+                            type="text"
+                            value={psDeliverablesInput}
+                            onChange={(e) => setPsDeliverablesInput(e.target.value)}
+                            placeholder="e.g. Working Prototype + SRS Document + Demo Video"
+                            className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all"
+                          />
+                        </div>
+
+                        <button
+                          type="submit"
+                          className="w-full py-3 bg-gradient-to-r from-[#2563EB] to-indigo-600 hover:from-blue-600 hover:to-indigo-700 active:scale-[0.99] text-white font-black text-xs rounded-xl shadow-md shadow-blue-500/20 transition-all cursor-pointer flex items-center justify-center gap-2 mt-1 border border-blue-400/30"
                         >
-                          <option value="all">All Rounds (General)</option>
-                          {(() => {
-                            const rounds = eventAccessEvent?.rounds || liveRoundsList || [];
-                            if (rounds.length > 0) {
-                              return rounds.map((r: any, rIdx: number) => {
-                                const rNum = Number(r.roundNumber) || rIdx + 1;
-                                return (
-                                  <option key={rNum} value={rNum}>
-                                    Round {rNum} — {r.name || `Stage ${rNum}`}
-                                  </option>
-                                );
-                              });
-                            }
-                            return [1, 2, 3].map(n => (
-                              <option key={n} value={n}>Round {n}</option>
-                            ));
-                          })()}
-                        </select>
-                      </div>
-                      <div className="col-span-1 space-y-1">
-                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">PS Code</label>
-                        <input
-                          type="text"
-                          value={psCodeInput}
-                          onChange={(e) => setPsCodeInput(e.target.value)}
-                          placeholder="PS-01"
-                          className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all"
-                          required
-                        />
-                      </div>
-                      <div className="col-span-1 space-y-1">
-                        <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Track / Category</label>
-                        <input
-                          type="text"
-                          value={psTrackInput}
-                          onChange={(e) => setPsTrackInput(e.target.value)}
-                          placeholder="e.g. AI & ML / FinTech"
-                          className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all"
-                          required
-                        />
-                      </div>
+                          <Plus className="w-4 h-4" />
+                          <span>{editingPsId ? "Update Problem Item" : "Add Problem Statement to List"}</span>
+                        </button>
+                      </form>
                     </div>
+                  )}
 
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Problem Title</label>
+                  {/* ========================================================================= */}
+                  {/* VIEW 2: ✨ GEMINI AI PDF / DOCUMENT SCANNER */}
+                  {/* ========================================================================= */}
+                  {psInputMode === "ai_pdf" && (
+                    <div className="space-y-4 text-left">
+                      {/* Hidden File Input */}
                       <input
-                        type="text"
-                        value={psTitleInput}
-                        onChange={(e) => setPsTitleInput(e.target.value)}
-                        placeholder="e.g. Smart Campus Resource Optimizer"
-                        className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all"
-                        required
+                        type="file"
+                        ref={psFileInputRef}
+                        accept=".pdf,.txt,.json,.csv,.md"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleProcessPsPdfFile(file);
+                          e.target.value = "";
+                        }}
                       />
-                    </div>
 
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Detailed Description & Requirements</label>
-                      <textarea
-                        rows={4}
-                        value={psDescInput}
-                        onChange={(e) => setPsDescInput(e.target.value)}
-                        placeholder="Paste or type detailed description, problem statement background, constraints, requirements, and target users..."
-                        className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all leading-relaxed whitespace-pre-wrap min-h-[95px] resize-y"
-                        required
-                      />
-                    </div>
+                      {/* Header Info */}
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                            <Wand2 className="w-4 h-4 text-indigo-600" />
+                            <span>Gemini AI PDF Problem Statement Scanner</span>
+                          </h4>
+                          <p className="text-[11px] text-slate-500 font-medium">
+                            Upload problem statement documents (PDF/TXT/JSON). Gemini AI will auto-extract tracks, requirements, and deliverables.
+                          </p>
+                        </div>
+                      </div>
 
-                    <div className="space-y-1">
-                      <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Expected Deliverables (Optional)</label>
-                      <input
-                        type="text"
-                        value={psDeliverablesInput}
-                        onChange={(e) => setPsDeliverablesInput(e.target.value)}
-                        placeholder="e.g. Working Prototype + SRS Document + Demo Video"
-                        className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all"
-                      />
-                    </div>
+                      {/* Round Selector for Import */}
+                      <div className="grid grid-cols-2 gap-3 p-3.5 bg-slate-50/90 rounded-2xl border border-slate-200/80">
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                            Assign Extracted To
+                          </label>
+                          <select
+                            value={psRoundInput}
+                            onChange={(e) => setPsRoundInput(e.target.value)}
+                            className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-black text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
+                          >
+                            <option value="all">All Rounds (General)</option>
+                            {(() => {
+                              const rounds = eventAccessEvent?.rounds || liveRoundsList || [];
+                              if (rounds.length > 0) {
+                                return rounds.map((r: any, rIdx: number) => {
+                                  const rNum = Number(r.roundNumber) || rIdx + 1;
+                                  return (
+                                    <option key={rNum} value={rNum}>
+                                      Round {rNum} — {r.name || `Stage ${rNum}`}
+                                    </option>
+                                  );
+                                });
+                              }
+                              return [1, 2, 3].map(n => (
+                                <option key={n} value={n}>Round {n}</option>
+                              ));
+                            })()}
+                          </select>
+                        </div>
 
-                    <button
-                      type="submit"
-                      className="w-full py-3 bg-gradient-to-r from-[#2563EB] to-indigo-600 hover:from-blue-600 hover:to-indigo-700 active:scale-[0.99] text-white font-black text-xs rounded-xl shadow-md shadow-blue-500/20 transition-all cursor-pointer flex items-center justify-center gap-2 mt-1 border border-blue-400/30"
-                    >
-                      <Plus className="w-4 h-4" />
-                      <span>{editingPsId ? "Update Problem Item" : "Add Problem Statement to List"}</span>
-                    </button>
-                  </form>
+                        <div className="space-y-1">
+                          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">
+                            Fallback Track
+                          </label>
+                          <input
+                            type="text"
+                            value={psTrackInput}
+                            onChange={(e) => setPsTrackInput(e.target.value)}
+                            placeholder="e.g. AI & ML / General"
+                            className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-xl text-xs font-bold text-slate-900 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Drag & Drop Upload Zone */}
+                      {!isAiScanningPs && !aiExtractedPsPreview && (
+                        <div
+                          onClick={() => psFileInputRef.current?.click()}
+                          onDragOver={(e) => e.preventDefault()}
+                          onDrop={(e) => {
+                            e.preventDefault();
+                            const file = e.dataTransfer.files?.[0];
+                            if (file) handleProcessPsPdfFile(file);
+                          }}
+                          className="border-2 border-dashed border-indigo-200 hover:border-indigo-500 hover:bg-indigo-50/40 bg-slate-50/60 rounded-3xl p-8 text-center cursor-pointer transition-all space-y-3 group"
+                        >
+                          <div className="w-14 h-14 rounded-2xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white flex items-center justify-center mx-auto shadow-md shadow-indigo-500/25 group-hover:scale-105 transition-transform">
+                            <FileUp className="w-7 h-7" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-black text-slate-900">
+                              Click to select or drop Problem Statement PDF here
+                            </p>
+                            <p className="text-[10px] text-slate-500 font-medium mt-0.5">
+                              Supports .pdf, .txt, .json, .csv, .md (multi-page PDF supported)
+                            </p>
+                          </div>
+                          <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-indigo-100 text-indigo-800 border border-indigo-200">
+                            <Sparkles className="w-3 h-3 text-indigo-600" />
+                            <span>Powered by Google Gemini AI</span>
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Scanning Animated Progress Box */}
+                      {isAiScanningPs && (
+                        <div className="p-8 bg-gradient-to-br from-indigo-50 via-blue-50 to-purple-50 rounded-3xl border border-indigo-200 text-center space-y-3 shadow-inner">
+                          <div className="w-12 h-12 rounded-2xl bg-indigo-600 text-white flex items-center justify-center mx-auto shadow-lg shadow-indigo-500/30 animate-spin">
+                            <Loader2 className="w-6 h-6" />
+                          </div>
+                          <div className="space-y-1">
+                            <h5 className="text-xs font-black text-indigo-950 flex items-center justify-center gap-1.5">
+                              <Sparkles className="w-4 h-4 text-amber-500 animate-bounce" />
+                              <span>Gemini AI Analyzing Document...</span>
+                            </h5>
+                            <p className="text-[11px] text-indigo-700 font-semibold">
+                              {aiScanPsStatus || "Parsing problem descriptions, technical tracks, and deliverables..."}
+                            </p>
+                            {aiScanFileName && (
+                              <p className="text-[10px] text-slate-400 font-mono font-medium">
+                                File: {aiScanFileName}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Extracted Preview List & Action Buttons */}
+                      {aiExtractedPsPreview && aiExtractedPsPreview.length > 0 && (
+                        <div className="space-y-4 animate-in fade-in duration-200">
+                          {/* Success Banner */}
+                          <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                              <div>
+                                <p className="text-xs font-black text-emerald-950">
+                                  {aiExtractedPsPreview.length} Problem Statement(s) Ready to Import
+                                </p>
+                                <p className="text-[10px] text-emerald-700 font-medium">
+                                  Extracted from <span className="font-mono font-bold">{aiScanFileName}</span> • {aiScanUsedAi ? "Gemini AI Verified" : "Rule Parsed"}
+                                </p>
+                              </div>
+                            </div>
+
+                            <button
+                              type="button"
+                              onClick={() => psFileInputRef.current?.click()}
+                              className="px-2.5 py-1 text-[10px] font-black text-slate-600 hover:text-slate-900 bg-white rounded-lg border border-slate-200 shadow-2xs cursor-pointer"
+                            >
+                              Re-Scan
+                            </button>
+                          </div>
+
+                          {/* Scrollable Preview of Extracted Statements */}
+                          <div className="max-h-[250px] overflow-y-auto space-y-2.5 pr-1">
+                            {aiExtractedPsPreview.map((item, idx) => (
+                              <div
+                                key={item.id || idx}
+                                className="p-3 bg-slate-50 rounded-2xl border border-slate-200 text-xs space-y-1.5 text-left"
+                              >
+                                <div className="flex items-center justify-between gap-2 flex-wrap">
+                                  <div className="flex items-center gap-1.5">
+                                    <span className="px-2 py-0.5 rounded-lg bg-blue-600 text-white font-mono font-black text-[10px]">
+                                      {item.code}
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded-lg bg-slate-200 text-slate-700 font-extrabold text-[10px]">
+                                      {item.track}
+                                    </span>
+                                    <span className="px-2 py-0.5 rounded-lg bg-indigo-100 text-indigo-800 font-black text-[10px]">
+                                      {item.round === "all" ? "All Rounds" : `Round ${item.round}`}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <h5 className="font-black text-slate-900 text-xs leading-snug">
+                                  {item.title}
+                                </h5>
+
+                                <p className="text-[11px] text-slate-600 font-medium line-clamp-2 leading-relaxed">
+                                  {item.description}
+                                </p>
+
+                                {item.deliverables && (
+                                  <p className="text-[10px] text-indigo-700 font-bold truncate">
+                                    📦 Deliverables: {item.deliverables}
+                                  </p>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+
+                          {/* Action Buttons */}
+                          <div className="space-y-2 pt-1">
+                            <button
+                              type="button"
+                              onClick={() => handleApplyAiExtractedPs("append")}
+                              className="w-full py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 active:scale-95 text-white font-black text-xs rounded-2xl shadow-lg shadow-emerald-500/25 transition-all flex items-center justify-center gap-2 cursor-pointer border border-emerald-400/30"
+                            >
+                              <Check className="w-4 h-4 text-emerald-200" />
+                              <span>+ Add All ({aiExtractedPsPreview.length}) to Problem Statement Roster</span>
+                            </button>
+
+                            <div className="flex items-center gap-2">
+                              {problemList.length > 0 && (
+                                <button
+                                  type="button"
+                                  onClick={() => handleApplyAiExtractedPs("replace")}
+                                  className="flex-1 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 font-bold text-xs rounded-xl border border-amber-200 transition-all cursor-pointer"
+                                >
+                                  Replace Current ({problemList.length}) List
+                                </button>
+                              )}
+
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setAiExtractedPsPreview(null);
+                                  setAiScanFileName("");
+                                  setAiScanPsStatus(null);
+                                }}
+                                className="flex-1 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl transition-all cursor-pointer"
+                              >
+                                Clear Preview
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Right Column: List of Problem Statements (Span 7) */}
