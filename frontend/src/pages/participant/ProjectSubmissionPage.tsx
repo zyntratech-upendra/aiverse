@@ -50,6 +50,8 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
   // Document Upload File States
   const [srsFileName, setSrsFileName] = useState("");
   const [presentationFileName, setPresentationFileName] = useState("");
+  const [srsFileUrl, setSrsFileUrl] = useState("");
+  const [presentationUrl, setPresentationUrl] = useState("");
 
   // Status & Submit States
   const [saving, setSaving] = useState(false);
@@ -70,12 +72,16 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
   const [eventLockedSteps, setEventLockedSteps] = useState<Record<number, boolean>>({});
   const [currentEventId, setCurrentEventId] = useState<string>("");
 
-  // Real-time Protection & Value Refs (Protects active typing against polling overwrites)
+  // Real-time Protection & Value Refs (Protects active typing & uploads against polling overwrites)
   const problemStatementRefVal = useRef(problemStatement);
   const keyFeaturesRefVal = useRef(keyFeatures);
   const githubUrlRefVal = useRef(githubUrl);
   const prototypeUrlRefVal = useRef(prototypeUrl);
   const demoVideoUrlRefVal = useRef(demoVideoUrl);
+  const srsFileNameRefVal = useRef(srsFileName);
+  const presentationFileNameRefVal = useRef(presentationFileName);
+  const srsFileUrlRefVal = useRef(srsFileUrl);
+  const presentationUrlRefVal = useRef(presentationUrl);
   const selectedPsIdRefVal = useRef(selectedPsId);
   const currentTeamRoundRef = useRef(currentTeamRound);
 
@@ -90,6 +96,10 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
   useEffect(() => { githubUrlRefVal.current = githubUrl; }, [githubUrl]);
   useEffect(() => { prototypeUrlRefVal.current = prototypeUrl; }, [prototypeUrl]);
   useEffect(() => { demoVideoUrlRefVal.current = demoVideoUrl; }, [demoVideoUrl]);
+  useEffect(() => { srsFileNameRefVal.current = srsFileName; }, [srsFileName]);
+  useEffect(() => { presentationFileNameRefVal.current = presentationFileName; }, [presentationFileName]);
+  useEffect(() => { srsFileUrlRefVal.current = srsFileUrl; }, [srsFileUrl]);
+  useEffect(() => { presentationUrlRefVal.current = presentationUrl; }, [presentationUrl]);
   useEffect(() => { selectedPsIdRefVal.current = selectedPsId; }, [selectedPsId]);
   useEffect(() => { currentTeamRoundRef.current = currentTeamRound; }, [currentTeamRound]);
 
@@ -103,6 +113,10 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     prototypeUrl: string;
     demoVideoUrl: string;
     selectedPsId: string;
+    srsFileName: string;
+    presentationFileName: string;
+    srsFileUrl: string;
+    presentationUrl: string;
   }>) => {
     try {
       const cRound = currentTeamRoundRef.current || 1;
@@ -159,9 +173,13 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
       const currentGh = githubUrlRefVal.current;
       const currentProto = prototypeUrlRefVal.current;
       const currentVid = demoVideoUrlRefVal.current;
+      const currentSrsName = srsFileNameRefVal.current;
+      const currentPptName = presentationFileNameRefVal.current;
+      const currentSrsUrl = srsFileUrlRefVal.current;
+      const currentPptUrl = presentationUrlRefVal.current;
       const currentPsId = selectedPsIdRefVal.current;
 
-      await updateDoc(regRef, {
+      const updatePayload: Record<string, any> = {
         problemStatement: currentPs,
         keyFeatures: currentKf,
         githubUrl: currentGh,
@@ -178,7 +196,26 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         [`${rP}demoVideoUrl`]: currentVid,
         [`${rP}selectedProblemStatementId`]: currentPsId,
         [`${rP}selectedProblemStatement`]: selectedPsObj,
-      });
+      };
+
+      if (currentSrsName) {
+        updatePayload.srsFileName = currentSrsName;
+        updatePayload[`${rP}srsFileName`] = currentSrsName;
+      }
+      if (currentPptName) {
+        updatePayload.presentationFileName = currentPptName;
+        updatePayload[`${rP}presentationFileName`] = currentPptName;
+      }
+      if (currentSrsUrl) {
+        updatePayload.srsFileUrl = currentSrsUrl;
+        updatePayload[`${rP}srsFileUrl`] = currentSrsUrl;
+      }
+      if (currentPptUrl) {
+        updatePayload.presentationUrl = currentPptUrl;
+        updatePayload[`${rP}presentationUrl`] = currentPptUrl;
+      }
+
+      await updateDoc(regRef, updatePayload);
 
       isDirtyRef.current = false;
       setSaveStatus("saved");
@@ -205,34 +242,60 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     if (!targetRegId) return;
     try {
       const regRef = doc(db, "registrations", targetRegId);
-      const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsId || p.code === selectedPsId) || null;
+      const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsIdRefVal.current || p.code === selectedPsIdRefVal.current) || null;
       // Read currentRound to tag saved data with correct round
       const currentDocSnap = await getDoc(regRef);
-      const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRound || 1) : (currentTeamRound || 1);
+      const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRoundRef.current || 1) : (currentTeamRoundRef.current || 1);
       const rP = `r${currentRoundVal}_`;
-      await updateDoc(regRef, {
-        problemStatement,
-        keyFeatures,
-        githubUrl,
-        prototypeUrl,
-        demoVideoUrl,
-        srsFileName,
-        presentationFileName,
-        selectedProblemStatementId: selectedPsId,
+
+      const curPs = problemStatementRefVal.current;
+      const curKf = keyFeaturesRefVal.current;
+      const curGh = githubUrlRefVal.current;
+      const curProto = prototypeUrlRefVal.current;
+      const curVid = demoVideoUrlRefVal.current;
+      const curSrs = additionalFields.srsFileName !== undefined ? additionalFields.srsFileName : srsFileNameRefVal.current;
+      const curPpt = additionalFields.presentationFileName !== undefined ? additionalFields.presentationFileName : presentationFileNameRefVal.current;
+      const curSrsUrl = additionalFields.srsFileUrl !== undefined ? additionalFields.srsFileUrl : srsFileUrlRefVal.current;
+      const curPptUrl = additionalFields.presentationUrl !== undefined ? additionalFields.presentationUrl : presentationUrlRefVal.current;
+      const curPsId = selectedPsIdRefVal.current;
+
+      const payload: Record<string, any> = {
+        problemStatement: curPs,
+        keyFeatures: curKf,
+        githubUrl: curGh,
+        prototypeUrl: curProto,
+        demoVideoUrl: curVid,
+        srsFileName: curSrs,
+        presentationFileName: curPpt,
+        srsFileUrl: curSrsUrl,
+        presentationUrl: curPptUrl,
+        selectedProblemStatementId: curPsId,
         selectedProblemStatement: selectedPsObj,
         submissionRound: currentRoundVal,
         updatedAt: Date.now(),
-        [`${rP}problemStatement`]: problemStatement,
-        [`${rP}keyFeatures`]: keyFeatures,
-        [`${rP}githubUrl`]: githubUrl,
-        [`${rP}prototypeUrl`]: prototypeUrl,
-        [`${rP}demoVideoUrl`]: demoVideoUrl,
-        [`${rP}srsFileName`]: srsFileName,
-        [`${rP}presentationFileName`]: presentationFileName,
-        [`${rP}selectedProblemStatementId`]: selectedPsId,
+        [`${rP}problemStatement`]: curPs,
+        [`${rP}keyFeatures`]: curKf,
+        [`${rP}githubUrl`]: curGh,
+        [`${rP}prototypeUrl`]: curProto,
+        [`${rP}demoVideoUrl`]: curVid,
+        [`${rP}srsFileName`]: curSrs,
+        [`${rP}presentationFileName`]: curPpt,
+        [`${rP}srsFileUrl`]: curSrsUrl,
+        [`${rP}presentationUrl`]: curPptUrl,
+        [`${rP}selectedProblemStatementId`]: curPsId,
         [`${rP}selectedProblemStatement`]: selectedPsObj,
         ...additionalFields
+      };
+
+      // Also ensure round-prefixed keys exist for any additionalFields like presentationUrl or srsFileUrl
+      Object.keys(additionalFields).forEach(key => {
+        payload[key] = additionalFields[key];
+        if (!key.startsWith("r1_") && !key.startsWith("r2_") && !key.startsWith("r3_") && !key.startsWith("r4_")) {
+          payload[`${rP}${key}`] = additionalFields[key];
+        }
       });
+
+      await updateDoc(regRef, payload);
       isDirtyRef.current = false;
     } catch (err) {
       console.error("Error saving step data to Firestore:", err);
@@ -255,6 +318,8 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     const remoteDemoVideoUrl = data[`${rP}demoVideoUrl`] ?? data[`${rP}videoLink`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? (data.demoVideoUrl || data.videoLink) : undefined);
     const remoteSrsFileName = data[`${rP}srsFileName`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.srsFileName : undefined);
     const remotePresentationFileName = data[`${rP}presentationFileName`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.presentationFileName : undefined);
+    const remoteSrsFileUrl = data[`${rP}srsFileUrl`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.srsFileUrl : undefined);
+    const remotePresentationUrl = data[`${rP}presentationUrl`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.presentationUrl : undefined);
     const remoteSelectedPsId = data[`${rP}selectedProblemStatementId`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.selectedProblemStatementId : undefined);
     const remoteIsPsSaved = Boolean(data[`${rP}isPsSaved`] || (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.isPsSaved : false) || remoteSelectedPsId);
     const remoteIsPsLocked = Boolean(data[`${rP}isPsLocked`] || (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? (data.isPsLocked || data.problemStatementLocked) : false));
@@ -335,8 +400,52 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
       selectedPsIdRefVal.current = localDraft.selectedPsId;
     }
 
-    if (remoteSrsFileName !== undefined) setSrsFileName(remoteSrsFileName);
-    if (remotePresentationFileName !== undefined) setPresentationFileName(remotePresentationFileName);
+    // 7. SRS File Name & URL (Strictly protect local uploads against blank polling values)
+    const hasLocalSrs = Boolean(srsFileNameRefVal.current && srsFileNameRefVal.current.trim() !== "");
+    if (!hasLocalSrs && !userHasEditedLocally) {
+      if (remoteSrsFileName !== undefined && remoteSrsFileName !== "") {
+        setSrsFileName(remoteSrsFileName);
+        srsFileNameRefVal.current = remoteSrsFileName;
+      } else if (localDraft?.srsFileName) {
+        setSrsFileName(localDraft.srsFileName);
+        srsFileNameRefVal.current = localDraft.srsFileName;
+      }
+    } else if (remoteSrsFileName !== undefined && remoteSrsFileName !== "") {
+      setSrsFileName(remoteSrsFileName);
+      srsFileNameRefVal.current = remoteSrsFileName;
+    }
+
+    if (remoteSrsFileUrl) {
+      setSrsFileUrl(remoteSrsFileUrl);
+      srsFileUrlRefVal.current = remoteSrsFileUrl;
+    } else if (localDraft?.srsFileUrl && !srsFileUrlRefVal.current) {
+      setSrsFileUrl(localDraft.srsFileUrl);
+      srsFileUrlRefVal.current = localDraft.srsFileUrl;
+    }
+
+    // 8. Presentation File Name & URL (Strictly protect local uploads against blank polling values)
+    const hasLocalPpt = Boolean(presentationFileNameRefVal.current && presentationFileNameRefVal.current.trim() !== "");
+    if (!hasLocalPpt && !userHasEditedLocally) {
+      if (remotePresentationFileName !== undefined && remotePresentationFileName !== "") {
+        setPresentationFileName(remotePresentationFileName);
+        presentationFileNameRefVal.current = remotePresentationFileName;
+      } else if (localDraft?.presentationFileName) {
+        setPresentationFileName(localDraft.presentationFileName);
+        presentationFileNameRefVal.current = localDraft.presentationFileName;
+      }
+    } else if (remotePresentationFileName !== undefined && remotePresentationFileName !== "") {
+      setPresentationFileName(remotePresentationFileName);
+      presentationFileNameRefVal.current = remotePresentationFileName;
+    }
+
+    if (remotePresentationUrl) {
+      setPresentationUrl(remotePresentationUrl);
+      presentationUrlRefVal.current = remotePresentationUrl;
+    } else if (localDraft?.presentationUrl && !presentationUrlRefVal.current) {
+      setPresentationUrl(localDraft.presentationUrl);
+      presentationUrlRefVal.current = localDraft.presentationUrl;
+    }
+
     if (remoteIsPsSaved) setIsPsSaved(true);
     if (remoteIsPsLocked) setIsPsLocked(true);
     if (remoteSubmissionStatus) setSubmissionStatus(remoteSubmissionStatus);
@@ -770,31 +879,47 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     try {
       if (targetRegId) {
         const regRef = doc(db, "registrations", targetRegId);
-        const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsId || p.code === selectedPsId) || null;
+        const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsIdRefVal.current || p.code === selectedPsIdRefVal.current) || null;
         const currentDocSnap = await getDoc(regRef);
-        const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRound || 1) : (currentTeamRound || 1);
+        const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRoundRef.current || 1) : (currentTeamRoundRef.current || 1);
         const rP = `r${currentRoundVal}_`;
+
+        const curPs = problemStatementRefVal.current;
+        const curKf = keyFeaturesRefVal.current;
+        const curGh = githubUrlRefVal.current;
+        const curProto = prototypeUrlRefVal.current;
+        const curVid = demoVideoUrlRefVal.current;
+        const curSrs = srsFileNameRefVal.current;
+        const curPpt = presentationFileNameRefVal.current;
+        const curSrsUrl = srsFileUrlRefVal.current;
+        const curPptUrl = presentationUrlRefVal.current;
+        const curPsId = selectedPsIdRefVal.current;
+
         await updateDoc(regRef, {
-          problemStatement,
-          keyFeatures,
-          githubUrl,
-          prototypeUrl,
-          demoVideoUrl,
-          srsFileName,
-          presentationFileName,
-          selectedProblemStatementId: selectedPsId,
+          problemStatement: curPs,
+          keyFeatures: curKf,
+          githubUrl: curGh,
+          prototypeUrl: curProto,
+          demoVideoUrl: curVid,
+          srsFileName: curSrs,
+          presentationFileName: curPpt,
+          srsFileUrl: curSrsUrl,
+          presentationUrl: curPptUrl,
+          selectedProblemStatementId: curPsId,
           selectedProblemStatement: selectedPsObj,
           submissionStatus: "Draft",
           submissionRound: currentRoundVal,
           updatedAt: Date.now(),
-          [`${rP}problemStatement`]: problemStatement,
-          [`${rP}keyFeatures`]: keyFeatures,
-          [`${rP}githubUrl`]: githubUrl,
-          [`${rP}prototypeUrl`]: prototypeUrl,
-          [`${rP}demoVideoUrl`]: demoVideoUrl,
-          [`${rP}srsFileName`]: srsFileName,
-          [`${rP}presentationFileName`]: presentationFileName,
-          [`${rP}selectedProblemStatementId`]: selectedPsId,
+          [`${rP}problemStatement`]: curPs,
+          [`${rP}keyFeatures`]: curKf,
+          [`${rP}githubUrl`]: curGh,
+          [`${rP}prototypeUrl`]: curProto,
+          [`${rP}demoVideoUrl`]: curVid,
+          [`${rP}srsFileName`]: curSrs,
+          [`${rP}presentationFileName`]: curPpt,
+          [`${rP}srsFileUrl`]: curSrsUrl,
+          [`${rP}presentationUrl`]: curPptUrl,
+          [`${rP}selectedProblemStatementId`]: curPsId,
           [`${rP}selectedProblemStatement`]: selectedPsObj,
           [`${rP}submissionStatus`]: "Draft",
         });
@@ -822,33 +947,49 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     try {
       if (targetRegId) {
         const regRef = doc(db, "registrations", targetRegId);
-        const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsId || p.code === selectedPsId) || null;
+        const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsIdRefVal.current || p.code === selectedPsIdRefVal.current) || null;
         const currentDocSnap = await getDoc(regRef);
-        const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRound || 1) : (currentTeamRound || 1);
+        const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRoundRef.current || 1) : (currentTeamRoundRef.current || 1);
         const rP = `r${currentRoundVal}_`;
         const now = Date.now();
+
+        const curPs = problemStatementRefVal.current;
+        const curKf = keyFeaturesRefVal.current;
+        const curGh = githubUrlRefVal.current;
+        const curProto = prototypeUrlRefVal.current;
+        const curVid = demoVideoUrlRefVal.current;
+        const curSrs = srsFileNameRefVal.current;
+        const curPpt = presentationFileNameRefVal.current;
+        const curSrsUrl = srsFileUrlRefVal.current;
+        const curPptUrl = presentationUrlRefVal.current;
+        const curPsId = selectedPsIdRefVal.current;
+
         await updateDoc(regRef, {
-          problemStatement,
-          keyFeatures,
-          githubUrl,
-          prototypeUrl,
-          demoVideoUrl,
-          srsFileName,
-          presentationFileName,
-          selectedProblemStatementId: selectedPsId,
+          problemStatement: curPs,
+          keyFeatures: curKf,
+          githubUrl: curGh,
+          prototypeUrl: curProto,
+          demoVideoUrl: curVid,
+          srsFileName: curSrs,
+          presentationFileName: curPpt,
+          srsFileUrl: curSrsUrl,
+          presentationUrl: curPptUrl,
+          selectedProblemStatementId: curPsId,
           selectedProblemStatement: selectedPsObj,
           submissionStatus: "Submitted",
           submissionRound: currentRoundVal,
           submittedAt: now,
           updatedAt: now,
-          [`${rP}problemStatement`]: problemStatement,
-          [`${rP}keyFeatures`]: keyFeatures,
-          [`${rP}githubUrl`]: githubUrl,
-          [`${rP}prototypeUrl`]: prototypeUrl,
-          [`${rP}demoVideoUrl`]: demoVideoUrl,
-          [`${rP}srsFileName`]: srsFileName,
-          [`${rP}presentationFileName`]: presentationFileName,
-          [`${rP}selectedProblemStatementId`]: selectedPsId,
+          [`${rP}problemStatement`]: curPs,
+          [`${rP}keyFeatures`]: curKf,
+          [`${rP}githubUrl`]: curGh,
+          [`${rP}prototypeUrl`]: curProto,
+          [`${rP}demoVideoUrl`]: curVid,
+          [`${rP}srsFileName`]: curSrs,
+          [`${rP}presentationFileName`]: curPpt,
+          [`${rP}srsFileUrl`]: curSrsUrl,
+          [`${rP}presentationUrl`]: curPptUrl,
+          [`${rP}selectedProblemStatementId`]: curPsId,
           [`${rP}selectedProblemStatement`]: selectedPsObj,
           [`${rP}submissionStatus`]: "Submitted",
           [`${rP}submittedAt`]: now,
@@ -879,8 +1020,15 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     }
     if (e.target.files && e.target.files[0]) {
       const fileName = e.target.files[0].name;
+      const fileUrl = `uploaded://${fileName}`;
       setSrsFileName(fileName);
-      await saveStepDataToFirestore({ srsFileName: fileName, srsFileUrl: `uploaded://${fileName}` });
+      setSrsFileUrl(fileUrl);
+      srsFileNameRefVal.current = fileName;
+      srsFileUrlRefVal.current = fileUrl;
+      lastUserEditTimeRef.current = Date.now();
+      isDirtyRef.current = true;
+      persistDraftToStorage({ srsFileName: fileName, srsFileUrl: fileUrl });
+      await saveStepDataToFirestore({ srsFileName: fileName, srsFileUrl: fileUrl });
       setStatusNotice({ type: "success", message: `SRS Document "${fileName}" saved to database!` });
       setTimeout(() => setStatusNotice(null), 3500);
     }
@@ -895,8 +1043,15 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     }
     if (e.target.files && e.target.files[0]) {
       const fileName = e.target.files[0].name;
+      const fileUrl = `uploaded://${fileName}`;
       setPresentationFileName(fileName);
-      await saveStepDataToFirestore({ presentationFileName: fileName, presentationUrl: `uploaded://${fileName}` });
+      setPresentationUrl(fileUrl);
+      presentationFileNameRefVal.current = fileName;
+      presentationUrlRefVal.current = fileUrl;
+      lastUserEditTimeRef.current = Date.now();
+      isDirtyRef.current = true;
+      persistDraftToStorage({ presentationFileName: fileName, presentationUrl: fileUrl });
+      await saveStepDataToFirestore({ presentationFileName: fileName, presentationUrl: fileUrl });
       setStatusNotice({ type: "success", message: `PPT Presentation "${fileName}" saved to database!` });
       setTimeout(() => setStatusNotice(null), 3500);
     }

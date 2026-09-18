@@ -8862,7 +8862,6 @@ const EventManagementPage: React.FC = () => {
                           setPsTitleInput("");
                           setPsTrackInput("");
                           setPsDescInput("");
-                          setPsDeliverablesInput("");
                         }}
                         className="text-xs font-extrabold text-blue-600 hover:text-blue-800 bg-blue-50 px-3 py-1 rounded-xl transition-all ml-auto"
                       >
