@@ -260,7 +260,6 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     const remoteIsPsLocked = Boolean(data[`${rP}isPsLocked`] || (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? (data.isPsLocked || data.problemStatementLocked) : false));
     const remoteSubmissionStatus = data[`${rP}submissionStatus`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.submissionStatus : undefined);
 
-    const now = Date.now();
     const localDraft = isInitialHydration ? getDraftFromStorage(targetRegId || "", regCurrentRound) : null;
     const hasLocalPs = Boolean(problemStatementRefVal.current && problemStatementRefVal.current.trim() !== "");
     const userHasEditedLocally = lastUserEditTimeRef.current > 0 || isDirtyRef.current;
