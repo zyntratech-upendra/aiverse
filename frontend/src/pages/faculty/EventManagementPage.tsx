@@ -304,7 +304,8 @@ const EventManagementPage: React.FC = () => {
         const rawList = Array.isArray(rawEvents) ? rawEvents : (rawEvents?.events || rawEvents?.data || []);
         const regList = Array.isArray(rawRegs) ? rawRegs : (rawRegs?.registrations || rawRegs?.data || []);
 
-        // Build dynamic seat count map per event (team members + lead, or individual)
+        // Build dynamic team count and seat count maps per event
+        const liveTeamCountMap: Record<string, number> = {};
         const liveSeatCountMap: Record<string, number> = {};
         regList.forEach((r: any) => {
           const eid = String(r.eventId || r.event || "").trim();
@@ -313,10 +314,13 @@ const EventManagementPage: React.FC = () => {
           const seatCount = membersLen > 0 ? membersLen + 1 : (Number(r.teamSize) || 1);
 
           if (eid) {
+            liveTeamCountMap[eid] = (liveTeamCountMap[eid] || 0) + 1;
+            liveTeamCountMap[eid.toLowerCase()] = liveTeamCountMap[eid];
             liveSeatCountMap[eid] = (liveSeatCountMap[eid] || 0) + seatCount;
             liveSeatCountMap[eid.toLowerCase()] = liveSeatCountMap[eid];
           }
           if (eTitle) {
+            liveTeamCountMap[eTitle] = (liveTeamCountMap[eTitle] || 0) + 1;
             liveSeatCountMap[eTitle] = (liveSeatCountMap[eTitle] || 0) + seatCount;
           }
         });
@@ -342,9 +346,10 @@ const EventManagementPage: React.FC = () => {
 
           const evId = String(data._id || data.id || "").trim();
           const evTitle = String(data.title || "").trim().toLowerCase();
+          const liveTeams = liveTeamCountMap[evId] || liveTeamCountMap[evId.toLowerCase()] || (evTitle ? liveTeamCountMap[evTitle] : 0) || 0;
           const liveSeats = liveSeatCountMap[evId] || liveSeatCountMap[evId.toLowerCase()] || (evTitle ? liveSeatCountMap[evTitle] : 0) || 0;
-          // Use live seats count from non-deleted registrations when list is available, otherwise backend count
-          const currentReg = Array.isArray(rawRegs) ? liveSeats : (Number(data.currentReg) || 0);
+          // Use live registered team count from active registrations
+          const currentReg = Array.isArray(rawRegs) ? liveTeams : (Number(data.currentReg) || 0);
 
           return {
             ...data,
@@ -4031,7 +4036,12 @@ const EventManagementPage: React.FC = () => {
                                   title={`Click to view all registered teams and individual members for "${event.title}"`}
                                 >
                                   <Users className="h-3.5 w-3.5 group-hover/regBtn:scale-110 transition-transform" />
-                                  <span>{event.currentReg || 0} Registered</span>
+                                  <span>
+                                    {event.category === "HACKATHONS" || event.category === "Hackathon" || (event.maxTeamSize && event.maxTeamSize > 1) || (event.minTeamSize && event.minTeamSize > 1)
+                                      ? `${event.currentReg || 0} ${(event.currentReg || 0) === 1 ? "Team" : "Teams"} Registered`
+                                      : `${event.currentReg || 0} Registered`
+                                    }
+                                  </span>
                                 </button>
                               </td>
                               <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
@@ -6529,7 +6539,12 @@ const EventManagementPage: React.FC = () => {
                           title="Click to view all registered teams and individual members"
                         >
                           <Users className="h-4 w-4 text-[#2563EB]" />
-                          <span>{selectedEventDetails?.currentReg || 0} Registered Seats ➔</span>
+                          <span>
+                            {selectedEventDetails?.category === "HACKATHONS" || selectedEventDetails?.category === "Hackathon" || (selectedEventDetails?.maxTeamSize && selectedEventDetails.maxTeamSize > 1) || (selectedEventDetails?.minTeamSize && selectedEventDetails.minTeamSize > 1)
+                              ? `${selectedEventDetails?.currentReg || 0} ${(selectedEventDetails?.currentReg || 0) === 1 ? "Registered Team" : "Registered Teams"} ➔`
+                              : `${selectedEventDetails?.currentReg || 0} Registered ➔`
+                            }
+                          </span>
                         </button>
                       </div>
 

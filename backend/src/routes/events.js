@@ -7,30 +7,17 @@ const { optionalAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { pick } = require('../utils/sanitize');
 
-// Helper to compute registration counts for events (only counting active, non-deleted registrations)
+// Helper to compute registration counts for events (counting active teams/registrations)
 async function getRegistrationCountsMap() {
   try {
     const regCounts = await Registration.aggregate([
-      {
-        $project: {
-          eventId: 1,
-          eventTitle: 1,
-          seatCount: {
-            $cond: {
-              if: { $and: [{ $isArray: '$members' }, { $gt: [{ $size: '$members' }, 0] }] },
-              then: { $add: [{ $size: '$members' }, 1] },
-              else: { $ifNull: ['$teamSize', 1] }
-            }
-          }
-        }
-      },
       {
         $group: {
           _id: {
             eventId: '$eventId',
             eventTitle: { $toLower: { $trim: { input: { $ifNull: ['$eventTitle', ''] } } } }
           },
-          totalSeats: { $sum: '$seatCount' }
+          totalTeams: { $sum: 1 }
         }
       }
     ]);
@@ -40,10 +27,10 @@ async function getRegistrationCountsMap() {
       const eid = r._id?.eventId ? String(r._id.eventId).trim() : '';
       const etitle = r._id?.eventTitle ? String(r._id.eventTitle).trim().toLowerCase() : '';
       if (eid) {
-        idMap[eid] = (idMap[eid] || 0) + r.totalSeats;
+        idMap[eid] = (idMap[eid] || 0) + r.totalTeams;
       }
       if (etitle) {
-        titleMap[etitle] = (titleMap[etitle] || 0) + r.totalSeats;
+        titleMap[etitle] = (titleMap[etitle] || 0) + r.totalTeams;
       }
     });
     return { idMap, titleMap };
