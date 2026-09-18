@@ -20,7 +20,9 @@ import {
   Eye,
   X,
   Receipt,
-  ZoomIn
+  ZoomIn,
+  MessageCircle,
+  Copy
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
@@ -60,6 +62,11 @@ interface EventData {
   regDeadlineTime?: string;
   registrationDeadline?: string;
   registrationDeadlineTime?: string;
+  whatsGroupLink?: string;
+  whatsappGroupLink?: string;
+  whatsappGroupUrl?: string;
+  whatsappLink?: string;
+  whatsappGroup?: string;
 }
 
 const RegistrationPage: React.FC = () => {
@@ -93,6 +100,24 @@ const RegistrationPage: React.FC = () => {
   const [transactionId, setTransactionId] = useState("");
   const [showExampleProofModal, setShowExampleProofModal] = useState(false);
   const paymentProofFileInputRef = useRef<HTMLInputElement>(null);
+
+  const [copiedWhatsAppLink, setCopiedWhatsAppLink] = useState(false);
+
+  const rawWhatsAppLink =
+    event?.whatsGroupLink ||
+    (event as any)?.whatsappGroupLink ||
+    (event as any)?.whatsappGroupUrl ||
+    (event as any)?.whatsappLink ||
+    (event as any)?.whatsappGroup ||
+    "";
+  const displayWhatsAppUrl = rawWhatsAppLink.trim();
+
+  const handleCopyWhatsAppLink = () => {
+    if (!displayWhatsAppUrl) return;
+    navigator.clipboard.writeText(displayWhatsAppUrl);
+    setCopiedWhatsAppLink(true);
+    setTimeout(() => setCopiedWhatsAppLink(false), 2500);
+  };
 
   const isQuiz = Boolean(
     event?.category === "QUIZ" ||
@@ -270,6 +295,7 @@ const RegistrationPage: React.FC = () => {
               regDeadlineTime: backendEvent.regDeadlineTime || backendEvent.registrationDeadlineTime,
               registrationDeadline: backendEvent.registrationDeadline || backendEvent.regDeadline,
               registrationDeadlineTime: backendEvent.registrationDeadlineTime || backendEvent.regDeadlineTime,
+              whatsGroupLink: backendEvent.whatsGroupLink || backendEvent.whatsappGroupLink || backendEvent.whatsappGroupUrl || backendEvent.whatsappLink || backendEvent.whatsappGroup || "",
             });
 
             const initialTeammatesCount = Math.max(0, minT - 1);
@@ -336,6 +362,7 @@ const RegistrationPage: React.FC = () => {
             regDeadlineTime: data.regDeadlineTime || data.registrationDeadlineTime,
             registrationDeadline: data.registrationDeadline || data.regDeadline,
             registrationDeadlineTime: data.registrationDeadlineTime || data.regDeadlineTime,
+            whatsGroupLink: data.whatsGroupLink || data.whatsappGroupLink || data.whatsappGroupUrl || data.whatsappLink || data.whatsappGroup || "",
           });
 
           // Initialize members array to satisfy minTeamSize (excluding lead)
@@ -895,6 +922,75 @@ const RegistrationPage: React.FC = () => {
                 <span className="text-[10px] text-slate-450 font-semibold block mt-0.5">
                   Roll No: <span className="font-bold text-slate-750">{leadStudentId}</span> • Ref ID: <span className="font-mono font-bold text-blue-600">{createdRegId || "Confirmed"}</span> • Event: <span className="font-bold text-slate-750">{event.title}</span>
                 </span>
+              </div>
+            </div>
+
+            {/* ================= WHATSAPP GROUP COMMUNITY JOIN CARD ================= */}
+            <div className="rounded-3xl bg-gradient-to-br from-emerald-500/10 via-teal-500/5 to-emerald-600/10 border-2 border-emerald-500/30 p-5 sm:p-6 shadow-lg shadow-emerald-950/5 relative overflow-hidden text-left">
+              {/* Decorative ambient lighting */}
+              <div className="absolute -right-12 -top-12 w-36 h-36 bg-emerald-400/20 rounded-full blur-2xl pointer-events-none" />
+              <div className="absolute -left-12 -bottom-12 w-36 h-36 bg-teal-400/20 rounded-full blur-2xl pointer-events-none" />
+
+              <div className="relative z-10 flex flex-col gap-4">
+                <div className="flex items-start sm:items-center gap-3.5">
+                  {/* Official WhatsApp Badge Icon */}
+                  <div className="w-12 h-12 sm:w-13 sm:h-13 rounded-2xl bg-[#25D366] text-white flex items-center justify-center shrink-0 shadow-md shadow-emerald-600/30 ring-4 ring-emerald-100">
+                    <MessageCircle className="w-6 h-6 sm:w-7 sm:h-7 fill-current" />
+                  </div>
+
+                  <div className="space-y-1">
+                    <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[10px] font-black uppercase tracking-wider">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-ping"></span>
+                      Official WhatsApp Community
+                    </div>
+                    <h3 className="text-base sm:text-lg font-black text-slate-900 tracking-tight">
+                      Join the Official Event WhatsApp Group
+                    </h3>
+                    <p className="text-xs text-slate-600 font-medium leading-relaxed">
+                      Connect directly with coordinators and registered participants. Receive live round announcements, venue schedules, problem statements, and real-time updates.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Action Buttons */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 pt-1">
+                  {displayWhatsAppUrl ? (
+                    <>
+                      <a
+                        href={displayWhatsAppUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="flex-1 px-5 py-3 rounded-2xl bg-[#25D366] hover:bg-[#20bd5a] text-white font-black text-xs inline-flex items-center justify-center gap-2 transition-all shadow-md shadow-emerald-500/25 active:scale-95 cursor-pointer hover:shadow-lg text-center"
+                      >
+                        <MessageCircle className="w-4 h-4 fill-current shrink-0" />
+                        <span>Join WhatsApp Group ➔</span>
+                      </a>
+
+                      <button
+                        type="button"
+                        onClick={handleCopyWhatsAppLink}
+                        className="px-4 py-3 rounded-2xl bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold text-xs inline-flex items-center justify-center gap-1.5 transition-all shadow-2xs cursor-pointer active:scale-95"
+                        title="Copy WhatsApp Group invite link"
+                      >
+                        {copiedWhatsAppLink ? (
+                          <>
+                            <Check className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span className="text-emerald-700 font-black">Copied!</span>
+                          </>
+                        ) : (
+                          <>
+                            <Copy className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                            <span>Copy Link</span>
+                          </>
+                        )}
+                      </button>
+                    </>
+                  ) : (
+                    <div className="w-full px-4 py-2.5 rounded-2xl bg-emerald-50/90 border border-emerald-200 text-emerald-900 text-xs font-bold text-center">
+                      <span>📢 Official WhatsApp group invite link will be emailed to your personal email by coordinators before event kick-off</span>
+                    </div>
+                  )}
+                </div>
               </div>
             </div>
 

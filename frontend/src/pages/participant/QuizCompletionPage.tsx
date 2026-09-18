@@ -108,8 +108,6 @@ export const QuizCompletionPage: React.FC = () => {
       return false;
     }) as any;
 
-  const isOverridden = !!overriddenData || !!submission?.isScoreOverridden;
-
   const maxScore = overriddenData?.maxScore ?? (submission?.maxScore || quiz?.totalMarks || (quiz?.questions?.length ? quiz.questions.length * 2 : 50));
   const score = overriddenData?.score ?? (submission?.score ?? 0);
   const percentage = overriddenData?.percentage ?? (submission?.percentage !== undefined ? submission.percentage : (maxScore > 0 ? Math.round((score / maxScore) * 100) : 0));

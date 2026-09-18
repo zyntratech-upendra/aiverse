@@ -105,13 +105,22 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     selectedPsId: string;
   }>) => {
     try {
-      const key = getDraftStorageKey(targetRegId || "", currentTeamRoundRef.current);
-      const existing = JSON.parse(localStorage.getItem(key) || "{}");
-      localStorage.setItem(key, JSON.stringify({
-        ...existing,
-        ...updates,
-        savedAt: Date.now()
-      }));
+      const cRound = currentTeamRoundRef.current || 1;
+      const keys = [
+        getDraftStorageKey(targetRegId || "", cRound),
+        getDraftStorageKey("anon", cRound),
+        getDraftStorageKey("", cRound)
+      ];
+      keys.forEach(key => {
+        try {
+          const existing = JSON.parse(localStorage.getItem(key) || "{}");
+          localStorage.setItem(key, JSON.stringify({
+            ...existing,
+            ...updates,
+            savedAt: Date.now()
+          }));
+        } catch (e) {}
+      });
     } catch (err) {
       // Ignore localStorage write errors
     }
@@ -119,9 +128,18 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
 
   const getDraftFromStorage = (regId: string, round: number) => {
     try {
-      const key = getDraftStorageKey(regId || "", round || 1);
-      const item = localStorage.getItem(key);
-      if (item) return JSON.parse(item);
+      const keys = [
+        getDraftStorageKey(regId || "", round || 1),
+        getDraftStorageKey("anon", round || 1),
+        getDraftStorageKey("", round || 1)
+      ];
+      for (const key of keys) {
+        const item = localStorage.getItem(key);
+        if (item) {
+          const parsed = JSON.parse(item);
+          if (parsed && typeof parsed === "object") return parsed;
+        }
+      }
     } catch (err) {}
     return null;
   };
@@ -243,54 +261,39 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     const remoteSubmissionStatus = data[`${rP}submissionStatus`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.submissionStatus : undefined);
 
     const now = Date.now();
-    const isActivelyEditing = isDirtyRef.current || (now - lastUserEditTimeRef.current < 45000);
     const localDraft = isInitialHydration ? getDraftFromStorage(targetRegId || "", regCurrentRound) : null;
+    const hasLocalPs = Boolean(problemStatementRefVal.current && problemStatementRefVal.current.trim() !== "");
+    const userHasEditedLocally = lastUserEditTimeRef.current > 0 || isDirtyRef.current;
 
-    // 1. Problem Statement / Ideation
-    if (isInitialHydration || !isHydratedRef.current) {
+    // 1. Problem Statement / Ideation (Strictly protect local user edits)
+    if (!hasLocalPs && !userHasEditedLocally) {
       if (remoteProblemStatement !== undefined && remoteProblemStatement !== "") {
         setProblemStatement(remoteProblemStatement);
         problemStatementRefVal.current = remoteProblemStatement;
       } else if (localDraft?.problemStatement) {
         setProblemStatement(localDraft.problemStatement);
         problemStatementRefVal.current = localDraft.problemStatement;
-      } else if (remoteProblemStatement !== undefined) {
-        setProblemStatement(remoteProblemStatement);
-        problemStatementRefVal.current = remoteProblemStatement;
       }
-    } else {
-      // During background polling: NEVER wipe local content if remote is empty or user is typing!
-      if (!isActivelyEditing && remoteProblemStatement !== undefined && remoteProblemStatement !== "") {
-        if (remoteProblemStatement !== problemStatementRefVal.current) {
-          setProblemStatement(remoteProblemStatement);
-          problemStatementRefVal.current = remoteProblemStatement;
-        }
-      }
+    } else if (isInitialHydration && !hasLocalPs && localDraft?.problemStatement) {
+      setProblemStatement(localDraft.problemStatement);
+      problemStatementRefVal.current = localDraft.problemStatement;
     }
 
     // 2. Key Features
-    if (isInitialHydration || !isHydratedRef.current) {
+    const hasLocalKf = Boolean(keyFeaturesRefVal.current && keyFeaturesRefVal.current.trim() !== "");
+    if (!hasLocalKf && !userHasEditedLocally) {
       if (remoteKeyFeatures !== undefined && remoteKeyFeatures !== "") {
         setKeyFeatures(remoteKeyFeatures);
         keyFeaturesRefVal.current = remoteKeyFeatures;
       } else if (localDraft?.keyFeatures) {
         setKeyFeatures(localDraft.keyFeatures);
         keyFeaturesRefVal.current = localDraft.keyFeatures;
-      } else if (remoteKeyFeatures !== undefined) {
-        setKeyFeatures(remoteKeyFeatures);
-        keyFeaturesRefVal.current = remoteKeyFeatures;
-      }
-    } else {
-      if (!isActivelyEditing && remoteKeyFeatures !== undefined && remoteKeyFeatures !== "") {
-        if (remoteKeyFeatures !== keyFeaturesRefVal.current) {
-          setKeyFeatures(remoteKeyFeatures);
-          keyFeaturesRefVal.current = remoteKeyFeatures;
-        }
       }
     }
 
     // 3. GitHub URL
-    if (isInitialHydration || !isHydratedRef.current) {
+    const hasLocalGh = Boolean(githubUrlRefVal.current && githubUrlRefVal.current.trim() !== "");
+    if (!hasLocalGh && !userHasEditedLocally) {
       if (remoteGithubUrl !== undefined && remoteGithubUrl !== "") {
         setGithubUrl(remoteGithubUrl);
         githubUrlRefVal.current = remoteGithubUrl;
@@ -298,17 +301,11 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         setGithubUrl(localDraft.githubUrl);
         githubUrlRefVal.current = localDraft.githubUrl;
       }
-    } else {
-      if (!isActivelyEditing && remoteGithubUrl !== undefined && remoteGithubUrl !== "") {
-        if (remoteGithubUrl !== githubUrlRefVal.current) {
-          setGithubUrl(remoteGithubUrl);
-          githubUrlRefVal.current = remoteGithubUrl;
-        }
-      }
     }
 
     // 4. Prototype URL
-    if (isInitialHydration || !isHydratedRef.current) {
+    const hasLocalProto = Boolean(prototypeUrlRefVal.current && prototypeUrlRefVal.current.trim() !== "");
+    if (!hasLocalProto && !userHasEditedLocally) {
       if (remotePrototypeUrl !== undefined && remotePrototypeUrl !== "") {
         setPrototypeUrl(remotePrototypeUrl);
         prototypeUrlRefVal.current = remotePrototypeUrl;
@@ -316,17 +313,11 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         setPrototypeUrl(localDraft.prototypeUrl);
         prototypeUrlRefVal.current = localDraft.prototypeUrl;
       }
-    } else {
-      if (!isActivelyEditing && remotePrototypeUrl !== undefined && remotePrototypeUrl !== "") {
-        if (remotePrototypeUrl !== prototypeUrlRefVal.current) {
-          setPrototypeUrl(remotePrototypeUrl);
-          prototypeUrlRefVal.current = remotePrototypeUrl;
-        }
-      }
     }
 
     // 5. Demo Video URL
-    if (isInitialHydration || !isHydratedRef.current) {
+    const hasLocalVid = Boolean(demoVideoUrlRefVal.current && demoVideoUrlRefVal.current.trim() !== "");
+    if (!hasLocalVid && !userHasEditedLocally) {
       if (remoteDemoVideoUrl !== undefined && remoteDemoVideoUrl !== "") {
         setDemoVideoUrl(remoteDemoVideoUrl);
         demoVideoUrlRefVal.current = remoteDemoVideoUrl;
@@ -334,22 +325,13 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         setDemoVideoUrl(localDraft.demoVideoUrl);
         demoVideoUrlRefVal.current = localDraft.demoVideoUrl;
       }
-    } else {
-      if (!isActivelyEditing && remoteDemoVideoUrl !== undefined && remoteDemoVideoUrl !== "") {
-        if (remoteDemoVideoUrl !== demoVideoUrlRefVal.current) {
-          setDemoVideoUrl(remoteDemoVideoUrl);
-          demoVideoUrlRefVal.current = remoteDemoVideoUrl;
-        }
-      }
     }
 
     // 6. Selected PS ID & Lock States
-    if (remoteSelectedPsId !== undefined) {
-      if (isInitialHydration || !isHydratedRef.current || !isActivelyEditing) {
-        setSelectedPsId(remoteSelectedPsId);
-        selectedPsIdRefVal.current = remoteSelectedPsId;
-      }
-    } else if ((isInitialHydration || !isHydratedRef.current) && localDraft?.selectedPsId) {
+    if (remoteSelectedPsId !== undefined && remoteSelectedPsId !== "") {
+      setSelectedPsId(remoteSelectedPsId);
+      selectedPsIdRefVal.current = remoteSelectedPsId;
+    } else if (!selectedPsIdRefVal.current && localDraft?.selectedPsId) {
       setSelectedPsId(localDraft.selectedPsId);
       selectedPsIdRefVal.current = localDraft.selectedPsId;
     }
@@ -510,32 +492,41 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
   // Form Change Handlers with real-time auto-persistence
   const handleProblemStatementChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (isPsLocked) return;
-    let val = e.target.value;
-    const words = val.trim() ? val.trim().split(/\s+/) : [];
-    if (words.length > 150) {
-      // Find character index where 150th word ends to preserve newlines and punctuation
-      let count = 0;
-      let cutIndex = val.length;
-      const regex = /\S+/g;
-      let match;
-      while ((match = regex.exec(val)) !== null) {
-        count++;
-        if (count === 150) {
-          cutIndex = regex.lastIndex;
-          break;
+    const val = e.target.value;
+    isDirtyRef.current = true;
+    lastUserEditTimeRef.current = Date.now();
+
+    let finalVal = val;
+    const trimmed = val.trim();
+    if (trimmed) {
+      const words = trimmed.split(/\s+/);
+      if (words.length > 150) {
+        // Enforce 150 words cap by finding boundary of 150th word
+        let wordCount = 0;
+        let cutIndex = val.length;
+        const regex = /\S+/g;
+        while (regex.exec(val) !== null) {
+          wordCount++;
+          if (wordCount === 150) {
+            cutIndex = regex.lastIndex;
+            break;
+          }
         }
+        finalVal = val.substring(0, cutIndex);
       }
-      val = val.substring(0, cutIndex);
     }
-    setProblemStatement(val);
-    problemStatementRefVal.current = val;
-    persistDraftToStorage({ problemStatement: val });
+
+    setProblemStatement(finalVal);
+    problemStatementRefVal.current = finalVal;
+    persistDraftToStorage({ problemStatement: finalVal });
     scheduleAutoSave();
   };
 
   const handleKeyFeaturesChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
     if (isStepLocked(4)) return;
     const val = e.target.value;
+    isDirtyRef.current = true;
+    lastUserEditTimeRef.current = Date.now();
     setKeyFeatures(val);
     keyFeaturesRefVal.current = val;
     persistDraftToStorage({ keyFeatures: val });
@@ -545,6 +536,8 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
   const handleGithubUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (isStepLocked(5)) return;
     const val = e.target.value;
+    isDirtyRef.current = true;
+    lastUserEditTimeRef.current = Date.now();
     setGithubUrl(val);
     githubUrlRefVal.current = val;
     persistDraftToStorage({ githubUrl: val });
@@ -554,6 +547,8 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
   const handlePrototypeUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (isStepLocked(6)) return;
     const val = e.target.value;
+    isDirtyRef.current = true;
+    lastUserEditTimeRef.current = Date.now();
     setPrototypeUrl(val);
     prototypeUrlRefVal.current = val;
     persistDraftToStorage({ prototypeUrl: val });
@@ -563,6 +558,8 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
   const handleDemoVideoUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (isStepLocked(isIdeationRound ? 2 : 6)) return;
     const val = e.target.value;
+    isDirtyRef.current = true;
+    lastUserEditTimeRef.current = Date.now();
     setDemoVideoUrl(val);
     demoVideoUrlRefVal.current = val;
     persistDraftToStorage({ demoVideoUrl: val });

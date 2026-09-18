@@ -81,7 +81,6 @@ export const ParticipantDashboardPage: React.FC = () => {
   const [certificateIssued, setCertificateIssued] = useState<boolean>(false);
   const [certificateId, setCertificateId] = useState<string>("");
   const [certificateType, setCertificateType] = useState<string>("");
-  const [certificateIssuedAt, setCertificateIssuedAt] = useState<number | null>(null);
 
   // Team review confirmed state
   const [teamReviewConfirmed, setTeamReviewConfirmed] = useState(false);
@@ -180,9 +179,6 @@ export const ParticipantDashboardPage: React.FC = () => {
       setCertificateIssued(true);
       setCertificateId(targetReg.certificateId || `CERT-${(targetReg.id || "AI").substring(0, 8).toUpperCase()}`);
       setCertificateType(targetReg.certificateType || "Certificate of Participation");
-      if (targetReg.certificateSentAt) {
-        setCertificateIssuedAt(targetReg.certificateSentAt);
-      }
     }
   };
 
