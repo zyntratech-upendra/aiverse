@@ -39,14 +39,17 @@ interface CertificateData {
   // Template customization options
   templateMode?: "custom" | "builtin";
   customTemplateUrl?: string;
+  namePosX?: number;
   namePosY?: number;
   nameFontSize?: number;
   nameColor?: string;
   showTeamName?: boolean;
+  teamPosX?: number;
   teamPosY?: number;
   teamFontSize?: number;
   teamColor?: string;
   showRollNo?: boolean;
+  rollPosX?: number;
   rollPosY?: number;
   rollFontSize?: number;
   rollColor?: string;
@@ -98,16 +101,19 @@ const CertificateViewPage: React.FC = () => {
         // Custom template layout params from URL
         const qMode = (searchParams.get("mode") as "custom" | "builtin") || undefined;
         const qTemplateUrl = searchParams.get("templateUrl") || undefined;
+        const qNameX = searchParams.get("nameX") ? Number(searchParams.get("nameX")) : (searchParams.get("namePosX") ? Number(searchParams.get("namePosX")) : undefined);
         const qNameY = searchParams.get("nameY") ? Number(searchParams.get("nameY")) : undefined;
         const qNameSize = searchParams.get("nameSize") ? Number(searchParams.get("nameSize")) : undefined;
         const qNameColor = searchParams.get("nameColor") || undefined;
 
         const qShowTeam = searchParams.get("showTeam") !== null ? searchParams.get("showTeam") === "true" : undefined;
+        const qTeamX = searchParams.get("teamX") ? Number(searchParams.get("teamX")) : (searchParams.get("teamPosX") ? Number(searchParams.get("teamPosX")) : undefined);
         const qTeamY = searchParams.get("teamY") ? Number(searchParams.get("teamY")) : undefined;
         const qTeamSize = searchParams.get("teamSize") ? Number(searchParams.get("teamSize")) : undefined;
         const qTeamColor = searchParams.get("teamColor") || undefined;
 
         const qShowRoll = searchParams.get("showRoll") !== null ? searchParams.get("showRoll") === "true" : undefined;
+        const qRollX = searchParams.get("rollX") ? Number(searchParams.get("rollX")) : (searchParams.get("rollPosX") ? Number(searchParams.get("rollPosX")) : undefined);
         const qRollY = searchParams.get("rollY") ? Number(searchParams.get("rollY")) : undefined;
         const qRollSize = searchParams.get("rollSize") ? Number(searchParams.get("rollSize")) : undefined;
         const qRollColor = searchParams.get("rollColor") || undefined;
@@ -235,14 +241,17 @@ const CertificateViewPage: React.FC = () => {
             isValid: true,
             templateMode: qMode || eventCustomCfg?.templateMode || (resolvedTemplateUrl ? "custom" : "builtin"),
             customTemplateUrl: resolvedTemplateUrl || eventCustomCfg?.customTemplateUrl,
+            namePosX: qNameX ?? eventCustomCfg?.namePosX ?? 50,
             namePosY: qNameY ?? eventCustomCfg?.namePosY ?? 38,
             nameFontSize: qNameSize ?? eventCustomCfg?.nameFontSize ?? 64,
             nameColor: qNameColor || eventCustomCfg?.nameColor || "#1E3A8A",
             showTeamName: qShowTeam ?? eventCustomCfg?.showTeamName ?? true,
+            teamPosX: qTeamX ?? eventCustomCfg?.teamPosX ?? 50,
             teamPosY: qTeamY ?? eventCustomCfg?.teamPosY ?? 53,
             teamFontSize: qTeamSize ?? eventCustomCfg?.teamFontSize ?? 32,
             teamColor: qTeamColor || eventCustomCfg?.teamColor || "#1E3A8A",
             showRollNo: qShowRoll ?? eventCustomCfg?.showRollNo ?? true,
+            rollPosX: qRollX ?? eventCustomCfg?.rollPosX ?? 50,
             rollPosY: qRollY ?? eventCustomCfg?.rollPosY ?? 45,
             rollFontSize: qRollSize ?? eventCustomCfg?.rollFontSize ?? 20,
             rollColor: qRollColor || eventCustomCfg?.rollColor || "#475569",
@@ -308,14 +317,17 @@ const CertificateViewPage: React.FC = () => {
             isValid: true,
             templateMode: found.certificateTemplateMode || eventCustomCfg?.templateMode || qMode || (eventCustomCfg?.customTemplateUrl || qTemplateUrl ? "custom" : "builtin"),
             customTemplateUrl: eventCustomCfg?.customTemplateUrl || qTemplateUrl,
+            namePosX: found.certificateNamePosX ?? eventCustomCfg?.namePosX ?? qNameX ?? 50,
             namePosY: found.certificateNamePosY ?? eventCustomCfg?.namePosY ?? qNameY ?? 38,
             nameFontSize: found.certificateNameFontSize ?? eventCustomCfg?.nameFontSize ?? qNameSize ?? 64,
             nameColor: found.certificateNameColor || eventCustomCfg?.nameColor || qNameColor || "#1E3A8A",
             showTeamName: found.certificateShowTeamName ?? eventCustomCfg?.showTeamName ?? qShowTeam ?? true,
+            teamPosX: found.certificateTeamPosX ?? eventCustomCfg?.teamPosX ?? qTeamX ?? 50,
             teamPosY: found.certificateTeamPosY ?? eventCustomCfg?.teamPosY ?? qTeamY ?? 53,
             teamFontSize: found.certificateTeamFontSize ?? eventCustomCfg?.teamFontSize ?? qTeamSize ?? 32,
             teamColor: found.certificateTeamColor || eventCustomCfg?.teamColor || qTeamColor || "#1E3A8A",
             showRollNo: found.certificateShowRollNo ?? eventCustomCfg?.showRollNo ?? qShowRoll ?? true,
+            rollPosX: found.certificateRollPosX ?? eventCustomCfg?.rollPosX ?? qRollX ?? 50,
             rollPosY: found.certificateRollPosY ?? eventCustomCfg?.rollPosY ?? qRollY ?? 45,
             rollFontSize: found.certificateRollFontSize ?? eventCustomCfg?.rollFontSize ?? qRollSize ?? 20,
             rollColor: found.certificateRollColor || eventCustomCfg?.rollColor || qRollColor || "#475569",
@@ -348,25 +360,28 @@ const CertificateViewPage: React.FC = () => {
             departmentName: searchParams.get("dept") || "Department of Computer Science & Engineering",
             isValid: true,
             templateMode: qMode || "builtin",
-            namePosY: 38,
-            nameFontSize: 64,
-            nameColor: "#1E3A8A",
-            showTeamName: true,
-            teamPosY: 53,
-            teamFontSize: 32,
-            teamColor: "#1E3A8A",
-            showRollNo: true,
-            rollPosY: 45,
-            rollFontSize: 20,
-            rollColor: "#475569",
-            citationPosY: 62,
-            citationFontSize: 24,
-            citationColor: "#334155",
-            showCollegeHeader: true,
-            showBorders: true,
-            showSeal: true,
-            showSignatures: false,
-            showQrCode: true,
+            namePosX: qNameX ?? 50,
+            namePosY: qNameY ?? 38,
+            nameFontSize: qNameSize ?? 64,
+            nameColor: qNameColor || "#1E3A8A",
+            showTeamName: qShowTeam ?? true,
+            teamPosX: qTeamX ?? 50,
+            teamPosY: qTeamY ?? 53,
+            teamFontSize: qTeamSize ?? 32,
+            teamColor: qTeamColor || "#1E3A8A",
+            showRollNo: qShowRoll ?? true,
+            rollPosX: qRollX ?? 50,
+            rollPosY: qRollY ?? 45,
+            rollFontSize: qRollSize ?? 20,
+            rollColor: qRollColor || "#475569",
+            citationPosY: qCitationY ?? 62,
+            citationFontSize: qCitationSize ?? 24,
+            citationColor: qCitationColor || "#334155",
+            showCollegeHeader: qShowHdr ?? true,
+            showBorders: qShowBrd ?? true,
+            showSeal: qShowSeal ?? true,
+            showSignatures: qShowSig ?? false,
+            showQrCode: qShowQr ?? true,
           });
         }
       } catch (err) {
@@ -441,28 +456,31 @@ const CertificateViewPage: React.FC = () => {
       ctx.textBaseline = "middle";
 
       // Draw Participant Name
+      const nameX = (W * (data.namePosX ?? 50)) / 100;
       const nameY = (H * (data.namePosY ?? 38)) / 100;
       const nameSize = data.nameFontSize ?? 64;
       ctx.fillStyle = data.nameColor || "#1E3A8A";
       ctx.font = `bold ${nameSize}px Georgia, Cambria, 'Times New Roman', serif`;
-      ctx.fillText(data.recipientName, W / 2, nameY);
+      ctx.fillText(data.recipientName, nameX, nameY);
 
       // Draw Roll No / Student ID
       if (data.showRollNo !== false && data.studentId) {
+        const rollX = (W * (data.rollPosX ?? 50)) / 100;
         const rollY = (H * (data.rollPosY ?? 45)) / 100;
         const rollSize = data.rollFontSize ?? 20;
         ctx.fillStyle = data.rollColor || "#475569";
         ctx.font = `bold ${rollSize}px -apple-system, BlinkMacSystemFont, monospace`;
-        ctx.fillText(`Roll: ${data.studentId}`, W / 2, rollY);
+        ctx.fillText(`Roll: ${data.studentId}`, rollX, rollY);
       }
 
       // Draw Team Name
       if (data.showTeamName !== false && data.groupName) {
+        const teamX = (W * (data.teamPosX ?? 50)) / 100;
         const teamY = (H * (data.teamPosY ?? 53)) / 100;
         const teamSize = data.teamFontSize ?? 32;
         ctx.fillStyle = data.teamColor || "#1E3A8A";
         ctx.font = `bold ${teamSize}px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
-        ctx.fillText(data.groupName, W / 2, teamY);
+        ctx.fillText(data.groupName, teamX, teamY);
       }
 
       // Verification Footer
@@ -998,14 +1016,15 @@ const CertificateViewPage: React.FC = () => {
           >
             {/* Dynamic Participant Name Positioned by Slider */}
             <div 
-              className="absolute left-1/2 -translate-x-1/2 text-center w-full px-6 pointer-events-none"
+              className="absolute text-center px-4 pointer-events-none max-w-[90%]"
               style={{
+                left: `${certData.namePosX ?? 50}%`,
                 top: `${certData.namePosY ?? 38}%`,
                 transform: "translate(-50%, -50%)"
               }}
             >
               <h2 
-                className="font-black font-serif underline decoration-blue-600/60 underline-offset-6 transition-all inline-block"
+                className="font-black font-serif underline decoration-blue-600/60 underline-offset-6 transition-all inline-block whitespace-nowrap"
                 style={{
                   color: certData.nameColor || "#0F172A",
                   fontSize: `${Math.max(20, Math.min(52, (certData.nameFontSize || 64) * 0.72))}px`
@@ -1018,14 +1037,15 @@ const CertificateViewPage: React.FC = () => {
             {/* Optional Roll No / Student ID Positioned by Slider */}
             {certData.showRollNo !== false && certData.studentId && (
               <div 
-                className="absolute left-1/2 -translate-x-1/2 text-center w-full px-6 pointer-events-none"
+                className="absolute text-center px-4 pointer-events-none max-w-[90%]"
                 style={{
+                  left: `${certData.rollPosX ?? 50}%`,
                   top: `${certData.rollPosY ?? 45}%`,
                   transform: "translate(-50%, -50%)"
                 }}
               >
                 <p 
-                  className="font-mono font-bold transition-all inline-block tracking-wider"
+                  className="font-mono font-bold transition-all inline-block tracking-wider whitespace-nowrap"
                   style={{
                     color: certData.rollColor || "#475569",
                     fontSize: `${Math.max(12, Math.min(28, (certData.rollFontSize || 20) * 0.72))}px`
@@ -1039,14 +1059,15 @@ const CertificateViewPage: React.FC = () => {
             {/* Optional Team Name Positioned by Slider */}
             {certData.showTeamName !== false && certData.groupName && (
               <div 
-                className="absolute left-1/2 -translate-x-1/2 text-center w-full px-6 pointer-events-none"
+                className="absolute text-center px-4 pointer-events-none max-w-[90%]"
                 style={{
+                  left: `${certData.teamPosX ?? 50}%`,
                   top: `${certData.teamPosY ?? 53}%`,
                   transform: "translate(-50%, -50%)"
                 }}
               >
                 <h3 
-                  className="font-black font-sans tracking-wide transition-all inline-block"
+                  className="font-black font-sans tracking-wide transition-all inline-block whitespace-nowrap"
                   style={{
                     color: certData.teamColor || "#1E3A8A",
                     fontSize: `${Math.max(14, Math.min(38, (certData.teamFontSize || 32) * 0.72))}px`

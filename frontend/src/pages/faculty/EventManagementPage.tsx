@@ -708,17 +708,20 @@ const EventManagementPage: React.FC = () => {
   const [certSuccessToast, setCertSuccessToast] = useState<string | null>(null);
 
   // Custom Template Fine-tuning Options (Participant, Team, Roll Placeholders)
-  const [certNamePosY, setCertNamePosY] = useState<number>(38); // % from top
+  const [certNamePosX, setCertNamePosX] = useState<number>(50); // % from left (X-Axis)
+  const [certNamePosY, setCertNamePosY] = useState<number>(38); // % from top (Y-Axis)
   const [certNameFontSize, setCertNameFontSize] = useState<number>(64); // px in 2000px canvas
   const [certNameColor, setCertNameColor] = useState<string>("#1E3A8A");
 
   const [certShowTeamName, setCertShowTeamName] = useState<boolean>(true);
-  const [certTeamPosY, setCertTeamPosY] = useState<number>(53); // % from top
+  const [certTeamPosX, setCertTeamPosX] = useState<number>(50); // % from left (X-Axis)
+  const [certTeamPosY, setCertTeamPosY] = useState<number>(53); // % from top (Y-Axis)
   const [certTeamFontSize, setCertTeamFontSize] = useState<number>(32);
   const [certTeamColor, setCertTeamColor] = useState<string>("#1E3A8A");
 
   const [certShowRollNo, setCertShowRollNo] = useState<boolean>(true);
-  const [certRollPosY, setCertRollPosY] = useState<number>(45); // % from top
+  const [certRollPosX, setCertRollPosX] = useState<number>(50); // % from left (X-Axis)
+  const [certRollPosY, setCertRollPosY] = useState<number>(45); // % from top (Y-Axis)
   const [certRollFontSize, setCertRollFontSize] = useState<number>(20);
   const [certRollColor, setCertRollColor] = useState<string>("#475569");
 
@@ -832,14 +835,17 @@ const EventManagementPage: React.FC = () => {
         collegeName: certCollegeName,
         deptName: certDeptName,
         issueDate: certIssueDate,
+        namePosX: certNamePosX,
         namePosY: certNamePosY,
         nameFontSize: certNameFontSize,
         nameColor: certNameColor,
         showTeamName: certShowTeamName,
+        teamPosX: certTeamPosX,
         teamPosY: certTeamPosY,
         teamFontSize: certTeamFontSize,
         teamColor: certTeamColor,
         showRollNo: certShowRollNo,
+        rollPosX: certRollPosX,
         rollPosY: certRollPosY,
         rollFontSize: certRollFontSize,
         rollColor: certRollColor,
@@ -1049,14 +1055,17 @@ const EventManagementPage: React.FC = () => {
     if (cfg.collegeName) setCertCollegeName(cfg.collegeName);
     if (cfg.deptName) setCertDeptName(cfg.deptName);
     if (cfg.issueDate) setCertIssueDate(cfg.issueDate);
+    if (cfg.namePosX !== undefined) setCertNamePosX(cfg.namePosX);
     if (cfg.namePosY !== undefined) setCertNamePosY(cfg.namePosY);
     if (cfg.nameFontSize !== undefined) setCertNameFontSize(cfg.nameFontSize);
     if (cfg.nameColor) setCertNameColor(cfg.nameColor);
     if (cfg.showTeamName !== undefined) setCertShowTeamName(cfg.showTeamName);
+    if (cfg.teamPosX !== undefined) setCertTeamPosX(cfg.teamPosX);
     if (cfg.teamPosY !== undefined) setCertTeamPosY(cfg.teamPosY);
     if (cfg.teamFontSize !== undefined) setCertTeamFontSize(cfg.teamFontSize);
     if (cfg.teamColor) setCertTeamColor(cfg.teamColor);
     if (cfg.showRollNo !== undefined) setCertShowRollNo(cfg.showRollNo);
+    if (cfg.rollPosX !== undefined) setCertRollPosX(cfg.rollPosX);
     if (cfg.rollPosY !== undefined) setCertRollPosY(cfg.rollPosY);
     if (cfg.rollFontSize !== undefined) setCertRollFontSize(cfg.rollFontSize);
     if (cfg.rollColor) setCertRollColor(cfg.rollColor);
@@ -1122,7 +1131,7 @@ const EventManagementPage: React.FC = () => {
     for (let i = 0; i < recipientsToSend.length; i++) {
       const recipient = recipientsToSend[i];
       const certId = recipient.certificateId || `AIV-${Date.now().toString(36).toUpperCase()}-${i + 1}`;
-      const certUrl = `${siteBaseUrl}/certificate/${certId}?name=${encodeURIComponent(recipient.name)}&event=${encodeURIComponent(eventAccessEvent?.title || "AI Verse Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(recipient.studentId)}&team=${encodeURIComponent(recipient.teamName)}&mode=${encodeURIComponent(certTemplateMode)}&nameY=${encodeURIComponent(certNamePosY)}&nameSize=${encodeURIComponent(certNameFontSize)}&nameColor=${encodeURIComponent(certNameColor)}&teamY=${encodeURIComponent(certTeamPosY)}&teamSize=${encodeURIComponent(certTeamFontSize)}&teamColor=${encodeURIComponent(certTeamColor)}&showTeam=${certShowTeamName}&rollY=${encodeURIComponent(certRollPosY)}&rollSize=${encodeURIComponent(certRollFontSize)}&rollColor=${encodeURIComponent(certRollColor)}&showRoll=${certShowRollNo}&showQr=${certShowQrCode}`;
+      const certUrl = `${siteBaseUrl}/certificate/${certId}?name=${encodeURIComponent(recipient.name)}&event=${encodeURIComponent(eventAccessEvent?.title || "AI Verse Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(recipient.studentId)}&team=${encodeURIComponent(recipient.teamName)}&mode=${encodeURIComponent(certTemplateMode)}&nameX=${encodeURIComponent(certNamePosX)}&nameY=${encodeURIComponent(certNamePosY)}&nameSize=${encodeURIComponent(certNameFontSize)}&nameColor=${encodeURIComponent(certNameColor)}&teamX=${encodeURIComponent(certTeamPosX)}&teamY=${encodeURIComponent(certTeamPosY)}&teamSize=${encodeURIComponent(certTeamFontSize)}&teamColor=${encodeURIComponent(certTeamColor)}&showTeam=${certShowTeamName}&rollX=${encodeURIComponent(certRollPosX)}&rollY=${encodeURIComponent(certRollPosY)}&rollSize=${encodeURIComponent(certRollFontSize)}&rollColor=${encodeURIComponent(certRollColor)}&showRoll=${certShowRollNo}&showQr=${certShowQrCode}`;
 
       setCertSendingProgress({
         current: i + 1,
@@ -1166,13 +1175,16 @@ const EventManagementPage: React.FC = () => {
                 certificateType: certType,
                 certificateSentAt: now,
                 certificateTemplateMode: certTemplateMode,
+                certificateNamePosX: certNamePosX,
                 certificateNamePosY: certNamePosY,
                 certificateNameFontSize: certNameFontSize,
                 certificateNameColor: certNameColor,
+                certificateTeamPosX: certTeamPosX,
                 certificateTeamPosY: certTeamPosY,
                 certificateTeamFontSize: certTeamFontSize,
                 certificateTeamColor: certTeamColor,
                 certificateShowTeamName: certShowTeamName,
+                certificateRollPosX: certRollPosX,
                 certificateRollPosY: certRollPosY,
                 certificateRollFontSize: certRollFontSize,
                 certificateRollColor: certRollColor,
@@ -1259,7 +1271,7 @@ const EventManagementPage: React.FC = () => {
     const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
     const siteBaseUrl = isLocal ? "https://aiversevitb.in" : window.location.origin;
     const testCertId = `AIV-TEST-${Date.now().toString(36).toUpperCase()}`;
-    const certUrl = `${siteBaseUrl}/certificate/${testCertId}?name=${encodeURIComponent("Faculty Test Recipient")}&event=${encodeURIComponent(eventAccessEvent?.title || "AI Verse Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=23PA1A0501&team=CodeCrafters&mode=${encodeURIComponent(certTemplateMode)}&nameY=${encodeURIComponent(certNamePosY)}&nameSize=${encodeURIComponent(certNameFontSize)}&nameColor=${encodeURIComponent(certNameColor)}&teamY=${encodeURIComponent(certTeamPosY)}&teamSize=${encodeURIComponent(certTeamFontSize)}&teamColor=${encodeURIComponent(certTeamColor)}&showTeam=${certShowTeamName}&rollY=${encodeURIComponent(certRollPosY)}&rollSize=${encodeURIComponent(certRollFontSize)}&rollColor=${encodeURIComponent(certRollColor)}&showRoll=${certShowRollNo}&showQr=${certShowQrCode}`;
+    const certUrl = `${siteBaseUrl}/certificate/${testCertId}?name=${encodeURIComponent("Faculty Test Recipient")}&event=${encodeURIComponent(eventAccessEvent?.title || "AI Verse Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=23PA1A0501&team=CodeCrafters&mode=${encodeURIComponent(certTemplateMode)}&nameX=${encodeURIComponent(certNamePosX)}&nameY=${encodeURIComponent(certNamePosY)}&nameSize=${encodeURIComponent(certNameFontSize)}&nameColor=${encodeURIComponent(certNameColor)}&teamX=${encodeURIComponent(certTeamPosX)}&teamY=${encodeURIComponent(certTeamPosY)}&teamSize=${encodeURIComponent(certTeamFontSize)}&teamColor=${encodeURIComponent(certTeamColor)}&showTeam=${certShowTeamName}&rollX=${encodeURIComponent(certRollPosX)}&rollY=${encodeURIComponent(certRollPosY)}&rollSize=${encodeURIComponent(certRollFontSize)}&rollColor=${encodeURIComponent(certRollColor)}&showRoll=${certShowRollNo}&showQr=${certShowQrCode}`;
 
     try {
       const emailData = buildCertificateEmail({
@@ -1346,28 +1358,31 @@ const EventManagementPage: React.FC = () => {
     canvas.height = H;
 
     const renderOverlayContent = () => {
-      // 1. Participant Name (Positioned dynamically by slider)
+      // 1. Participant Name (Positioned dynamically by sliders)
+      const nameX = (W * (certNamePosX ?? 50)) / 100;
       const nameY = (H * certNamePosY) / 100;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
       ctx.fillStyle = certNameColor || "#0F172A";
       ctx.font = `bold ${certNameFontSize || 64}px Georgia, Cambria, 'Times New Roman', serif`;
-      ctx.fillText("Sample Participant Name", W / 2, nameY);
+      ctx.fillText("Sample Participant Name", nameX, nameY);
 
       // 2. Roll No / Student ID (if enabled)
       if (certShowRollNo) {
+        const rollX = (W * (certRollPosX ?? 50)) / 100;
         const rollY = (H * certRollPosY) / 100;
         ctx.fillStyle = certRollColor || "#475569";
         ctx.font = `bold ${certRollFontSize || 20}px -apple-system, BlinkMacSystemFont, monospace`;
-        ctx.fillText("Roll: 23PA1A0501", W / 2, rollY);
+        ctx.fillText("Roll: 23PA1A0501", rollX, rollY);
       }
 
       // 3. Team Name (if enabled)
       if (certShowTeamName) {
+        const teamX = (W * (certTeamPosX ?? 50)) / 100;
         const teamY = (H * certTeamPosY) / 100;
         ctx.fillStyle = certTeamColor || "#1E3A8A";
         ctx.font = `bold ${certTeamFontSize || 32}px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
-        ctx.fillText("CodeCrafters", W / 2, teamY);
+        ctx.fillText("CodeCrafters", teamX, teamY);
       }
 
       // 4. Verification ID / Footer (if enabled)
@@ -11066,6 +11081,26 @@ const EventManagementPage: React.FC = () => {
                     </div>
 
                     <div className="space-y-3 text-xs">
+                      {/* Name Position X Slider */}
+                      <div>
+                        <div className="flex justify-between items-center mb-1">
+                          <label className="font-bold text-slate-700">
+                            Horizontal Position (X-Axis)
+                          </label>
+                          <span className="font-mono font-black text-blue-700 bg-white border border-blue-200 px-2 py-0.5 rounded text-[11px]">
+                            {certNamePosX}%
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min={5}
+                          max={95}
+                          value={certNamePosX}
+                          onChange={(e) => setCertNamePosX(Number(e.target.value))}
+                          className="w-full accent-blue-600 cursor-pointer"
+                        />
+                      </div>
+
                       {/* Name Position Y Slider */}
                       <div>
                         <div className="flex justify-between items-center mb-1">
@@ -11169,6 +11204,26 @@ const EventManagementPage: React.FC = () => {
 
                     {certShowTeamName && (
                       <div className="space-y-3 text-xs">
+                        {/* Team Position X Slider */}
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="font-bold text-slate-700">
+                              Horizontal Position (X-Axis)
+                            </label>
+                            <span className="font-mono font-black text-indigo-700 bg-white border border-indigo-200 px-2 py-0.5 rounded text-[11px]">
+                              {certTeamPosX}%
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={5}
+                            max={95}
+                            value={certTeamPosX}
+                            onChange={(e) => setCertTeamPosX(Number(e.target.value))}
+                            className="w-full accent-indigo-600 cursor-pointer"
+                          />
+                        </div>
+
                         {/* Team Position Y Slider */}
                         <div>
                           <div className="flex justify-between items-center mb-1">
@@ -11273,6 +11328,26 @@ const EventManagementPage: React.FC = () => {
 
                     {certShowRollNo && (
                       <div className="space-y-3 text-xs">
+                        {/* Roll Position X Slider */}
+                        <div>
+                          <div className="flex justify-between items-center mb-1">
+                            <label className="font-bold text-slate-700">
+                              Horizontal Position (X-Axis)
+                            </label>
+                            <span className="font-mono font-black text-slate-700 bg-white border border-slate-200 px-2 py-0.5 rounded text-[11px]">
+                              {certRollPosX}%
+                            </span>
+                          </div>
+                          <input
+                            type="range"
+                            min={5}
+                            max={95}
+                            value={certRollPosX}
+                            onChange={(e) => setCertRollPosX(Number(e.target.value))}
+                            className="w-full accent-slate-600 cursor-pointer"
+                          />
+                        </div>
+
                         {/* Roll Position Y Slider */}
                         <div>
                           <div className="flex justify-between items-center mb-1">
@@ -11557,14 +11632,15 @@ const EventManagementPage: React.FC = () => {
                     >
                       {/* Dynamic Participant Name Positioned by Slider */}
                       <div 
-                        className="absolute left-1/2 -translate-x-1/2 text-center w-full px-6 pointer-events-none transition-all duration-75"
+                        className="absolute text-center px-4 pointer-events-none transition-all duration-75 max-w-[90%]"
                         style={{
+                          left: `${certNamePosX}%`,
                           top: `${certNamePosY}%`,
                           transform: "translate(-50%, -50%)"
                         }}
                       >
                         <h3 
-                          className="font-black font-serif underline decoration-blue-600/60 underline-offset-6 transition-all inline-block"
+                          className="font-black font-serif underline decoration-blue-600/60 underline-offset-6 transition-all inline-block whitespace-nowrap"
                           style={{
                             color: certNameColor || "#0F172A",
                             fontSize: `${Math.max(18, Math.min(42, certNameFontSize * 0.52))}px`
@@ -11577,14 +11653,15 @@ const EventManagementPage: React.FC = () => {
                       {/* Optional Roll No / Student ID Positioned by Slider */}
                       {certShowRollNo && (
                         <div 
-                          className="absolute left-1/2 -translate-x-1/2 text-center w-full px-6 pointer-events-none transition-all duration-75"
+                          className="absolute text-center px-4 pointer-events-none transition-all duration-75 max-w-[90%]"
                           style={{
+                            left: `${certRollPosX}%`,
                             top: `${certRollPosY}%`,
                             transform: "translate(-50%, -50%)"
                           }}
                         >
                           <p 
-                            className="font-mono font-bold transition-all inline-block tracking-wider"
+                            className="font-mono font-bold transition-all inline-block tracking-wider whitespace-nowrap"
                             style={{
                               color: certRollColor || "#475569",
                               fontSize: `${Math.max(10, Math.min(22, certRollFontSize * 0.52))}px`
@@ -11598,14 +11675,15 @@ const EventManagementPage: React.FC = () => {
                       {/* Optional Team Name Positioned by Slider */}
                       {certShowTeamName && (
                         <div 
-                          className="absolute left-1/2 -translate-x-1/2 text-center w-full px-6 pointer-events-none transition-all duration-75"
+                          className="absolute text-center px-4 pointer-events-none transition-all duration-75 max-w-[90%]"
                           style={{
+                            left: `${certTeamPosX}%`,
                             top: `${certTeamPosY}%`,
                             transform: "translate(-50%, -50%)"
                           }}
                         >
                           <h4 
-                            className="font-black font-sans tracking-wide transition-all inline-block"
+                            className="font-black font-sans tracking-wide transition-all inline-block whitespace-nowrap"
                             style={{
                               color: certTeamColor || "#1E3A8A",
                               fontSize: `${Math.max(12, Math.min(32, certTeamFontSize * 0.52))}px`
