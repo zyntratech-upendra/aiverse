@@ -593,12 +593,12 @@ const EventManagementPage: React.FC = () => {
   // Team Submissions Monitor State
   const [isSubmissionsModalOpen, setIsSubmissionsModalOpen] = useState(false);
   const [selectedTeamSubmission, setSelectedTeamSubmission] = useState<any | null>(null);
-  const [submissionsFilter, setSubmissionsFilter] = useState<"All" | "Submitted" | "Draft" | "Pending">("All");
+  const [submissionsFilter, setSubmissionsFilter] = useState<"InRound" | "All" | "Submitted" | "Draft" | "Pending">("InRound");
   const [submissionsSearchQuery, setSubmissionsSearchQuery] = useState("");
   const [matrixViewRound, setMatrixViewRound] = useState<number>(0); // 0 = current round (live data)
 
   const handleOpenSubmissionsModal = () => {
-    setSubmissionsFilter("All");
+    setSubmissionsFilter("InRound");
     setSubmissionsSearchQuery("");
     setMatrixViewRound(0);
     setIsSubmissionsModalOpen(true);
@@ -10809,16 +10809,29 @@ const EventManagementPage: React.FC = () => {
                 const cR = eventAccessEvent?.currentRound || 1;
                 const viewR = matrixViewRound > 0 ? matrixViewRound : cR;
                 const viewRPrefix = `r${viewR}_`;
+
+                const isTeamPresentInViewRound = (r: any) => {
+                  if (viewR === 1) return true;
+                  const teamRound = Number(r.currentRound || r.promotedToRound || 1);
+                  const elimRound = r.eliminatedInRound ? Number(r.eliminatedInRound) : null;
+                  return teamRound >= viewR || (elimRound !== null && elimRound >= viewR);
+                };
+
                 const isSubForViewRound = (r: any) => (r as any)[`${viewRPrefix}submissionStatus`] === "Submitted" || !!(r as any)[`${viewRPrefix}submittedAt`] || (r.submissionRound === viewR && (r.submissionStatus === "Submitted" || !!r.submittedAt));
                 const isDraftForViewRound = (r: any) => !isSubForViewRound(r) && !!((r as any)[`${viewRPrefix}problemStatement`] || (r.submissionRound === viewR && r.problemStatement));
-                const countSubmitted = eventAccessRegistrations.filter(isSubForViewRound).length;
-                const countDrafts = eventAccessRegistrations.filter(isDraftForViewRound).length;
+                const teamsInViewR = eventAccessRegistrations.filter(isTeamPresentInViewRound);
+                const countSubmitted = teamsInViewR.filter(isSubForViewRound).length;
+                const countDrafts = teamsInViewR.filter(isDraftForViewRound).length;
 
                 return (
                   <div className="hidden md:flex items-center gap-3 bg-white/10 px-4 py-2 rounded-2xl border border-white/15 text-xs font-black">
+                    <span className="text-blue-200">
+                      In Round {viewR}: {teamsInViewR.length} Teams
+                    </span>
+                    <span className="text-white/30">|</span>
                     <span className="text-emerald-400 flex items-center gap-1">
                       <Check className="w-3.5 h-3.5" />
-                      {countSubmitted} Final Submitted
+                      {countSubmitted} Submitted
                     </span>
                     <span className="text-white/30">|</span>
                     <span className="text-amber-300 flex items-center gap-1">
@@ -10826,7 +10839,7 @@ const EventManagementPage: React.FC = () => {
                       {countDrafts} Drafts
                     </span>
                     <span className="text-white/30">|</span>
-                    <span className="text-slate-200">Total: {eventAccessRegistrations.length} Teams</span>
+                    <span className="text-slate-200">Total Registered: {eventAccessRegistrations.length}</span>
                   </div>
                 );
               })()}
@@ -10858,56 +10871,145 @@ const EventManagementPage: React.FC = () => {
             {/* Filter Tabs & Search Header Toolbar */}
             <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs flex flex-col lg:flex-row items-center justify-between gap-4 shrink-0">
               {/* Filter Tabs & Round Info */}
-              <div className="flex items-center gap-2 overflow-x-auto w-full lg:w-auto">
-                <button
-                  type="button"
-                  onClick={() => setSubmissionsFilter("All")}
-                  className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${submissionsFilter === "All"
-                      ? "bg-[#2563EB] text-white shadow-md shadow-blue-500/20"
-                      : "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200"
-                    }`}
-                >
-                  <span>All Teams</span>
-                  <span className={`px-2 py-0.5 rounded-full text-[10px] ${submissionsFilter === "All" ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700 font-black"
-                    }`}>
-                    {eventAccessRegistrations.length}
-                  </span>
-                </button>
+              {(() => {
+                const cR = eventAccessEvent?.currentRound || 1;
+                const viewRound = matrixViewRound > 0 ? matrixViewRound : cR;
+                const isTeamPresentInViewRound = (r: any) => {
+                  if (viewRound === 1) return true;
+                  const teamRound = Number(r.currentRound || r.promotedToRound || 1);
+                  const elimRound = r.eliminatedInRound ? Number(r.eliminatedInRound) : null;
+                  return teamRound >= viewRound || (elimRound !== null && elimRound >= viewRound);
+                };
+                const teamsInView = eventAccessRegistrations.filter(isTeamPresentInViewRound);
+                const viewRPrefix = `r${viewRound}_`;
+                const isSub = (r: any) => (r as any)[`${viewRPrefix}submissionStatus`] === "Submitted" || !!(r as any)[`${viewRPrefix}submittedAt`] || (r.submissionRound === viewRound && (r.submissionStatus === "Submitted" || !!r.submittedAt));
+                const isDraft = (r: any) => !isSub(r) && !!((r as any)[`${viewRPrefix}problemStatement`] || (r.submissionRound === viewRound && r.problemStatement));
+                const isPending = (r: any) => !isSub(r) && !isDraft(r);
 
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="w-4 h-4 rounded-full bg-indigo-200/50 flex items-center justify-center text-indigo-600 font-black text-[10px]">i</span>
-                  <span className="opacity-70 font-semibold uppercase tracking-wider text-[10px] mr-1">View Round:</span>
-                  <select
-                    value={matrixViewRound}
-                    onChange={(e) => setMatrixViewRound(Number(e.target.value))}
-                    className="px-3 py-2 rounded-xl bg-white border border-indigo-200 text-xs font-black text-indigo-900 focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer shadow-sm min-w-[160px]"
-                  >
-                    <option value={0}>
-                      {(() => {
-                        const cR = eventAccessEvent?.currentRound || 1;
-                        const activeR = (eventAccessEvent?.rounds || []).find((r: any) => r.roundNumber === cR);
-                        const typeName = activeR?.type || eventAccessEvent?.stageType || "Hackathon";
-                        return `Round ${cR} — ${typeName} (Current)`;
-                      })()}
-                    </option>
-                    {(() => {
-                      const cR = eventAccessEvent?.currentRound || 1;
-                      const rounds = eventAccessEvent?.rounds || [];
-                      const pastOptions: any[] = [];
-                      for (let r = 1; r < cR; r++) {
-                        const roundDef = rounds.find((rd: any) => rd.roundNumber === r);
-                        const roundTypeName = roundDef?.type || `Round ${r}`;
-                        pastOptions.push(
-                          <option key={r} value={r}>
-                            Round {r} — {roundTypeName} (Past)
-                          </option>
-                        );
-                      }
-                      return pastOptions;
-                    })()}
-                  </select>
-                </div>
-              </div>
+                const countInRound = teamsInView.length;
+                const countSub = teamsInView.filter(isSub).length;
+                const countDrf = teamsInView.filter(isDraft).length;
+                const countPnd = teamsInView.filter(isPending).length;
+
+                return (
+                  <div className="flex items-center gap-2 overflow-x-auto w-full lg:w-auto">
+                    {/* Filter: Present In Round */}
+                    <button
+                      type="button"
+                      onClick={() => setSubmissionsFilter("InRound")}
+                      className={`px-4 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer whitespace-nowrap flex items-center gap-2 ${submissionsFilter === "InRound"
+                          ? "bg-[#2563EB] text-white shadow-md shadow-blue-500/20"
+                          : "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200"
+                        }`}
+                    >
+                      <span>In Round {viewRound}</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] ${submissionsFilter === "InRound" ? "bg-white/20 text-white" : "bg-blue-100 text-blue-800 font-black"
+                        }`}>
+                        {countInRound}
+                      </span>
+                    </button>
+
+                    {/* Filter: All Teams */}
+                    <button
+                      type="button"
+                      onClick={() => setSubmissionsFilter("All")}
+                      className={`px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${submissionsFilter === "All"
+                          ? "bg-[#2563EB] text-white shadow-md shadow-blue-500/20"
+                          : "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200"
+                        }`}
+                    >
+                      <span>All Teams</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] ${submissionsFilter === "All" ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700 font-black"
+                        }`}>
+                        {eventAccessRegistrations.length}
+                      </span>
+                    </button>
+
+                    {/* Filter: Submitted */}
+                    <button
+                      type="button"
+                      onClick={() => setSubmissionsFilter("Submitted")}
+                      className={`px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${submissionsFilter === "Submitted"
+                          ? "bg-emerald-600 text-white shadow-md shadow-emerald-600/20"
+                          : "bg-emerald-50/70 text-emerald-800 hover:bg-emerald-100 border border-emerald-200/70"
+                        }`}
+                    >
+                      <span>Submitted</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] ${submissionsFilter === "Submitted" ? "bg-white/20 text-white" : "bg-emerald-200 text-emerald-900 font-black"
+                        }`}>
+                        {countSub}
+                      </span>
+                    </button>
+
+                    {/* Filter: Drafts */}
+                    <button
+                      type="button"
+                      onClick={() => setSubmissionsFilter("Draft")}
+                      className={`px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${submissionsFilter === "Draft"
+                          ? "bg-amber-600 text-white shadow-md shadow-amber-600/20"
+                          : "bg-amber-50/70 text-amber-800 hover:bg-amber-100 border border-amber-200/70"
+                        }`}
+                    >
+                      <span>Drafts</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] ${submissionsFilter === "Draft" ? "bg-white/20 text-white" : "bg-amber-200 text-amber-900 font-black"
+                        }`}>
+                        {countDrf}
+                      </span>
+                    </button>
+
+                    {/* Filter: Pending */}
+                    <button
+                      type="button"
+                      onClick={() => setSubmissionsFilter("Pending")}
+                      className={`px-3.5 py-2.5 rounded-2xl text-xs font-black transition-all cursor-pointer whitespace-nowrap flex items-center gap-1.5 ${submissionsFilter === "Pending"
+                          ? "bg-slate-700 text-white shadow-md shadow-slate-700/20"
+                          : "bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200"
+                        }`}
+                    >
+                      <span>Pending</span>
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] ${submissionsFilter === "Pending" ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700 font-black"
+                        }`}>
+                        {countPnd}
+                      </span>
+                    </button>
+
+                    {/* Round Selector Dropdown */}
+                    <div className="flex items-center gap-2 shrink-0 ml-2 pl-2 border-l border-slate-200">
+                      <span className="w-4 h-4 rounded-full bg-indigo-200/50 flex items-center justify-center text-indigo-600 font-black text-[10px]">i</span>
+                      <span className="opacity-70 font-semibold uppercase tracking-wider text-[10px] mr-1">View Round:</span>
+                      <select
+                        value={matrixViewRound}
+                        onChange={(e) => setMatrixViewRound(Number(e.target.value))}
+                        className="px-3 py-2 rounded-xl bg-white border border-indigo-200 text-xs font-black text-indigo-900 focus:outline-none focus:ring-2 focus:ring-indigo-400 cursor-pointer shadow-sm min-w-[160px]"
+                      >
+                        <option value={0}>
+                          {(() => {
+                            const cR = eventAccessEvent?.currentRound || 1;
+                            const activeR = (eventAccessEvent?.rounds || []).find((r: any) => r.roundNumber === cR);
+                            const typeName = activeR?.type || eventAccessEvent?.stageType || "Hackathon";
+                            return `Round ${cR} — ${typeName} (Current)`;
+                          })()}
+                        </option>
+                        {(() => {
+                          const cR = eventAccessEvent?.currentRound || 1;
+                          const rounds = eventAccessEvent?.rounds || [];
+                          const pastOptions: any[] = [];
+                          for (let r = 1; r < cR; r++) {
+                            const roundDef = rounds.find((rd: any) => rd.roundNumber === r);
+                            const roundTypeName = roundDef?.type || `Round ${r}`;
+                            pastOptions.push(
+                              <option key={r} value={r}>
+                                Round {r} — {roundTypeName} (Past)
+                              </option>
+                            );
+                          }
+                          return pastOptions;
+                        })()}
+                      </select>
+                    </div>
+                  </div>
+                );
+              })()}
 
               {/* Legend & Search */}
               <div className="flex flex-col sm:flex-row items-center gap-4 w-full lg:w-auto justify-between lg:justify-end">
@@ -10947,6 +11049,14 @@ const EventManagementPage: React.FC = () => {
                 const isIdeationRound = currentMatrixStageType === "Ideation & Video Submission" || currentMatrixStageType === "Ideation" || currentMatrixStageType === "Video Submission";
                 const viewRPrefix = `r${viewRound}_`;
 
+                // Team presence in viewRound helper
+                const isTeamPresentInViewRound = (r: any) => {
+                  if (viewRound === 1) return true;
+                  const teamRound = Number(r.currentRound || r.promotedToRound || 1);
+                  const elimRound = r.eliminatedInRound ? Number(r.eliminatedInRound) : null;
+                  return teamRound >= viewRound || (elimRound !== null && elimRound >= viewRound);
+                };
+
                 const isRegSubmittedForRound = (reg: any) => (reg as any)[`${viewRPrefix}submissionStatus`] === "Submitted" || !!(reg as any)[`${viewRPrefix}submittedAt`] || (reg.submissionRound === viewRound && (reg.submissionStatus === "Submitted" || !!reg.submittedAt));
                 const isRegDraftForRound = (reg: any) => !isRegSubmittedForRound(reg) && !!((reg as any)[`${viewRPrefix}problemStatement`] || (reg.submissionRound === viewRound && reg.problemStatement));
                 const isRegPendingForRound = (reg: any) => !isRegSubmittedForRound(reg) && !isRegDraftForRound(reg);
@@ -10958,14 +11068,17 @@ const EventManagementPage: React.FC = () => {
                     (reg.problemStatement || "").toLowerCase().includes(submissionsSearchQuery.toLowerCase()) ||
                     (reg.teamLeadStudentId || reg.studentId || "").toLowerCase().includes(submissionsSearchQuery.toLowerCase());
 
+                  const isPresent = isTeamPresentInViewRound(reg);
                   const isSubmitted = isRegSubmittedForRound(reg);
                   const isDraft = isRegDraftForRound(reg);
                   const isPending = isRegPendingForRound(reg);
 
-                  if (submissionsFilter === "Submitted") return matchSearch && isSubmitted;
-                  if (submissionsFilter === "Draft") return matchSearch && isDraft;
-                  if (submissionsFilter === "Pending") return matchSearch && isPending;
-                  return matchSearch;
+                  if (submissionsFilter === "InRound") return matchSearch && isPresent;
+                  if (submissionsFilter === "Submitted") return matchSearch && isPresent && isSubmitted;
+                  if (submissionsFilter === "Draft") return matchSearch && isPresent && isDraft;
+                  if (submissionsFilter === "Pending") return matchSearch && isPresent && isPending;
+                  if (submissionsFilter === "All") return matchSearch;
+                  return matchSearch && isPresent;
                 });
 
                 if (filteredList.length === 0) {
@@ -10973,7 +11086,7 @@ const EventManagementPage: React.FC = () => {
                     <div className="py-24 text-center bg-slate-50/50 rounded-3xl border border-dashed border-slate-200 p-8 space-y-3 m-8">
                       <FileText className="h-10 w-10 text-slate-300 mx-auto" />
                       <h4 className="text-sm font-extrabold text-slate-800">No Submissions Found</h4>
-                      <p className="text-xs text-slate-400 font-medium">No team submissions match your filter or search query.</p>
+                      <p className="text-xs text-slate-400 font-medium">No team submissions match your filter or search query for Round {viewRound}.</p>
                     </div>
                   );
                 }
@@ -10984,10 +11097,10 @@ const EventManagementPage: React.FC = () => {
                       <thead>
                         {/* Upper Squares Column Headers */}
                         <tr className="bg-slate-900 text-white text-left">
-                          <th className="py-5 px-6 font-black uppercase text-[11px] tracking-wider w-[260px] border-b border-slate-800 bg-slate-950">
+                          <th className="py-5 px-6 font-black uppercase text-[11px] tracking-wider w-[280px] border-b border-slate-800 bg-slate-950">
                             <div className="flex items-center gap-2">
                               <Users className="w-4 h-4 text-blue-400" />
-                              <span>Team Name</span>
+                              <span>Team Name & Status</span>
                             </div>
                           </th>
 
@@ -11182,6 +11295,10 @@ const EventManagementPage: React.FC = () => {
                           const targetMatrixRound = viewingPastRound ? matrixViewRound : (eventAccessEvent?.currentRound || 1);
                           const rPrefix = `r${targetMatrixRound}_`;
 
+                          // Team's actual current round & status
+                          const teamCurrentRound = Number(reg.currentRound || reg.promotedToRound || 1);
+                          const isEliminated = reg.roundStatus === "Eliminated";
+
                           // Helper to get field value: isolated per round
                           const getField = (fieldName: string) => {
                             if (viewingPastRound || targetMatrixRound > 1) {
@@ -11211,16 +11328,35 @@ const EventManagementPage: React.FC = () => {
 
                           return (
                             <tr key={reg.id || idx} className="hover:bg-blue-50/40 transition-colors group">
-                              {/* Left Side Rectangle: Team Name */}
+                              {/* Left Side Rectangle: Team Name & Round Badges */}
                               <td className="py-5 px-6">
                                 <div className="flex items-center gap-3">
                                   <div className="w-10 h-10 rounded-2xl bg-indigo-100 text-indigo-700 font-black text-sm flex items-center justify-center shrink-0 shadow-xs border border-indigo-200">
                                     {displayTeamName.charAt(0).toUpperCase()}
                                   </div>
-                                  <div className="text-left">
-                                    <span className="font-extrabold text-slate-900 text-sm block truncate max-w-[190px]" title={displayTeamName}>
-                                      {displayTeamName}
-                                    </span>
+                                  <div className="text-left min-w-0">
+                                    <div className="flex items-center gap-1.5 flex-wrap">
+                                      <span className="font-extrabold text-slate-900 text-sm truncate max-w-[170px]" title={displayTeamName}>
+                                        {displayTeamName}
+                                      </span>
+                                      {isEliminated ? (
+                                        <span className="px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-red-100 text-red-700 border border-red-200 shrink-0">
+                                          Eliminated (R{reg.eliminatedInRound || teamCurrentRound})
+                                        </span>
+                                      ) : teamCurrentRound === targetMatrixRound ? (
+                                        <span className="px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-emerald-100 text-emerald-800 border border-emerald-200 shrink-0">
+                                          In Round {targetMatrixRound}
+                                        </span>
+                                      ) : teamCurrentRound > targetMatrixRound ? (
+                                        <span className="px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-purple-100 text-purple-800 border border-purple-200 shrink-0">
+                                          Round {teamCurrentRound}+
+                                        </span>
+                                      ) : (
+                                        <span className="px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-amber-100 text-amber-800 border border-amber-200 shrink-0">
+                                          In Round {teamCurrentRound}
+                                        </span>
+                                      )}
+                                    </div>
                                     <span className="text-[10px] font-bold text-slate-400 block mt-0.5">
                                       {isGroup ? `Lead: ${reg.teamLeadName || reg.name}` : "Individual"} • {reg.teamLeadStudentId || reg.studentId || "N/A"}
                                     </span>
@@ -11392,18 +11528,32 @@ const EventManagementPage: React.FC = () => {
             </div>
 
             {/* Bottom Footer Bar */}
-            <div className="p-4 sm:px-6 bg-white border border-slate-200/80 rounded-2xl flex items-center justify-between shadow-xs shrink-0">
-              <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest">
-                Showing matrix status for {eventAccessRegistrations.length} registered hackathon team(s)
-              </span>
-              <button
-                type="button"
-                onClick={() => setIsSubmissionsModalOpen(false)}
-                className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold rounded-xl text-xs transition-colors cursor-pointer shadow-xs active:scale-95"
-              >
-                Close Full Page
-              </button>
-            </div>
+            {(() => {
+              const cR = eventAccessEvent?.currentRound || 1;
+              const viewRound = matrixViewRound > 0 ? matrixViewRound : cR;
+              const isTeamPresentInViewRound = (r: any) => {
+                if (viewRound === 1) return true;
+                const teamRound = Number(r.currentRound || r.promotedToRound || 1);
+                const elimRound = r.eliminatedInRound ? Number(r.eliminatedInRound) : null;
+                return teamRound >= viewRound || (elimRound !== null && elimRound >= viewRound);
+              };
+              const teamsInView = eventAccessRegistrations.filter(isTeamPresentInViewRound);
+
+              return (
+                <div className="p-4 sm:px-6 bg-white border border-slate-200/80 rounded-2xl flex flex-col sm:flex-row items-center justify-between gap-3 shadow-xs shrink-0">
+                  <span className="text-[10px] font-extrabold text-slate-500 uppercase tracking-widest text-center sm:text-left">
+                    Showing {submissionsFilter === "All" ? eventAccessRegistrations.length : teamsInView.length} of {teamsInView.length} team(s) present in Round {viewRound} (Total Registered: {eventAccessRegistrations.length})
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsSubmissionsModalOpen(false)}
+                    className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold rounded-xl text-xs transition-colors cursor-pointer shadow-xs active:scale-95"
+                  >
+                    Close Full Page
+                  </button>
+                </div>
+              );
+            })()}
 
           </div>
         </div>,

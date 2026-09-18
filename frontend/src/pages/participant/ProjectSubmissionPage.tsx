@@ -1160,9 +1160,19 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         <div className="flex items-center gap-3.5">
           <img src="/ai_verse.png" alt="AI Verse Logo" className="w-12 h-12 rounded-2xl object-contain shadow-md shadow-blue-500/25 shrink-0 ring-1 ring-blue-500/20" />
           <div>
-            <h1 className="text-3xl font-black text-[#0F172A] tracking-tight">Project Submission</h1>
+            <div className="flex items-center gap-2.5 flex-wrap">
+              <h1 className="text-3xl font-black text-[#0F172A] tracking-tight">Project Submission</h1>
+              <span className="px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider bg-blue-50 text-blue-700 border border-blue-200">
+                Round {currentTeamRound} Active
+              </span>
+              {currentTeamRound > 1 && (
+                <span className="px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider bg-emerald-50 text-emerald-800 border border-emerald-200 flex items-center gap-1">
+                  ✓ Qualified Stage {currentTeamRound}
+                </span>
+              )}
+            </div>
             <p className="text-sm font-medium text-slate-500 mt-0.5">
-              Complete the 7 steps below to submit your hackathon project to AI Verse.
+              Complete the {isIdeationRound ? 'ideation' : '7'} steps below to submit your Round {currentTeamRound} hackathon project to AI Verse.
             </p>
           </div>
         </div>
@@ -1284,8 +1294,9 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
             {(() => {
               if (isIdeationRound) return null;
               const filteredProblemStatements = availableProblemStatements.filter((item) => {
-                if (!item.round || item.round === "all" || item.round === "All") return true;
-                return Number(item.round) === currentTeamRound;
+                const itemRound = item.round ?? item.roundNumber;
+                if (!itemRound || itemRound === "all" || itemRound === "All") return true;
+                return Number(itemRound) === currentTeamRound;
               });
 
               if (filteredProblemStatements.length === 0 && availableProblemStatements.length === 0) return null;
@@ -1341,6 +1352,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
                         const isSelected = selectedPsId === item.id || selectedPsId === item.code;
                         const takenByTeam = takenPsMap[item.id] || takenPsMap[item.code] || takenPsMap[psKey];
                         const isTakenByOther = !!takenByTeam && !isSelected;
+                        const itemRoundVal = item.round ?? item.roundNumber;
 
                         return (
                           <div
@@ -1369,9 +1381,9 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
                                 >
                                   {item.code || `PS-0${idx + 1}`}
                                 </span>
-                                {item.round && item.round !== "all" && item.round !== "All" && (
+                                {itemRoundVal && itemRoundVal !== "all" && itemRoundVal !== "All" && (
                                   <span className="px-2 py-0.5 rounded-lg text-[10px] font-extrabold bg-indigo-50 text-indigo-700 border border-indigo-200">
-                                    R{item.round}
+                                    R{itemRoundVal}
                                   </span>
                                 )}
                               </div>
@@ -2046,12 +2058,14 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-100">
-                    Step 7 of 7
+                    Step {isIdeationRound ? '3 of 3' : '7 of 7'}
                   </span>
-                  <h3 className="text-xl font-black text-slate-900 tracking-tight">7. Submission Overview</h3>
+                  <h3 className="text-xl font-black text-slate-900 tracking-tight">
+                    {isIdeationRound ? '3. Ideation Overview' : `7. Round ${currentTeamRound} Submission Overview`}
+                  </h3>
                 </div>
                 <p className="text-xs text-slate-500 font-medium mt-0.5">
-                  Review your project details before final submission.
+                  Review your Round {currentTeamRound} project details before final submission.
                 </p>
               </div>
             </div>
