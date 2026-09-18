@@ -1,7 +1,18 @@
 // Pure MongoDB Atlas & REST API adapter replacing Firebase completely.
 // Zero dependencies on Firebase SDKs.
+const getApiBase = (): string => {
+  if (import.meta.env.VITE_API_BASE) {
+    return (import.meta.env.VITE_API_BASE as string).replace(/\/+$/, '');
+  }
+  if (typeof window !== 'undefined') {
+    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+      return `${window.location.origin}/api`;
+    }
+  }
+  return 'http://localhost:4000/api';
+};
 
-const API_BASE = ((import.meta.env.VITE_API_BASE as string) || 'http://localhost:4000/api').replace(/\/+$/, '');
+const API_BASE = getApiBase();
 
 function getHeaders(): Record<string, string> {
   const headers: Record<string, string> = { 'Content-Type': 'application/json' };

@@ -1,12 +1,8 @@
-const getApiBase = (): string => {
+export const getApiBase = (): string => {
   if (import.meta.env.VITE_API_BASE) {
     return (import.meta.env.VITE_API_BASE as string).replace(/\/+$/, '');
   }
   if (typeof window !== 'undefined') {
-    // If running on Vercel preview or production without VITE_API_BASE, connect to production backend on AWS
-    if (window.location.hostname.includes('vercel.app')) {
-      return 'https://aiversevitb.in/api';
-    }
     if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
       return `${window.location.origin}/api`;
     }
@@ -685,43 +681,64 @@ export async function deleteOrganizer(id: string) {
 // Photo Albums & Gallery
 // ==========================================
 export async function fetchAlbums() {
+  await ensureAuthToken();
   const res = await fetch(`${API_BASE}/albums`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to fetch albums');
   return res.json();
 }
 
 export async function createAlbum(albumObj: any) {
+  await ensureAuthToken();
   const res = await fetch(`${API_BASE}/albums`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify(albumObj),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || err.message || `Failed to create album (${res.status})`);
+  }
   return res.json();
 }
 
 export async function bulkCreateAlbums(items: any[]) {
+  await ensureAuthToken();
   const res = await fetch(`${API_BASE}/albums/bulk`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify({ items }),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || err.message || `Failed to bulk create albums (${res.status})`);
+  }
   return res.json();
 }
 
 export async function updateAlbum(id: string, patch: any) {
-  const res = await fetch(`${API_BASE}/albums/${id}`, {
+  await ensureAuthToken();
+  const res = await fetch(`${API_BASE}/albums/${encodeURIComponent(id)}`, {
     method: 'PUT',
     headers: authHeaders(),
     body: JSON.stringify(patch),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || err.message || `Failed to update album (${res.status})`);
+  }
   return res.json();
 }
 
 export async function deleteAlbum(id: string) {
-  const res = await fetch(`${API_BASE}/albums/${id}`, {
+  await ensureAuthToken();
+  const res = await fetch(`${API_BASE}/albums/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || err.message || `Failed to delete album (${res.status})`);
+  }
   return res.json();
 }
 

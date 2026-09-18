@@ -535,15 +535,42 @@ export const GalleryManagementPage: React.FC = () => {
         })
       );
 
+      // Invalidate public gallery cache to immediately reflect category changes
       dataCache.invalidate("public_gallery_photos");
+      dataCache.remove("public_gallery_photos");
+      dataCache.invalidate("home_highlights");
+
+      // Optimistic update of local state
+      setPhotos((prev) =>
+        prev.map((p) => {
+          if (editingAlbum.photos.some((ap) => ap.id === p.id)) {
+            return {
+              ...p,
+              title: editingAlbum.photos.length > 1 ? p.title : cleanEvent,
+              eventTitle: cleanEvent,
+              category: editCategory,
+              caption: editCaption.trim(),
+              description: editCaption.trim(),
+              date: editDate || p.date,
+              status: editStatus,
+              tags: editTags,
+              imageUrl: (editImagePreview && editingAlbum.photos[0]?.id === p.id) ? editImagePreview : p.imageUrl,
+              coverImage: (editImagePreview && editingAlbum.photos[0]?.id === p.id) ? editImagePreview : p.coverImage,
+              bannerImage: (editImagePreview && editingAlbum.photos[0]?.id === p.id) ? editImagePreview : p.bannerImage,
+            };
+          }
+          return p;
+        })
+      );
+
       await loadPhotos();
       setIsEditModalOpen(false);
       setEditingAlbum(null);
       setEditingPhoto(null);
       addToast("Event album updated successfully!", "success");
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error updating event album:", err);
-      addToast("Failed to update event album.", "warning");
+      addToast(err?.message || "Failed to update event album.", "warning");
     }
   };
 
@@ -553,13 +580,14 @@ export const GalleryManagementPage: React.FC = () => {
     try {
       await Promise.all(album.photos.map((p) => updateAlbum(p.id, { status: newStatus })));
       dataCache.invalidate("public_gallery_photos");
+      dataCache.remove("public_gallery_photos");
       setPhotos((prev) =>
         prev.map((p) => (album.photos.some((ap) => ap.id === p.id) ? { ...p, status: newStatus } : p))
       );
       addToast(`"${album.title}" album marked as ${newStatus.toUpperCase()}`, "info");
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error updating status:", err);
-      addToast("Failed to toggle status.", "warning");
+      addToast(err?.message || "Failed to toggle status.", "warning");
     }
   };
 
@@ -569,12 +597,13 @@ export const GalleryManagementPage: React.FC = () => {
     try {
       await Promise.all(deleteConfirmAlbum.photos.map((p) => deleteAlbum(p.id)));
       dataCache.invalidate("public_gallery_photos");
+      dataCache.remove("public_gallery_photos");
       setPhotos((prev) => prev.filter((p) => !deleteConfirmAlbum.photos.some((dp) => dp.id === p.id)));
       addToast(`Event "${deleteConfirmAlbum.title}" (${deleteConfirmAlbum.photos.length} photos) deleted.`, "info");
       setDeleteConfirmAlbum(null);
-    } catch (err) {
+    } catch (err: any) {
       console.error("Error deleting album:", err);
-      addToast("Failed to delete event.", "warning");
+      addToast(err?.message || "Failed to delete event.", "warning");
     }
   };
 

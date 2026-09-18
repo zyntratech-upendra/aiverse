@@ -44,6 +44,17 @@ export interface EventGallerySection {
   photos: EventPhoto[];
 }
 
+const normalizeCategory = (cat?: string): EventPhoto["category"] => {
+  if (!cat) return "Workshops";
+  const c = cat.trim().toLowerCase();
+  if (c === "hackathons" || c === "hackathon") return "Hackathons";
+  if (c === "symposiums" || c === "symposium" || c === "seminars" || c === "seminar" || c === "lectures" || c === "talks") return "Symposiums";
+  if (c === "socials" || c === "social" || c === "community" || c === "meetups" || c === "meetup") return "Socials";
+  if (c === "workshops" || c === "workshop" || c === "bootcamps" || c === "bootcamp" || c === "training") return "Workshops";
+  if (["Workshops", "Hackathons", "Symposiums", "Socials"].includes(cat)) return cat as EventPhoto["category"];
+  return "Workshops";
+};
+
 const GalleryPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"All" | "Workshops" | "Hackathons" | "Symposiums" | "Socials">("All");
   const [searchQuery, setSearchQuery] = useState("");
@@ -85,8 +96,12 @@ const GalleryPage: React.FC = () => {
 
         // 2. Try Firestore fallback if empty
         if (!backendItems || backendItems.length === 0) {
-          const querySnapshot = await getDocs(collection(db, "albums"));
-          backendItems = querySnapshot.docs.map((d) => ({ ...d.data(), id: d.id }));
+          try {
+            const querySnapshot = await getDocs(collection(db, "albums"));
+            backendItems = querySnapshot.docs.map((d) => ({ ...d.data(), id: d.id }));
+          } catch (e) {
+            console.warn("Firestore fallback notice:", e);
+          }
         }
 
         const list: EventPhoto[] = [];
@@ -94,7 +109,7 @@ const GalleryPage: React.FC = () => {
         (backendItems || []).forEach((data: any) => {
           if (data.status === "Draft") return; // Skip drafts
 
-          const category = (data.category || "Workshops") as EventPhoto["category"];
+          const category = normalizeCategory(data.category);
           const dateStr = data.date || "Just now";
           const drive = data.driveLink || "";
           const tags = Array.isArray(data.tags) ? data.tags : [];
