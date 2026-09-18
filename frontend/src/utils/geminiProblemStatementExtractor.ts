@@ -45,7 +45,6 @@ export interface ExtractedProblemStatement {
   track: string;
   round: number | string;
   description: string;
-  deliverables?: string;
 }
 
 /**
@@ -110,13 +109,8 @@ export function parseProblemStatementsFromText(
   const items: ExtractedProblemStatement[] = [];
 
   // Define regex patterns that signify the START of a new problem statement card
-  // Pattern 1: Explicit labels (Problem 1, Question 1, PS-01, Challenge 1, Task 1, Theme 1, Case 1, etc.)
   const explicitMarkerRegex = /^(?:###?\s*|\*\*\s*)?(?:Problem(?:\s+Statement)?|Challenge|Question|Q\.?|Task|Theme|Track|Case\s+Study|PS)\s*[:#.-]?\s*(\d+|[A-Z0-9_-]+)(?:[\s:–—.-]+(.*))?$/i;
-  
-  // Pattern 2: Bracketed markers e.g. [Problem 1], [PS-01], [Challenge 2]
   const bracketMarkerRegex = /^\[\s*(?:Problem(?:\s+Statement)?|PS|Challenge|Question|Track|Task)\s*[:#.-]?\s*(\d+|[A-Z0-9_-]+)\s*\](?:\s*[:–—.-]+(.*))?$/i;
-
-  // Pattern 3: Numbered items at line start e.g. "1. Smart Traffic Management" or "1) College Attendance"
   const numberedTitleRegex = /^(?:###?\s*|\*\*\s*)?(\d{1,3})[\.)\]]\s+([A-Za-z0-9][\w\s\-—:–,/&()']{2,})$/i;
 
   interface SplitMarker {
@@ -157,7 +151,6 @@ export function parseProblemStatementsFromText(
       if (!line) return;
       const numMatch = line.match(numberedTitleRegex);
       if (numMatch) {
-        // Ensure this line looks like a title/heading rather than normal paragraph continuation
         markers.push({
           lineIndex: idx,
           rawCode: numMatch[1],
@@ -202,13 +195,11 @@ export function parseProblemStatementsFromText(
       title = title.replace(/^[:–—.-]+\s*/, "").replace(/[*_#]+$/g, "").trim();
 
       let track = "";
-      let deliverables = "";
       const descLines: string[] = [];
 
       // Parse remaining lines in chunk
       const contentLines = problemLines.slice(1);
       for (const line of contentLines) {
-        // Skip duplicate title line if it was used as title
         if (line === title) continue;
 
         const trackMatch = line.match(/^(?:Track|Domain|Category|Theme)\s*[:=]\s*(.+)/i);
@@ -217,18 +208,11 @@ export function parseProblemStatementsFromText(
           continue;
         }
 
-        const delivMatch = line.match(/^(?:Deliverables?|Expected Output|Submissions?|Output)\s*[:=]\s*(.+)/i);
-        if (delivMatch) {
-          deliverables = delivMatch[1].replace(/[*_#]+$/g, "").trim();
-          continue;
-        }
-
         descLines.push(line);
       }
 
       const description = descLines.join("\n").trim() || title;
       const inferredTrack = track || inferDomainTrack(title, description, defaultTrack);
-      const finalDeliverables = deliverables || "Working Prototype / Logic Implementation + Presentation Deck + Documentation";
 
       items.push({
         id: `ps_${Date.now()}_${mIdx + 1}_${Math.random().toString(36).substring(2, 6)}`,
@@ -236,8 +220,7 @@ export function parseProblemStatementsFromText(
         title,
         track: inferredTrack,
         round: defaultRound,
-        description,
-        deliverables: finalDeliverables
+        description
       });
     });
   }
@@ -258,12 +241,10 @@ export function parseProblemStatementsFromText(
           title: firstLine.length > 70 ? firstLine.substring(0, 70) + "..." : firstLine,
           track: inferDomainTrack(firstLine, rest, defaultTrack),
           round: defaultRound,
-          description: rest,
-          deliverables: "Working Prototype + Documentation"
+          description: rest
         });
       });
     } else if (text.length > 15) {
-      // Single problem statement fallback
       const firstLine = lines[0] || "Problem Statement";
       const rest = lines.slice(1).join("\n").trim() || text;
 
@@ -273,8 +254,7 @@ export function parseProblemStatementsFromText(
         title: firstLine.length > 75 ? firstLine.substring(0, 75) + "..." : firstLine,
         track: inferDomainTrack(firstLine, rest, defaultTrack),
         round: defaultRound,
-        description: rest,
-        deliverables: "Working Prototype + Documentation"
+        description: rest
       });
     }
   }
@@ -323,7 +303,6 @@ SCHEMA TO RETURN FOR EACH OBJECT:
 - "track": The technical domain or category (e.g. "Smart Cities & IoT", "EdTech & Smart Campus", "Logistics & Optimization", "Cybersecurity & Security", "AI & Recommendation Systems", "FinTech", "Healthcare & MedTech", "CleanTech & Sustainability", "Open Innovation")
 - "round": Assigned round number (e.g. 1, 2, 3) if specified, otherwise "${targetRound}"
 - "description": The full problem statement description, scenario, background, requirements, constraints, and questions for this specific problem only.
-- "deliverables": Expected deliverables (e.g. "Working Prototype / Logic Implementation + Presentation Deck + Documentation")
 
 Return ONLY a strict JSON array of objects:
 [
@@ -332,16 +311,14 @@ Return ONLY a strict JSON array of objects:
     "title": "Smart Traffic Management",
     "track": "Smart Cities & IoT",
     "round": "${targetRound}",
-    "description": "A city has four major roads. During peak hours, Road A receives 1,200 vehicles/hour, Road B receives 900, Road C receives 1,500, and Road D receives 600. Design a method to distribute traffic signals so that the average waiting time is reduced. What data would you collect, and what algorithm or logic would you use?",
-    "deliverables": "Working Prototype / Algorithm Implementation + Presentation Deck + GitHub Repository"
+    "description": "A city has four major roads. During peak hours, Road A receives 1,200 vehicles/hour, Road B receives 900, Road C receives 1,500, and Road D receives 600. Design a method to distribute traffic signals so that the average waiting time is reduced. What data would you collect, and what algorithm or logic would you use?"
   },
   {
     "code": "PS-02",
     "title": "College Attendance System",
     "track": "EdTech & Smart Campus",
     "round": "${targetRound}",
-    "description": "A college wants to automatically identify students who are frequently absent. Given attendance records for 500 students across 6 subjects, design a solution that identifies students with attendance below 75%, detects unusual attendance patterns, and generates a monthly report. Explain the steps and the logic you would use.",
-    "deliverables": "Working Prototype + Analytics Dashboard + System Architecture Document"
+    "description": "A college wants to automatically identify students who are frequently absent. Given attendance records for 500 students across 6 subjects, design a solution that identifies students with attendance below 75%, detects unusual attendance patterns, and generates a monthly report. Explain the steps and the logic you would use."
   }
 ]
 
@@ -377,7 +354,6 @@ ${rawText}
         continue;
       }
 
-      // Clean JSON output (strip backticks if any)
       const cleanJson = rawOutputText
         .replace(/^```json\s*/i, "")
         .replace(/^```\s*/i, "")
@@ -397,8 +373,7 @@ ${rawText}
             title: (item.title || `Problem Statement ${num}`).trim(),
             track: (item.track || inferDomainTrack(item.title || "", item.description || "", targetTrack)).trim(),
             round: assignedRound === "all" ? "all" : (isNaN(Number(assignedRound)) ? assignedRound : Number(assignedRound)),
-            description: (item.description || "").trim(),
-            deliverables: (item.deliverables || "Working Prototype + Presentation Deck + GitHub Repository").trim()
+            description: (item.description || "").trim()
           };
         });
 

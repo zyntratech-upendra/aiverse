@@ -1892,7 +1892,6 @@ const EventManagementPage: React.FC = () => {
   const [psRoundInput, setPsRoundInput] = useState<string>("all");
   const [problemRoundFilter, setProblemRoundFilter] = useState<string>("all");
   const [psDescInput, setPsDescInput] = useState("");
-  const [psDeliverablesInput, setPsDeliverablesInput] = useState("");
   const [savingMultiProblems, setSavingMultiProblems] = useState(false);
   const [problemSuccessMsg, setProblemSuccessMsg] = useState<string | null>(null);
 
@@ -1919,8 +1918,7 @@ const EventManagementPage: React.FC = () => {
         title: eventAccessEvent.problemStatementTitle,
         track: eventAccessEvent.problemStatementTrack || "General Track",
         round: currR,
-        description: eventAccessEvent.problemStatement || "",
-        deliverables: ""
+        description: eventAccessEvent.problemStatement || ""
       }]);
     } else {
       setProblemList([]);
@@ -1932,7 +1930,6 @@ const EventManagementPage: React.FC = () => {
     setPsRoundInput(String(currR));
     setProblemRoundFilter("all");
     setPsDescInput("");
-    setPsDeliverablesInput("");
     setPsInputMode("manual");
     setIsAiScanningPs(false);
     setAiScanPsStatus(null);
@@ -2024,8 +2021,7 @@ const EventManagementPage: React.FC = () => {
         title: psTitleInput,
         track: psTrackInput,
         round: assignedRound,
-        description: psDescInput,
-        deliverables: psDeliverablesInput
+        description: psDescInput
       } : item));
       setEditingPsId(null);
     } else {
@@ -2035,8 +2031,7 @@ const EventManagementPage: React.FC = () => {
         title: psTitleInput,
         track: psTrackInput || "General",
         round: assignedRound,
-        description: psDescInput,
-        deliverables: psDeliverablesInput
+        description: psDescInput
       };
       setProblemList(prev => [...prev, newItem]);
     }
@@ -2045,7 +2040,6 @@ const EventManagementPage: React.FC = () => {
     setPsTitleInput("");
     setPsTrackInput("");
     setPsDescInput("");
-    setPsDeliverablesInput("");
   };
 
   const handleEditProblemItem = (item: any) => {
@@ -2055,7 +2049,6 @@ const EventManagementPage: React.FC = () => {
     setPsTrackInput(item.track);
     setPsRoundInput(item.round ? String(item.round) : "all");
     setPsDescInput(item.description);
-    setPsDeliverablesInput(item.deliverables || "");
   };
 
   const handleDeleteProblemItem = (id: string) => {
@@ -2065,7 +2058,6 @@ const EventManagementPage: React.FC = () => {
       setPsTitleInput("");
       setPsTrackInput("");
       setPsDescInput("");
-      setPsDeliverablesInput("");
     }
   };
 
@@ -8974,23 +8966,12 @@ const EventManagementPage: React.FC = () => {
                         <div className="space-y-1">
                           <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Detailed Description & Requirements</label>
                           <textarea
-                            rows={4}
+                            rows={5}
                             value={psDescInput}
                             onChange={(e) => setPsDescInput(e.target.value)}
                             placeholder="Paste or type detailed description, problem statement background, constraints, requirements, and target users..."
-                            className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all leading-relaxed whitespace-pre-wrap min-h-[95px] resize-y"
+                            className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-medium text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all leading-relaxed whitespace-pre-wrap min-h-[110px] resize-y"
                             required
-                          />
-                        </div>
-
-                        <div className="space-y-1">
-                          <label className="block text-[10px] font-black text-slate-500 uppercase tracking-widest">Expected Deliverables (Optional)</label>
-                          <input
-                            type="text"
-                            value={psDeliverablesInput}
-                            onChange={(e) => setPsDeliverablesInput(e.target.value)}
-                            placeholder="e.g. Working Prototype + SRS Document + Demo Video"
-                            className="w-full px-3 py-2 bg-slate-50/80 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all"
                           />
                         </div>
 
@@ -9259,12 +9240,6 @@ const EventManagementPage: React.FC = () => {
                                 <p className="text-[11px] text-slate-600 font-medium line-clamp-2 leading-relaxed">
                                   {item.description}
                                 </p>
-
-                                {item.deliverables && (
-                                  <p className="text-[10px] text-indigo-700 font-bold truncate">
-                                    📦 Deliverables: {item.deliverables}
-                                  </p>
-                                )}
                               </div>
                             ))}
                           </div>
@@ -9432,14 +9407,6 @@ const EventManagementPage: React.FC = () => {
                                 {item.description}
                               </div>
                             </div>
-
-                            {/* Deliverables Section */}
-                            {item.deliverables && (
-                              <div className="px-4.5 py-3 rounded-2xl bg-blue-50/80 border border-blue-100/80 text-xs font-extrabold text-blue-950 flex items-center gap-2.5 shadow-2xs">
-                                <span className="text-[#2563EB]">🎯 Deliverables:</span>
-                                <span className="text-slate-800 font-semibold">{item.deliverables}</span>
-                              </div>
-                            )}
                           </div>
                         ))}
                       </div>
