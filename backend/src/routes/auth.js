@@ -65,75 +65,69 @@ router.post(
         $or: [{ phone: cleanEmail }, { phone: last10 }, { phoneNumber: cleanEmail }, { phoneNumber: last10 }],
       }).lean();
 
-      if (!userDoc) {
-        const regDoc = await Registration.findOne({
-          $or: [
-            { phone: cleanEmail },
-            { phone: last10 },
-            { phoneNumber: cleanEmail },
-            { phoneNumber: last10 },
-            { leadPhone: cleanEmail },
-            { leadPhone: last10 },
-            { 'members.phone': cleanEmail },
-            { 'members.phone': last10 },
-            { 'members.phoneNumber': cleanEmail },
-            { 'members.phoneNumber': last10 },
-          ],
-        }).lean();
+      let regDoc = await Registration.findOne({
+        $or: [
+          { phone: cleanEmail },
+          { phone: last10 },
+          { phoneNumber: cleanEmail },
+          { phoneNumber: last10 },
+          { leadPhone: cleanEmail },
+          { leadPhone: last10 },
+          { 'members.phone': cleanEmail },
+          { 'members.phone': last10 },
+          { 'members.phoneNumber': cleanEmail },
+          { 'members.phoneNumber': last10 },
+        ],
+      }).lean();
 
-        if (regDoc) {
-          if (!isRegistrationConfirmed(regDoc)) {
-            return res.status(403).json({
-              success: false,
-              error: 'Your team registration is not confirmed yet. Please wait for faculty confirmation before logging in.',
-            });
-          }
+      if (!userDoc && !regDoc) {
+        return res.status(404).json({
+          success: false,
+          error: 'No registered participant or team lead found for this phone number. Please register for an event first.',
+        });
+      }
 
-          const role = 'participant';
-          const payload = {
-            uid: regDoc._id,
-            email: regDoc.email || regDoc.teamEmail || `${last10}@aiverse.in`,
-            name: regDoc.fullName || regDoc.teamLeadName || regDoc.name || 'Participant',
-            role,
-            displayRole: 'Participant',
-            requiresPasswordChange: true,
-            registration_id: regDoc._id,
-            teamName: regDoc.groupName || regDoc.teamName || '',
-            eventTitle: regDoc.eventTitle || '',
-          };
-          const token = signToken(payload, { expiresIn: '7d' });
-          return res.json({ success: true, token, user: payload });
+      if (regDoc) {
+        if (!isRegistrationConfirmed(regDoc)) {
+          return res.status(403).json({
+            success: false,
+            error: 'Your team registration is pending verification. Please wait for faculty confirmation before logging in.',
+          });
         }
-      } else {
+
+        const role = 'participant';
+        const payload = {
+          uid: regDoc._id,
+          email: regDoc.email || regDoc.teamEmail || `${last10}@aiverse.in`,
+          name: regDoc.fullName || regDoc.teamLeadName || regDoc.name || 'Participant',
+          role,
+          displayRole: 'Participant',
+          requiresPasswordChange: true,
+          registration_id: regDoc._id,
+          teamName: regDoc.groupName || regDoc.teamName || '',
+          eventTitle: regDoc.eventTitle || '',
+        };
+        const token = signToken(payload, { expiresIn: '7d' });
+        return res.json({ success: true, token, user: payload });
+      }
+
+      if (userDoc) {
         const role = normalizeRole(userDoc.role, 'participant');
 
         if (role === 'participant') {
-          let regDoc = null;
           if (userDoc.registration_id) {
             regDoc = await Registration.findById(userDoc.registration_id).lean();
           }
           if (!regDoc) {
-            regDoc = await Registration.findOne({
-              $or: [
-                { phone: cleanEmail },
-                { phone: last10 },
-                { phoneNumber: cleanEmail },
-                { phoneNumber: last10 },
-                { leadPhone: cleanEmail },
-                { leadPhone: last10 },
-                { email: userDoc.email },
-                { 'members.phone': cleanEmail },
-                { 'members.phone': last10 },
-                { 'members.phoneNumber': cleanEmail },
-                { 'members.phoneNumber': last10 },
-                { 'members.email': userDoc.email },
-              ],
-            }).lean();
-          }
-          if (regDoc && !isRegistrationConfirmed(regDoc)) {
             return res.status(403).json({
               success: false,
-              error: 'Your team registration is not confirmed yet. Please wait for faculty confirmation before logging in.',
+              error: 'Access denied: No confirmed event registration found for this phone number. Only registered team leads and participants can log in.',
+            });
+          }
+          if (!isRegistrationConfirmed(regDoc)) {
+            return res.status(403).json({
+              success: false,
+              error: 'Your team registration is pending verification. Please wait for faculty confirmation before logging in.',
             });
           }
         }
@@ -147,17 +141,17 @@ router.post(
           email: userDoc.email,
           name: userDoc.name || userDoc.display_name || 'Participant',
           role,
-          displayRole: userDoc.displayRole || userDoc.position || 'Participant',
+          displayRole: userDoc.displayRole || userDoc.position || (role === 'faculty' ? 'Super Admin' : role === 'organizer' ? 'Student Organizer' : role === 'jury' ? 'Jury Evaluator' : 'Participant'),
           requiresPasswordChange: requiresPwChange,
-          registration_id: userDoc.registration_id || '',
-          teamName: userDoc.team_name || userDoc.teamName || '',
-          eventTitle: userDoc.event_title || userDoc.eventTitle || '',
+          registration_id: userDoc.registration_id || (regDoc ? regDoc._id : ''),
+          teamName: userDoc.team_name || userDoc.teamName || (regDoc ? regDoc.groupName || regDoc.teamName : ''),
+          eventTitle: userDoc.event_title || userDoc.eventTitle || (regDoc ? regDoc.eventTitle : ''),
         };
         const token = signToken(payload, { expiresIn: '7d' });
         return res.json({ success: true, token, user: payload });
       }
 
-      return res.status(404).json({ success: false, error: 'No registered user found for this phone number' });
+      return res.status(404).json({ success: false, error: 'No registered participant found for this phone number' });
     }
 
     if (!cleanEmail || !cleanPassword) {
@@ -175,7 +169,6 @@ router.post(
       'studentorganizer@aiverse.in',
       'jury@aiverse.in',
       'jurry@aiverse.in',
-      'participant@aiverse.in',
     ];
 
     if (userDoc) {
@@ -213,10 +206,16 @@ router.post(
             ],
           }).lean();
         }
-        if (regDoc && !isRegistrationConfirmed(regDoc)) {
+        if (!regDoc) {
           return res.status(403).json({
             success: false,
-            error: 'Your team registration is not confirmed yet. Please wait for faculty confirmation before logging in.',
+            error: 'Access denied: No event registration found for this account. Only registered team leads and participants can log in.',
+          });
+        }
+        if (!isRegistrationConfirmed(regDoc)) {
+          return res.status(403).json({
+            success: false,
+            error: 'Your team registration is pending verification. Please wait for faculty confirmation before logging in.',
           });
         }
       }
@@ -241,15 +240,15 @@ router.post(
       return res.json({ success: true, token, user: payload });
     }
 
-    // If predefined email not yet created, create now
+    // If predefined admin/faculty/jury email not yet created, create now
     if (PREDEFINED_EMAILS.includes(cleanEmail)) {
       if (!DEFAULT_ADMIN_PASSWORDS.includes(cleanPassword)) {
         return res.status(401).json({ success: false, error: 'Invalid credentials.' });
       }
 
-      let role = 'participant';
-      let displayRole = 'Participant';
-      let name = 'Participant';
+      let role = 'faculty';
+      let displayRole = 'Super Admin';
+      let name = 'Super Admin';
 
       if (cleanEmail === 'admin@aiverse.in') {
         role = 'faculty';
@@ -295,7 +294,7 @@ router.post(
       return res.json({ success: true, token, user: payload });
     }
 
-    // Check in registrations collection
+    // Check in registrations collection (Team Lead & Registered Participants)
     const reg = await Registration.findOne({
       $or: [
         { email: cleanEmail },
@@ -316,7 +315,7 @@ router.post(
       if (!isRegistrationConfirmed(reg)) {
         return res.status(403).json({
           success: false,
-          error: 'Your team registration is not confirmed yet. Please wait for faculty confirmation before logging in.',
+          error: 'Your team registration is pending verification. Please wait for faculty confirmation before logging in.',
         });
       }
 
@@ -335,7 +334,10 @@ router.post(
       return res.json({ success: true, token, user: payload });
     }
 
-    return res.status(401).json({ success: false, error: 'Invalid email or password.' });
+    return res.status(401).json({
+      success: false,
+      error: 'Access denied: No registered team lead or participant found for this email address. Please register for an event first.',
+    });
   })
 );
 

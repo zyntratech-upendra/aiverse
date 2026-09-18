@@ -210,9 +210,9 @@ const LoginPage: React.FC = () => {
 
         {/* Sign up Footer text */}
         <div className="text-center text-xs sm:text-sm text-slate-400 mt-8 font-medium">
-          Don't have an account?
+          New participant or team?
           <Link to="/events" className="text-aether-blue-600 font-bold hover:underline ml-1">
-            Join Club
+            Register for Events
           </Link>
         </div>
 

@@ -13,8 +13,7 @@ export const ALLOWED_EMAILS = [
   "facultycoordinator@aiverse.in",
   "studentorganizer@aiverse.in",
   "jury@aiverse.in",
-  "jurry@aiverse.in",
-  "participant@aiverse.in"
+  "jurry@aiverse.in"
 ];
 
 export interface UserProfile {
