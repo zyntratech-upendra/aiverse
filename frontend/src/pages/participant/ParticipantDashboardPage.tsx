@@ -1399,6 +1399,8 @@ export const ParticipantDashboardPage: React.FC = () => {
                       const correctCount = userSub?.correctCount ?? Math.round((effectiveScore / Math.max(1, (activeQuizObj.pointsPerQuestion || 2))));
                       const incorrectCount = userSub?.incorrectCount ?? Math.max(0, (reviewQuestions.length || Math.round(maxQScore / 2)) - correctCount);
 
+                      const isResultsPublished = Boolean(activeQuizObj?.resultsPublished);
+
                       return (
                         <div
                           key={quiz.id}
@@ -1418,10 +1420,10 @@ export const ParticipantDashboardPage: React.FC = () => {
                                 {isSubmitted && (
                                   <span className="text-[10px] font-black text-emerald-700 bg-emerald-50 px-2.5 py-0.5 rounded-full border border-emerald-200 flex items-center gap-1">
                                     <CircleCheckBig className="w-3 h-3 text-emerald-600" />
-                                    <span>Submitted & Evaluated</span>
+                                    <span>{isResultsPublished ? "Submitted & Evaluated" : "Submitted & Sealed"}</span>
                                   </span>
                                 )}
-                                {currentRound > 1 && isSubmitted && (
+                                {currentRound > 1 && isSubmitted && isResultsPublished && (
                                   <span className="text-[10px] font-black text-purple-700 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-200 flex items-center gap-1">
                                     <Trophy className="w-3 h-3 text-purple-600" />
                                     <span>Qualified for Round {currentRound}</span>
@@ -1434,12 +1436,19 @@ export const ParticipantDashboardPage: React.FC = () => {
 
                             <div className="flex items-center gap-2 self-start md:self-auto flex-wrap">
                               {isSubmitted ? (
-                                <div className="text-right">
-                                  <div className="text-xs font-bold text-slate-400">Final Score</div>
-                                  <div className="text-xl font-black text-blue-600">
-                                    {effectiveScore} <span className="text-sm font-semibold text-slate-400">/ {maxQScore}</span>
+                                isResultsPublished ? (
+                                  <div className="text-right">
+                                    <div className="text-xs font-bold text-slate-400">Final Score</div>
+                                    <div className="text-xl font-black text-blue-600">
+                                      {effectiveScore} <span className="text-sm font-semibold text-slate-400">/ {maxQScore}</span>
+                                    </div>
                                   </div>
-                                </div>
+                                ) : (
+                                  <span className="text-[10px] font-extrabold text-amber-800 bg-amber-50 px-3 py-1 rounded-full border border-amber-200/80 flex items-center gap-1.5 shadow-2xs">
+                                    <Clock className="w-3.5 h-3.5 text-amber-600 animate-pulse" />
+                                    <span>Results Pending</span>
+                                  </span>
+                                )
                               ) : isLive ? (
                                 <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 px-3 py-1 rounded-full border border-emerald-200 flex items-center gap-1">
                                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Live Now
@@ -1450,55 +1459,80 @@ export const ParticipantDashboardPage: React.FC = () => {
                                 </span>
                               ) : (
                                 <span className="text-[10px] font-bold text-indigo-700 bg-indigo-50 px-3 py-1 rounded-full border border-indigo-200 flex items-center gap-1">
-                                  <Clock className="w-3 h-3 text-indigo-500" /> Scheduled
+                                  <Clock className="w-3.5 h-3.5 text-indigo-500" /> Scheduled
                                 </span>
                               )}
                             </div>
                           </div>
 
-                          {/* Submitted Quiz Scorecard Hero Summary */}
+                          {/* Submitted Quiz Scorecard Hero Summary (Published vs Pending) */}
                           {isSubmitted && (
-                            <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-5 text-white shadow-md relative overflow-hidden">
-                              <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
-                                <div className="space-y-1">
-                                  <span className="text-blue-300 text-[10px] font-black uppercase tracking-widest block">
-                                    Quiz Performance & Scorecard
-                                  </span>
-                                  <div className="flex items-baseline gap-2">
-                                    <span className="text-3xl sm:text-4xl font-black text-white tracking-tight">
-                                      {effectiveScore}
+                            isResultsPublished ? (
+                              <div className="bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-5 text-white shadow-md relative overflow-hidden">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+                                  <div className="space-y-1">
+                                    <span className="text-blue-300 text-[10px] font-black uppercase tracking-widest block">
+                                      Quiz Performance & Scorecard
                                     </span>
-                                    <span className="text-lg font-bold text-slate-400">
-                                      / {maxQScore} Marks
-                                    </span>
+                                    <div className="flex items-baseline gap-2">
+                                      <span className="text-3xl sm:text-4xl font-black text-white tracking-tight">
+                                        {effectiveScore}
+                                      </span>
+                                      <span className="text-lg font-bold text-slate-400">
+                                        / {maxQScore} Marks
+                                      </span>
+                                    </div>
+                                  </div>
+
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <div className="bg-white/10 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/15 text-center">
+                                      <span className="text-[10px] font-bold text-slate-300 block uppercase">Accuracy</span>
+                                      <span className="text-sm font-black text-emerald-400">{effectivePercentage}%</span>
+                                    </div>
+
+                                    <div className="bg-white/10 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/15 text-center">
+                                      <span className="text-[10px] font-bold text-slate-300 block uppercase">Correct</span>
+                                      <span className="text-sm font-black text-emerald-400">{correctCount}</span>
+                                    </div>
+
+                                    <div className="bg-white/10 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/15 text-center">
+                                      <span className="text-[10px] font-bold text-slate-300 block uppercase">Incorrect</span>
+                                      <span className="text-sm font-black text-rose-400">{incorrectCount}</span>
+                                    </div>
+
+                                    <div className="bg-white/10 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/15 text-center">
+                                      <span className="text-[10px] font-bold text-slate-300 block uppercase">Status</span>
+                                      <span className="text-xs font-black text-amber-300">
+                                        {isPassed ? "✓ Qualified" : "Completed"}
+                                      </span>
+                                    </div>
                                   </div>
                                 </div>
-
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <div className="bg-white/10 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/15 text-center">
-                                    <span className="text-[10px] font-bold text-slate-300 block uppercase">Accuracy</span>
-                                    <span className="text-sm font-black text-emerald-400">{effectivePercentage}%</span>
+                              </div>
+                            ) : (
+                              <div className="bg-gradient-to-br from-slate-900 via-indigo-950 to-slate-900 rounded-2xl p-5 text-white shadow-md relative overflow-hidden">
+                                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 relative z-10">
+                                  <div className="space-y-1.5">
+                                    <span className="text-amber-400 text-[10px] font-black uppercase tracking-widest bg-amber-400/15 border border-amber-400/30 px-2.5 py-0.5 rounded-full inline-block">
+                                      OFFICIAL ANNOUNCEMENT PENDING
+                                    </span>
+                                    <h4 className="text-lg sm:text-xl font-black text-white tracking-tight">
+                                      The Quiz Results Will Be Announced Soon
+                                    </h4>
+                                    <p className="text-xs text-slate-300 font-medium max-w-xl leading-relaxed">
+                                      Your examination answers have been securely recorded and sealed. Scores, accuracy, and verified answer keys will appear once officially published by the faculty.
+                                    </p>
                                   </div>
 
-                                  <div className="bg-white/10 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/15 text-center">
-                                    <span className="text-[10px] font-bold text-slate-300 block uppercase">Correct</span>
-                                    <span className="text-sm font-black text-emerald-400">{correctCount}</span>
-                                  </div>
-
-                                  <div className="bg-white/10 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/15 text-center">
-                                    <span className="text-[10px] font-bold text-slate-300 block uppercase">Incorrect</span>
-                                    <span className="text-sm font-black text-rose-400">{incorrectCount}</span>
-                                  </div>
-
-                                  <div className="bg-white/10 backdrop-blur-md px-3.5 py-1.5 rounded-xl border border-white/15 text-center">
-                                    <span className="text-[10px] font-bold text-slate-300 block uppercase">Status</span>
-                                    <span className="text-xs font-black text-amber-300">
-                                      {isPassed ? "✓ Qualified" : "Completed"}
+                                  <div className="flex items-center gap-2 shrink-0">
+                                    <span className="inline-flex items-center gap-1.5 text-xs font-bold px-3.5 py-2 rounded-xl bg-white/10 text-slate-200 border border-white/15 backdrop-blur-md">
+                                      <CircleCheckBig className="w-4 h-4 text-emerald-400" />
+                                      <span>Answers Sealed</span>
                                     </span>
                                   </div>
                                 </div>
                               </div>
-                            </div>
+                            )
                           )}
 
                           {/* Action Button Row */}
@@ -1509,23 +1543,36 @@ export const ParticipantDashboardPage: React.FC = () => {
 
                             {isSubmitted ? (
                               <div className="flex items-center gap-2.5 flex-wrap">
-                                <button
-                                  onClick={() => toggleQuizReview(quiz.id)}
-                                  className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-xl border border-blue-200/80 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95"
-                                >
-                                  <BarChart3 className="w-4 h-4 text-blue-600" />
-                                  <span>{isExpanded ? "Hide Answer Sheet" : "Review Questions & Answers"}</span>
-                                  {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                                </button>
+                                {isResultsPublished ? (
+                                  <>
+                                    <button
+                                      onClick={() => toggleQuizReview(quiz.id)}
+                                      className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold text-xs rounded-xl border border-blue-200/80 transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs active:scale-95"
+                                    >
+                                      <BarChart3 className="w-4 h-4 text-blue-600" />
+                                      <span>{isExpanded ? "Hide Answer Sheet" : "Review Questions & Answers"}</span>
+                                      {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                    </button>
 
-                                <Link
-                                  to={`/participant/quiz/${quiz.id}/completed`}
-                                  className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
-                                >
-                                  <Trophy className="w-3.5 h-3.5 text-amber-400" />
-                                  <span>Full Scorecard & Receipt</span>
-                                  <ArrowRight className="w-3.5 h-3.5" />
-                                </Link>
+                                    <Link
+                                      to={`/participant/quiz/${quiz.id}/completed`}
+                                      className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-4 py-2 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                                    >
+                                      <Trophy className="w-3.5 h-3.5 text-amber-400" />
+                                      <span>Full Scorecard & Receipt</span>
+                                      <ArrowRight className="w-3.5 h-3.5" />
+                                    </Link>
+                                  </>
+                                ) : (
+                                  <Link
+                                    to={`/participant/quiz/${quiz.id}/completed`}
+                                    className="bg-slate-900 hover:bg-slate-800 text-white font-bold text-xs px-5 py-2.5 rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                                  >
+                                    <Clock className="w-3.5 h-3.5 text-amber-400" />
+                                    <span>View Submission Receipt</span>
+                                    <ArrowRight className="w-3.5 h-3.5" />
+                                  </Link>
+                                )}
                               </div>
                             ) : (
                               <Link
@@ -1543,7 +1590,7 @@ export const ParticipantDashboardPage: React.FC = () => {
                           </div>
 
                           {/* ================= INLINE QUESTION & ANSWER SHEET REVIEW ================= */}
-                          {isExpanded && (
+                          {isExpanded && isResultsPublished && (
                             <div className="pt-5 border-t border-slate-200/80 space-y-4 animate-in fade-in duration-200">
                               <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                                 <div>

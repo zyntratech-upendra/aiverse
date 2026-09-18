@@ -704,12 +704,15 @@ interface ExcelScoreRow {
         updatedAt: now
       };
       await api.updateQuiz(quiz.id, updatedQuiz);
+      if (typeof window !== "undefined") {
+        sessionStorage.removeItem(`quiz_cache_${quiz.id}`);
+      }
       setQuizzes(prev => prev.map(q => q.id === quiz.id ? updatedQuiz : q));
       await showAlert({
-        title: nextState ? "Results Published" : "Results Hidden",
+        title: nextState ? "Results Published (ON)" : "Results Hidden (OFF)",
         message: nextState
-          ? `Quiz results for "${quiz.title}" are now live and visible to participants!`
-          : `Quiz results for "${quiz.title}" have been hidden from participants.`,
+          ? `Quiz results for "${quiz.title}" are now LIVE and visible to participants!`
+          : `Quiz results for "${quiz.title}" have been HIDDEN from participants.`,
         type: "success"
       });
     } catch (err: any) {
@@ -3288,24 +3291,38 @@ Answer: A`;
                 {currentQuizObj && (
                   <button
                     onClick={() => handleTogglePublishResults(currentQuizObj)}
-                    className={`font-bold text-xs px-4 py-2 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer shadow-xs border ${
+                    className={`font-bold text-xs px-3.5 py-1.5 rounded-xl transition-all flex items-center gap-2.5 cursor-pointer shadow-xs border ${
                       currentQuizObj.resultsPublished
-                        ? "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-600"
-                        : "bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white border-blue-600"
+                        ? "bg-emerald-50 text-emerald-900 border-emerald-300 hover:bg-emerald-100"
+                        : "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200"
                     }`}
-                    title={currentQuizObj.resultsPublished ? "Results are currently visible to participants. Click to hide." : "Publish results so participants can view their scorecards."}
+                    title={
+                      currentQuizObj.resultsPublished
+                        ? "Results are currently ON (Live for participants). Click to turn OFF."
+                        : "Results are currently OFF (Hidden from participants). Click to turn ON."
+                    }
                   >
-                    {currentQuizObj.resultsPublished ? (
-                      <>
-                        <CheckCircle className="w-4 h-4 text-white" />
-                        <span>Results Published</span>
-                      </>
-                    ) : (
-                      <>
-                        <Sparkles className="w-4 h-4 text-white" />
-                        <span>Publish Results</span>
-                      </>
-                    )}
+                    {/* Visual Toggle Switch Pill */}
+                    <div
+                      className={`w-9 h-5 rounded-full p-0.5 transition-colors flex items-center ${
+                        currentQuizObj.resultsPublished ? "bg-emerald-600 justify-end" : "bg-slate-300 justify-start"
+                      }`}
+                    >
+                      <div className="w-4 h-4 rounded-full bg-white shadow-sm transform transition-transform" />
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-xs">
+                      <span className="font-extrabold">Publish Results:</span>
+                      <span
+                        className={`font-black text-[10px] uppercase px-2 py-0.5 rounded-md ${
+                          currentQuizObj.resultsPublished
+                            ? "bg-emerald-600 text-white shadow-2xs"
+                            : "bg-slate-300 text-slate-700"
+                        }`}
+                      >
+                        {currentQuizObj.resultsPublished ? "ON" : "OFF"}
+                      </span>
+                    </div>
                   </button>
                 )}
 

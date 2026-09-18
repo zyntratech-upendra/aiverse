@@ -73,6 +73,10 @@ export const QuizCompletionPage: React.FC = () => {
     };
 
     loadData();
+
+    // Poll every 4 seconds to detect when faculty publishes results in real-time
+    const pollId = setInterval(loadData, 4000);
+    return () => clearInterval(pollId);
   }, [quizId, user]);
 
   const formatSeconds = (seconds: number) => {
@@ -81,7 +85,7 @@ export const QuizCompletionPage: React.FC = () => {
     return `${mins}m ${secs}s`;
   };
 
-  const isResultsPublished = true;
+  const isResultsPublished = Boolean(quiz?.resultsPublished);
   const violationsCount = submission?.violationsCount || 0;
   const violationLogs = submission?.violationLogs || [];
 
