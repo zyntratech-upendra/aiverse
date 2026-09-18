@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useAuth } from "../../context/AuthContext";
 import { Link, useNavigate } from "react-router-dom";
 import {
@@ -498,6 +498,15 @@ export const ParticipantDashboardPage: React.FC = () => {
   };
 
   const submissionProgress = getSubmissionProgress();
+
+  const submissionInitialData = useMemo(() => ({
+    githubUrl,
+    demoVideoUrl,
+    submissionStatus,
+    submittedAt,
+    currentRound,
+    problemStatement: projectTitle
+  }), [githubUrl, demoVideoUrl, submissionStatus, submittedAt, currentRound, projectTitle]);
 
   const handleConfirmAndContinue = () => {
     setTeamReviewConfirmed(true);
@@ -1258,13 +1267,7 @@ export const ParticipantDashboardPage: React.FC = () => {
             <ProjectSubmissionPage
               targetRegId={targetRegId}
               activeRoundType={activeRoundType}
-              initialData={{
-                githubUrl,
-                demoVideoUrl,
-                submissionStatus,
-                submittedAt,
-                currentRound
-              }}
+              initialData={submissionInitialData}
               onSuccess={() => {
                 setSubmissionStatus("Submitted");
                 setSubmittedAt(Date.now());

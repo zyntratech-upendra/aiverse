@@ -55,6 +55,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
   const [saving, setSaving] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [statusNotice, setStatusNotice] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [saveStatus, setSaveStatus] = useState<"idle" | "saving" | "saved">("idle");
 
   // Problem Statements List, Selected, Saved & Lock State
   const [availableProblemStatements, setAvailableProblemStatements] = useState<any[]>([]);
@@ -68,6 +69,114 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
   // Event Step Locks State
   const [eventLockedSteps, setEventLockedSteps] = useState<Record<number, boolean>>({});
   const [currentEventId, setCurrentEventId] = useState<string>("");
+
+  // Real-time Protection & Value Refs (Protects active typing against polling overwrites)
+  const problemStatementRefVal = useRef(problemStatement);
+  const keyFeaturesRefVal = useRef(keyFeatures);
+  const githubUrlRefVal = useRef(githubUrl);
+  const prototypeUrlRefVal = useRef(prototypeUrl);
+  const demoVideoUrlRefVal = useRef(demoVideoUrl);
+  const selectedPsIdRefVal = useRef(selectedPsId);
+  const currentTeamRoundRef = useRef(currentTeamRound);
+
+  const isHydratedRef = useRef(false);
+  const isDirtyRef = useRef(false);
+  const lastUserEditTimeRef = useRef<number>(0);
+  const autoSaveTimerRef = useRef<any>(null);
+
+  // Synchronize ref values
+  useEffect(() => { problemStatementRefVal.current = problemStatement; }, [problemStatement]);
+  useEffect(() => { keyFeaturesRefVal.current = keyFeatures; }, [keyFeatures]);
+  useEffect(() => { githubUrlRefVal.current = githubUrl; }, [githubUrl]);
+  useEffect(() => { prototypeUrlRefVal.current = prototypeUrl; }, [prototypeUrl]);
+  useEffect(() => { demoVideoUrlRefVal.current = demoVideoUrl; }, [demoVideoUrl]);
+  useEffect(() => { selectedPsIdRefVal.current = selectedPsId; }, [selectedPsId]);
+  useEffect(() => { currentTeamRoundRef.current = currentTeamRound; }, [currentTeamRound]);
+
+  // LocalStorage Draft Persistence Helpers
+  const getDraftStorageKey = (regId: string, round: number) => `aiverse_draft_${regId || 'anon'}_r${round || 1}`;
+
+  const persistDraftToStorage = (updates: Partial<{
+    problemStatement: string;
+    keyFeatures: string;
+    githubUrl: string;
+    prototypeUrl: string;
+    demoVideoUrl: string;
+    selectedPsId: string;
+  }>) => {
+    try {
+      const key = getDraftStorageKey(targetRegId || "", currentTeamRoundRef.current);
+      const existing = JSON.parse(localStorage.getItem(key) || "{}");
+      localStorage.setItem(key, JSON.stringify({
+        ...existing,
+        ...updates,
+        savedAt: Date.now()
+      }));
+    } catch (err) {
+      // Ignore localStorage write errors
+    }
+  };
+
+  const getDraftFromStorage = (regId: string, round: number) => {
+    try {
+      const key = getDraftStorageKey(regId || "", round || 1);
+      const item = localStorage.getItem(key);
+      if (item) return JSON.parse(item);
+    } catch (err) {}
+    return null;
+  };
+
+  // Debounced Firestore Auto-Save in background
+  const performAutoSave = async () => {
+    if (!targetRegId || !isDirtyRef.current) return;
+    try {
+      setSaveStatus("saving");
+      const regRef = doc(db, "registrations", targetRegId);
+      const cRound = currentTeamRoundRef.current || 1;
+      const rP = `r${cRound}_`;
+      const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsIdRefVal.current || p.code === selectedPsIdRefVal.current) || null;
+
+      const currentPs = problemStatementRefVal.current;
+      const currentKf = keyFeaturesRefVal.current;
+      const currentGh = githubUrlRefVal.current;
+      const currentProto = prototypeUrlRefVal.current;
+      const currentVid = demoVideoUrlRefVal.current;
+      const currentPsId = selectedPsIdRefVal.current;
+
+      await updateDoc(regRef, {
+        problemStatement: currentPs,
+        keyFeatures: currentKf,
+        githubUrl: currentGh,
+        prototypeUrl: currentProto,
+        demoVideoUrl: currentVid,
+        selectedProblemStatementId: currentPsId,
+        selectedProblemStatement: selectedPsObj,
+        submissionRound: cRound,
+        updatedAt: Date.now(),
+        [`${rP}problemStatement`]: currentPs,
+        [`${rP}keyFeatures`]: currentKf,
+        [`${rP}githubUrl`]: currentGh,
+        [`${rP}prototypeUrl`]: currentProto,
+        [`${rP}demoVideoUrl`]: currentVid,
+        [`${rP}selectedProblemStatementId`]: currentPsId,
+        [`${rP}selectedProblemStatement`]: selectedPsObj,
+      });
+
+      isDirtyRef.current = false;
+      setSaveStatus("saved");
+      setTimeout(() => setSaveStatus("idle"), 3000);
+    } catch (err) {
+      console.warn("Auto-save to Firestore failed:", err);
+      setSaveStatus("idle");
+    }
+  };
+
+  const scheduleAutoSave = () => {
+    isDirtyRef.current = true;
+    lastUserEditTimeRef.current = Date.now();
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
+    autoSaveTimerRef.current = setTimeout(performAutoSave, 1500);
+  };
 
   const isStepLocked = (stepId: number): boolean => {
     if (stepId === 1 && (isPsLocked || eventLockedSteps[1])) return true;
@@ -106,93 +215,210 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         [`${rP}selectedProblemStatement`]: selectedPsObj,
         ...additionalFields
       });
+      isDirtyRef.current = false;
     } catch (err) {
       console.error("Error saving step data to Firestore:", err);
     }
   };
 
-  // Helper to apply registration data with strict per-round isolation
-  const applyRegistrationDocData = (data: any) => {
-    const regCurrentRound = Number(data.currentRound || data.promotedToRound || initialData?.currentRound || 1);
+  // Helper to apply registration data safely without wiping user edits
+  const applyRegistrationDocData = (data: any, isInitialHydration: boolean = false) => {
+    if (!data) return;
+
+    const regCurrentRound = Number(data.currentRound || data.promotedToRound || initialData?.currentRound || currentTeamRoundRef.current || 1);
     setCurrentTeamRound(regCurrentRound);
+    currentTeamRoundRef.current = regCurrentRound;
 
     const rP = `r${regCurrentRound}_`;
-    const hasExplicitRoundData = !!(
-      data[`${rP}problemStatement`] ||
-      data[`${rP}selectedProblemStatementId`] ||
-      data[`${rP}submittedAt`] ||
-      data[`${rP}submissionStatus`] ||
-      data[`${rP}srsFileName`] ||
-      data[`${rP}presentationFileName`] ||
-      data[`${rP}keyFeatures`] ||
-      data[`${rP}githubUrl`]
-    );
-    const isLiveSubmissionForCurrentRound = Number(data.submissionRound) === regCurrentRound || (regCurrentRound === 1 && !data.submissionRound);
+    const remoteProblemStatement = data[`${rP}problemStatement`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.problemStatement : undefined);
+    const remoteKeyFeatures = data[`${rP}keyFeatures`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.keyFeatures : undefined);
+    const remoteGithubUrl = data[`${rP}githubUrl`] ?? data[`${rP}githubLink`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? (data.githubUrl || data.githubLink) : undefined);
+    const remotePrototypeUrl = data[`${rP}prototypeUrl`] ?? data[`${rP}figmaUrl`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? (data.prototypeUrl || data.figmaUrl) : undefined);
+    const remoteDemoVideoUrl = data[`${rP}demoVideoUrl`] ?? data[`${rP}videoLink`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? (data.demoVideoUrl || data.videoLink) : undefined);
+    const remoteSrsFileName = data[`${rP}srsFileName`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.srsFileName : undefined);
+    const remotePresentationFileName = data[`${rP}presentationFileName`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.presentationFileName : undefined);
+    const remoteSelectedPsId = data[`${rP}selectedProblemStatementId`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.selectedProblemStatementId : undefined);
+    const remoteIsPsSaved = Boolean(data[`${rP}isPsSaved`] || (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.isPsSaved : false) || remoteSelectedPsId);
+    const remoteIsPsLocked = Boolean(data[`${rP}isPsLocked`] || (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? (data.isPsLocked || data.problemStatementLocked) : false));
+    const remoteSubmissionStatus = data[`${rP}submissionStatus`] ?? (Number(data.submissionRound) === regCurrentRound || regCurrentRound === 1 ? data.submissionStatus : undefined);
 
-    if (hasExplicitRoundData) {
-      setProblemStatement(data[`${rP}problemStatement`] || "");
-      setKeyFeatures(data[`${rP}keyFeatures`] || "");
-      setGithubUrl(data[`${rP}githubUrl`] || data[`${rP}githubLink`] || "");
-      setPrototypeUrl(data[`${rP}prototypeUrl`] || data[`${rP}figmaUrl`] || "");
-      setDemoVideoUrl(data[`${rP}demoVideoUrl`] || data[`${rP}videoLink`] || "");
-      setSrsFileName(data[`${rP}srsFileName`] || "");
-      setPresentationFileName(data[`${rP}presentationFileName`] || "");
-      setSelectedPsId(data[`${rP}selectedProblemStatementId`] || "");
-      setIsPsSaved(Boolean(data[`${rP}isPsSaved`] || data[`${rP}selectedProblemStatementId`]));
-      setIsPsLocked(Boolean(data[`${rP}isPsLocked`]));
-      setSubmissionStatus(data[`${rP}submissionStatus`] || "Draft");
-    } else if (isLiveSubmissionForCurrentRound) {
-      if (data.problemStatement) setProblemStatement(data.problemStatement);
-      if (data.keyFeatures) setKeyFeatures(data.keyFeatures);
-      if (data.githubUrl || data.githubLink) setGithubUrl(data.githubUrl || data.githubLink);
-      if (data.prototypeUrl || data.figmaUrl) setPrototypeUrl(data.prototypeUrl || data.figmaUrl);
-      if (data.demoVideoUrl || data.videoLink) setDemoVideoUrl(data.demoVideoUrl || data.videoLink);
-      if (data.srsFileName) setSrsFileName(data.srsFileName);
-      if (data.presentationFileName) setPresentationFileName(data.presentationFileName);
-      if (data.selectedProblemStatementId) setSelectedPsId(data.selectedProblemStatementId);
-      if (data.isPsSaved) setIsPsSaved(true);
-      if (data.isPsLocked || data.problemStatementLocked) {
-        setIsPsLocked(true);
-        setIsPsSaved(true);
+    const now = Date.now();
+    const isActivelyEditing = isDirtyRef.current || (now - lastUserEditTimeRef.current < 45000);
+    const localDraft = isInitialHydration ? getDraftFromStorage(targetRegId || "", regCurrentRound) : null;
+
+    // 1. Problem Statement / Ideation
+    if (isInitialHydration || !isHydratedRef.current) {
+      if (remoteProblemStatement !== undefined && remoteProblemStatement !== "") {
+        setProblemStatement(remoteProblemStatement);
+        problemStatementRefVal.current = remoteProblemStatement;
+      } else if (localDraft?.problemStatement) {
+        setProblemStatement(localDraft.problemStatement);
+        problemStatementRefVal.current = localDraft.problemStatement;
+      } else if (remoteProblemStatement !== undefined) {
+        setProblemStatement(remoteProblemStatement);
+        problemStatementRefVal.current = remoteProblemStatement;
       }
-      if (data.submissionStatus) setSubmissionStatus(data.submissionStatus);
     } else {
-      // Newly entered/promoted round with no submissions yet — start clean without previous round's ideology
-      setProblemStatement("");
-      setKeyFeatures("");
-      setGithubUrl("");
-      setPrototypeUrl("");
-      setDemoVideoUrl("");
-      setSrsFileName("");
-      setPresentationFileName("");
-      setSelectedPsId("");
-      setIsPsSaved(false);
-      setIsPsLocked(false);
-      setSubmissionStatus("Pending");
+      // During background polling: NEVER wipe local content if remote is empty or user is typing!
+      if (!isActivelyEditing && remoteProblemStatement !== undefined && remoteProblemStatement !== "") {
+        if (remoteProblemStatement !== problemStatementRefVal.current) {
+          setProblemStatement(remoteProblemStatement);
+          problemStatementRefVal.current = remoteProblemStatement;
+        }
+      }
     }
+
+    // 2. Key Features
+    if (isInitialHydration || !isHydratedRef.current) {
+      if (remoteKeyFeatures !== undefined && remoteKeyFeatures !== "") {
+        setKeyFeatures(remoteKeyFeatures);
+        keyFeaturesRefVal.current = remoteKeyFeatures;
+      } else if (localDraft?.keyFeatures) {
+        setKeyFeatures(localDraft.keyFeatures);
+        keyFeaturesRefVal.current = localDraft.keyFeatures;
+      } else if (remoteKeyFeatures !== undefined) {
+        setKeyFeatures(remoteKeyFeatures);
+        keyFeaturesRefVal.current = remoteKeyFeatures;
+      }
+    } else {
+      if (!isActivelyEditing && remoteKeyFeatures !== undefined && remoteKeyFeatures !== "") {
+        if (remoteKeyFeatures !== keyFeaturesRefVal.current) {
+          setKeyFeatures(remoteKeyFeatures);
+          keyFeaturesRefVal.current = remoteKeyFeatures;
+        }
+      }
+    }
+
+    // 3. GitHub URL
+    if (isInitialHydration || !isHydratedRef.current) {
+      if (remoteGithubUrl !== undefined && remoteGithubUrl !== "") {
+        setGithubUrl(remoteGithubUrl);
+        githubUrlRefVal.current = remoteGithubUrl;
+      } else if (localDraft?.githubUrl) {
+        setGithubUrl(localDraft.githubUrl);
+        githubUrlRefVal.current = localDraft.githubUrl;
+      }
+    } else {
+      if (!isActivelyEditing && remoteGithubUrl !== undefined && remoteGithubUrl !== "") {
+        if (remoteGithubUrl !== githubUrlRefVal.current) {
+          setGithubUrl(remoteGithubUrl);
+          githubUrlRefVal.current = remoteGithubUrl;
+        }
+      }
+    }
+
+    // 4. Prototype URL
+    if (isInitialHydration || !isHydratedRef.current) {
+      if (remotePrototypeUrl !== undefined && remotePrototypeUrl !== "") {
+        setPrototypeUrl(remotePrototypeUrl);
+        prototypeUrlRefVal.current = remotePrototypeUrl;
+      } else if (localDraft?.prototypeUrl) {
+        setPrototypeUrl(localDraft.prototypeUrl);
+        prototypeUrlRefVal.current = localDraft.prototypeUrl;
+      }
+    } else {
+      if (!isActivelyEditing && remotePrototypeUrl !== undefined && remotePrototypeUrl !== "") {
+        if (remotePrototypeUrl !== prototypeUrlRefVal.current) {
+          setPrototypeUrl(remotePrototypeUrl);
+          prototypeUrlRefVal.current = remotePrototypeUrl;
+        }
+      }
+    }
+
+    // 5. Demo Video URL
+    if (isInitialHydration || !isHydratedRef.current) {
+      if (remoteDemoVideoUrl !== undefined && remoteDemoVideoUrl !== "") {
+        setDemoVideoUrl(remoteDemoVideoUrl);
+        demoVideoUrlRefVal.current = remoteDemoVideoUrl;
+      } else if (localDraft?.demoVideoUrl) {
+        setDemoVideoUrl(localDraft.demoVideoUrl);
+        demoVideoUrlRefVal.current = localDraft.demoVideoUrl;
+      }
+    } else {
+      if (!isActivelyEditing && remoteDemoVideoUrl !== undefined && remoteDemoVideoUrl !== "") {
+        if (remoteDemoVideoUrl !== demoVideoUrlRefVal.current) {
+          setDemoVideoUrl(remoteDemoVideoUrl);
+          demoVideoUrlRefVal.current = remoteDemoVideoUrl;
+        }
+      }
+    }
+
+    // 6. Selected PS ID & Lock States
+    if (remoteSelectedPsId !== undefined) {
+      if (isInitialHydration || !isHydratedRef.current || !isActivelyEditing) {
+        setSelectedPsId(remoteSelectedPsId);
+        selectedPsIdRefVal.current = remoteSelectedPsId;
+      }
+    } else if ((isInitialHydration || !isHydratedRef.current) && localDraft?.selectedPsId) {
+      setSelectedPsId(localDraft.selectedPsId);
+      selectedPsIdRefVal.current = localDraft.selectedPsId;
+    }
+
+    if (remoteSrsFileName !== undefined) setSrsFileName(remoteSrsFileName);
+    if (remotePresentationFileName !== undefined) setPresentationFileName(remotePresentationFileName);
+    if (remoteIsPsSaved) setIsPsSaved(true);
+    if (remoteIsPsLocked) setIsPsLocked(true);
+    if (remoteSubmissionStatus) setSubmissionStatus(remoteSubmissionStatus);
 
     if (data.eventId && data.eventId !== currentEventId) {
       setCurrentEventId(data.eventId);
     }
+
+    isHydratedRef.current = true;
   };
 
-  // Real-time listener for current team's registration
+  // Hydrate from initialData once on mount
+  useEffect(() => {
+    if (initialData && !isHydratedRef.current) {
+      applyRegistrationDocData(initialData, true);
+    }
+  }, [initialData]);
+
+  // Load latest registration doc & start gentle polling
   useEffect(() => {
     if (!targetRegId) return;
 
     let pollReg: any = null;
-    const loadReg = async () => {
+    const loadReg = async (isInitial: boolean) => {
       try {
         const docSnap = await getDoc(doc(db, "registrations", targetRegId));
         if (docSnap.exists()) {
-          applyRegistrationDocData(docSnap.data());
+          const data = docSnap.data();
+          applyRegistrationDocData(data, isInitial);
+
+          // Fetch event details if available
+          let eventId = data.eventId;
+          let eventData: any = null;
+          if (eventId) {
+            const evSnap = await getDoc(doc(db, "events", eventId));
+            if (evSnap.exists()) eventData = evSnap.data();
+          }
+          if (!eventData && data.eventTitle) {
+            const evsSnap = await getDocs(collection(db, "events"));
+            const matched = evsSnap.docs.find(d => (d.data().title || "").toLowerCase().trim() === (data.eventTitle || "").toLowerCase().trim());
+            if (matched) eventData = matched.data();
+          }
+          if (eventData) {
+            if (eventData.problemStatements && eventData.problemStatements.length > 0) {
+              setAvailableProblemStatements(eventData.problemStatements);
+            } else if (eventData.problemStatementTitle) {
+              setAvailableProblemStatements([{
+                id: "ps_1",
+                code: "PS-01",
+                title: eventData.problemStatementTitle,
+                track: eventData.problemStatementTrack || "General",
+                description: eventData.problemStatement || ""
+              }]);
+            }
+          }
         }
       } catch (err) {
         console.error("Error loading registration doc:", err);
       }
     };
-    loadReg();
-    pollReg = setInterval(loadReg, 5000);
+
+    loadReg(true);
+    pollReg = setInterval(() => loadReg(false), 5000);
     return () => { if (pollReg) clearInterval(pollReg); };
   }, [targetRegId]);
 
@@ -281,59 +507,67 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     return () => clearTimeout(timer);
   }, [keyFeatures, currentStep]);
 
-  // Initialize values from initialData (only if values exist to prevent accidental wipes)
-  useEffect(() => {
-    if (initialData) {
-      applyRegistrationDocData(initialData);
-    }
-  }, [initialData]);
-
-  // Load latest values if targetRegId provided
-  useEffect(() => {
-    const loadRegData = async () => {
-      if (!targetRegId) return;
-      try {
-        const docRef = doc(db, "registrations", targetRegId);
-        const docSnap = await getDoc(docRef);
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          applyRegistrationDocData(data);
-
-          // Fetch Event Problem Statements from Firestore
-          let eventId = data.eventId;
-          let eventData: any = null;
-
-          if (eventId) {
-            const evSnap = await getDoc(doc(db, "events", eventId));
-            if (evSnap.exists()) eventData = evSnap.data();
-          }
-
-          if (!eventData && data.eventTitle) {
-            const evsSnap = await getDocs(collection(db, "events"));
-            const matched = evsSnap.docs.find(d => (d.data().title || "").toLowerCase().trim() === (data.eventTitle || "").toLowerCase().trim());
-            if (matched) eventData = matched.data();
-          }
-
-          if (eventData) {
-            if (eventData.problemStatements && eventData.problemStatements.length > 0) {
-              setAvailableProblemStatements(eventData.problemStatements);
-            } else if (eventData.problemStatementTitle) {
-              setAvailableProblemStatements([{
-                id: "ps_1",
-                code: "PS-01",
-                title: eventData.problemStatementTitle,
-                track: eventData.problemStatementTrack || "General",
-                description: eventData.problemStatement || ""
-              }]);
-            }
-          }
+  // Form Change Handlers with real-time auto-persistence
+  const handleProblemStatementChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (isPsLocked) return;
+    let val = e.target.value;
+    const words = val.trim() ? val.trim().split(/\s+/) : [];
+    if (words.length > 150) {
+      // Find character index where 150th word ends to preserve newlines and punctuation
+      let count = 0;
+      let cutIndex = val.length;
+      const regex = /\S+/g;
+      let match;
+      while ((match = regex.exec(val)) !== null) {
+        count++;
+        if (count === 150) {
+          cutIndex = regex.lastIndex;
+          break;
         }
-      } catch (err) {
-        console.error("Error loading registration submission data:", err);
       }
-    };
-    loadRegData();
-  }, [targetRegId]);
+      val = val.substring(0, cutIndex);
+    }
+    setProblemStatement(val);
+    problemStatementRefVal.current = val;
+    persistDraftToStorage({ problemStatement: val });
+    scheduleAutoSave();
+  };
+
+  const handleKeyFeaturesChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    if (isStepLocked(4)) return;
+    const val = e.target.value;
+    setKeyFeatures(val);
+    keyFeaturesRefVal.current = val;
+    persistDraftToStorage({ keyFeatures: val });
+    scheduleAutoSave();
+  };
+
+  const handleGithubUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isStepLocked(5)) return;
+    const val = e.target.value;
+    setGithubUrl(val);
+    githubUrlRefVal.current = val;
+    persistDraftToStorage({ githubUrl: val });
+    scheduleAutoSave();
+  };
+
+  const handlePrototypeUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isStepLocked(6)) return;
+    const val = e.target.value;
+    setPrototypeUrl(val);
+    prototypeUrlRefVal.current = val;
+    persistDraftToStorage({ prototypeUrl: val });
+    scheduleAutoSave();
+  };
+
+  const handleDemoVideoUrlChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (isStepLocked(isIdeationRound ? 2 : 6)) return;
+    const val = e.target.value;
+    setDemoVideoUrl(val);
+    demoVideoUrlRefVal.current = val;
+    persistDraftToStorage({ demoVideoUrl: val });
+    scheduleAutoSave();
+  };
 
   // Handle Problem Statement Card Selection (Preview locally)
   const handleSelectProblemStatement = (item: any, idx: number) => {
@@ -363,8 +597,12 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     const isDifferent = selectedPsId !== newId;
 
     setSelectedPsId(newId);
+    selectedPsIdRefVal.current = newId;
     const fullText = `[${item.code || `PS-0${idx + 1}`}] ${item.title}\n\n${item.description}`;
     setProblemStatement(fullText);
+    problemStatementRefVal.current = fullText;
+    persistDraftToStorage({ selectedPsId: newId, problemStatement: fullText });
+    scheduleAutoSave();
 
     if (isDifferent) {
       setIsPsSaved(false);
@@ -418,7 +656,9 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         });
       }
 
+      isDirtyRef.current = false;
       setIsPsSaved(true);
+      setSaveStatus("saved");
       setStatusNotice({
         type: "success",
         message: "Problem statement successfully saved & held for your team!"
@@ -447,7 +687,10 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     }
 
     setSelectedPsId("");
+    selectedPsIdRefVal.current = "";
     setProblemStatement("");
+    problemStatementRefVal.current = "";
+    persistDraftToStorage({ selectedPsId: "", problemStatement: "" });
     setIsPsSaved(false);
 
     if (targetRegId) {
@@ -490,6 +733,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     // Lock PS Selection for current team
     setIsPsSaved(true);
     setIsPsLocked(true);
+    isDirtyRef.current = false;
 
     if (targetRegId) {
       try {
@@ -523,6 +767,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
 
   // Handle Draft Save
   const handleSaveDraft = async () => {
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     setSaving(true);
     setStatusNotice(null);
 
@@ -530,7 +775,6 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
       if (targetRegId) {
         const regRef = doc(db, "registrations", targetRegId);
         const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsId || p.code === selectedPsId) || null;
-        // Read currentRound from the doc to tag this submission with the correct round
         const currentDocSnap = await getDoc(regRef);
         const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRound || 1) : (currentTeamRound || 1);
         const rP = `r${currentRoundVal}_`;
@@ -560,6 +804,8 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         });
       }
 
+      isDirtyRef.current = false;
+      setSaveStatus("saved");
       setStatusNotice({ type: "success", message: "Draft saved successfully!" });
       setTimeout(() => setStatusNotice(null), 4000);
     } catch (err) {
@@ -573,6 +819,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
   // Handle Final Submission
   const handleSubmitProject = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
+    if (autoSaveTimerRef.current) clearTimeout(autoSaveTimerRef.current);
     setSubmitting(true);
     setStatusNotice(null);
 
@@ -580,7 +827,6 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
       if (targetRegId) {
         const regRef = doc(db, "registrations", targetRegId);
         const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsId || p.code === selectedPsId) || null;
-        // Read currentRound to tag this submission with the correct round
         const currentDocSnap = await getDoc(regRef);
         const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRound || 1) : (currentTeamRound || 1);
         const rP = `r${currentRoundVal}_`;
@@ -615,6 +861,8 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         });
       }
 
+      isDirtyRef.current = false;
+      setSaveStatus("saved");
       setStatusNotice({ type: "success", message: "Project submitted successfully!" });
       if (onSuccess) onSuccess();
       setTimeout(() => setStatusNotice(null), 4000);
@@ -1079,16 +1327,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
                   ref={problemStatementRef}
                   rows={8}
                   value={problemStatement}
-                  onChange={(e) => {
-                    if (isPsLocked) return;
-                    let val = e.target.value;
-                    const words = val.trim() ? val.trim().split(/\s+/) : [];
-                    if (words.length > 150) {
-                      const match = val.match(/^(\s*\S+){0,150}/);
-                      if (match) val = match[0];
-                    }
-                    setProblemStatement(val);
-                  }}
+                  onChange={handleProblemStatementChange}
                   readOnly={isPsLocked}
                   placeholder="Type or paste your problem statement title, detailed description, constraints, and target user requirements..."
                   className={`w-full p-5 sm:p-6 border-0 rounded-2xl text-sm font-medium leading-relaxed whitespace-pre-wrap font-sans transition-all overflow-hidden resize-none shadow-2xs ${
@@ -1109,7 +1348,21 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
                     </span>
                   </div>
 
-                  <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-auto">
+                  <div className="flex items-center gap-3 shrink-0 self-end sm:self-auto">
+                    {/* Live Cloud Save Indicator */}
+                    {saveStatus === "saving" && (
+                      <span className="text-[11px] font-bold text-blue-600 flex items-center gap-1.5 animate-pulse bg-blue-50 border border-blue-100 px-2.5 py-1 rounded-lg">
+                        <Loader2 className="w-3 h-3 animate-spin text-blue-600" />
+                        <span>Saving draft...</span>
+                      </span>
+                    )}
+                    {saveStatus === "saved" && (
+                      <span className="text-[11px] font-bold text-emerald-700 flex items-center gap-1.5 bg-emerald-50 border border-emerald-200/80 px-2.5 py-1 rounded-lg">
+                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                        <span>Saved</span>
+                      </span>
+                    )}
+
                     <div className="w-20 h-1.5 rounded-full bg-slate-200/80 overflow-hidden">
                       {(() => {
                         const wordCount = problemStatement.trim() ? problemStatement.trim().split(/\s+/).length : 0;
@@ -1413,7 +1666,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
                 rows={6}
                 value={keyFeatures}
                 disabled={isStepLocked(4)}
-                onChange={(e) => setKeyFeatures(e.target.value)}
+                onChange={handleKeyFeaturesChange}
                 placeholder={`1. AI-driven predictive resource management algorithm\n2. Real-time websocket notification engine\n3. Role-based authentication & analytics dashboard...`}
                 className={`w-full p-4.5 border rounded-2xl text-sm font-medium text-slate-800 placeholder:text-slate-400 focus:outline-none transition-all leading-relaxed whitespace-pre-wrap overflow-hidden resize-none ${
                   isStepLocked(4) 
@@ -1487,7 +1740,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
                   type="url" 
                   value={githubUrl}
                   disabled={isStepLocked(5)}
-                  onChange={(e) => setGithubUrl(e.target.value)}
+                  onChange={handleGithubUrlChange}
                   placeholder="https://github.com/your-username/your-project-repo" 
                   className={`w-full pl-12 pr-4 py-3.5 border rounded-2xl text-sm font-semibold transition-all ${
                     isStepLocked(5) 
@@ -1565,7 +1818,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
                       type="url" 
                       value={prototypeUrl}
                       disabled={isStepLocked(6)}
-                      onChange={(e) => setPrototypeUrl(e.target.value)}
+                      onChange={handlePrototypeUrlChange}
                       placeholder="https://figma.com/... or https://myproject.vercel.app" 
                       className={`w-full pl-12 pr-4 py-3.5 border rounded-2xl text-sm font-semibold transition-all ${
                         isStepLocked(6) 
@@ -1588,7 +1841,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
                     type="url" 
                     value={demoVideoUrl}
                     disabled={isStepLocked(6)}
-                    onChange={(e) => setDemoVideoUrl(e.target.value)}
+                    onChange={handleDemoVideoUrlChange}
                     placeholder="https://youtube.com/watch?v=... or Drive link" 
                     className={`w-full pl-12 pr-4 py-3.5 border rounded-2xl text-sm font-semibold transition-all ${
                       isStepLocked(6) 
