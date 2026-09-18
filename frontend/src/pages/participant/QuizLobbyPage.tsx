@@ -40,8 +40,7 @@ export const QuizLobbyPage: React.FC = () => {
     return () => clearInterval(timer);
   }, []);
 
-  // Polling quiz status (replaces real-time onSnapshot to prevent 1,500 listener hotspot)
-  // Polls every 30 seconds for quiz start status, and on tab focus
+  // Polling quiz status with 3s active lobby polling
   const hasLoadedRef = useRef(false);
   useEffect(() => {
     if (!quizId) return;
@@ -55,7 +54,7 @@ export const QuizLobbyPage: React.FC = () => {
 
     const fetchQuizStatus = async () => {
       try {
-        const loadedQuiz = await getQuizById(quizId, !hasLoadedRef.current);
+        const loadedQuiz = await getQuizById(quizId, true);
         if (!isMounted) return;
         
         if (!loadedQuiz) {
@@ -94,13 +93,10 @@ export const QuizLobbyPage: React.FC = () => {
       }
     };
 
-    // Initial fetch with user slot jitter to smooth lobby crowd
-    const initialJitter = quizLoadBalancer.getUserJitter(user?.uid || "lobby_guest", 1500);
-    const initTimer = setTimeout(fetchQuizStatus, initialJitter);
+    fetchQuizStatus();
 
-    // Poll every 30 seconds with ±3s randomized jitter
-    const jitteredPollMs = 30_000 + (quizLoadBalancer.getUserJitter(user?.uid || "lobby_guest", 6000) - 3000);
-    const pollId = setInterval(fetchQuizStatus, Math.max(15_000, jitteredPollMs));
+    // Fast 3-second active lobby polling so admin quiz start is detected immediately
+    const pollId = setInterval(fetchQuizStatus, 3000);
 
     // Also re-check immediately when tab becomes visible
     const handleVisibility = () => {
@@ -112,7 +108,6 @@ export const QuizLobbyPage: React.FC = () => {
 
     return () => {
       isMounted = false;
-      clearTimeout(initTimer);
       clearInterval(pollId);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
@@ -121,21 +116,24 @@ export const QuizLobbyPage: React.FC = () => {
   // Derived status computations
   const isLive = Boolean(
     quiz &&
-    quiz.status === "active" &&
-    quiz.scheduledStartTime &&
-    quiz.scheduledStartTime <= currentTime &&
+    (quiz.status?.toLowerCase() === "active" || (quiz as any).isLive === true) &&
+    (!quiz.scheduledStartTime || quiz.scheduledStartTime <= currentTime) &&
     (!quiz.scheduledEndTime || quiz.scheduledEndTime > currentTime)
   );
 
   const isCompleted = Boolean(
     quiz && (
-      quiz.status === "completed" ||
-      (quiz.scheduledEndTime && quiz.scheduledEndTime <= currentTime && quiz.scheduledStartTime)
+      quiz.status?.toLowerCase() === "completed" ||
+      (quiz.scheduledEndTime && quiz.scheduledEndTime <= currentTime && quiz.scheduledEndTime > 0)
     )
   );
 
   const isUpcoming = Boolean(
-    quiz && quiz.scheduledStartTime && quiz.scheduledStartTime > currentTime
+    quiz &&
+    !isCompleted &&
+    quiz.status?.toLowerCase() === "active" &&
+    quiz.scheduledStartTime &&
+    quiz.scheduledStartTime > currentTime
   );
 
   // Format countdown string for upcoming quiz

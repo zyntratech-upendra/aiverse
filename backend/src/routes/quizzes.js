@@ -159,7 +159,36 @@ router.post(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const rawPayload = req.body || {};
-    const allowedFields = ['eventId', 'eventTitle', 'title', 'description', 'durationMinutes', 'startTime', 'endTime', 'passingPercentage', 'status', 'track', 'randomizeQuestions', 'showResultsImmediately', 'maxAttempts', 'questions'];
+    const allowedFields = [
+      'eventId',
+      'eventTitle',
+      'title',
+      'description',
+      'category',
+      'track',
+      'durationMinutes',
+      'totalMarks',
+      'passingMarks',
+      'pointsPerQuestion',
+      'instructions',
+      'status',
+      'isLive',
+      'scheduledStartTime',
+      'scheduledEndTime',
+      'startTime',
+      'endTime',
+      'passingPercentage',
+      'resultsPublished',
+      'questionsCount',
+      'shuffleQuestions',
+      'shuffleOptions',
+      'randomizeQuestions',
+      'showResultsImmediately',
+      'maxAttempts',
+      'questions',
+      'overriddenScores',
+      'createdBy'
+    ];
     const payload = pick(rawPayload, allowedFields);
     const id = rawPayload._id || rawPayload.id || new mongoose.Types.ObjectId().toString();
     const now = Date.now();
@@ -189,7 +218,36 @@ router.put(
   asyncHandler(async (req, res) => {
     const id = req.params.id;
     const rawPayload = req.body || {};
-    const allowedFields = ['eventId', 'eventTitle', 'title', 'description', 'durationMinutes', 'startTime', 'endTime', 'passingPercentage', 'status', 'track', 'randomizeQuestions', 'showResultsImmediately', 'maxAttempts', 'questions'];
+    const allowedFields = [
+      'eventId',
+      'eventTitle',
+      'title',
+      'description',
+      'category',
+      'track',
+      'durationMinutes',
+      'totalMarks',
+      'passingMarks',
+      'pointsPerQuestion',
+      'instructions',
+      'status',
+      'isLive',
+      'scheduledStartTime',
+      'scheduledEndTime',
+      'startTime',
+      'endTime',
+      'passingPercentage',
+      'resultsPublished',
+      'questionsCount',
+      'shuffleQuestions',
+      'shuffleOptions',
+      'randomizeQuestions',
+      'showResultsImmediately',
+      'maxAttempts',
+      'questions',
+      'overriddenScores',
+      'createdBy'
+    ];
     const payload = pick(rawPayload, allowedFields);
     const now = Date.now();
 

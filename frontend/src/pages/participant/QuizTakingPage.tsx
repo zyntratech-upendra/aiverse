@@ -74,9 +74,9 @@ export const QuizTakingPage: React.FC = () => {
 
         const now = Date.now();
         const isLive = Boolean(
-          quizData.status === "active" &&
-          quizData.scheduledStartTime &&
-          quizData.scheduledStartTime <= now &&
+          quizData &&
+          (quizData.status?.toLowerCase() === "active" || (quizData as any).isLive === true) &&
+          (!quizData.scheduledStartTime || quizData.scheduledStartTime <= now) &&
           (!quizData.scheduledEndTime || quizData.scheduledEndTime > now)
         );
 

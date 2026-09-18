@@ -1379,14 +1379,16 @@ export const ParticipantDashboardPage: React.FC = () => {
 
                       const isLive = Boolean(
                         !isSubmitted &&
-                        quiz.status === "active" &&
-                        quiz.scheduledStartTime &&
-                        quiz.scheduledStartTime <= now &&
+                        quiz &&
+                        (quiz.status?.toLowerCase() === "active" || (quiz as any).isLive === true) &&
+                        (!quiz.scheduledStartTime || quiz.scheduledStartTime <= now) &&
                         (!quiz.scheduledEndTime || quiz.scheduledEndTime > now)
                       );
                       const isCompleted = Boolean(
-                        quiz.status === "completed" ||
-                        (quiz.scheduledEndTime && quiz.scheduledEndTime <= now && quiz.scheduledStartTime)
+                        quiz && (
+                          quiz.status?.toLowerCase() === "completed" ||
+                          (quiz.scheduledEndTime && quiz.scheduledEndTime <= now && quiz.scheduledEndTime > 0)
+                        )
                       );
 
                       const isExpanded = expandedQuizReviewId === quiz.id;

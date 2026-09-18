@@ -3089,15 +3089,7 @@ Answer: A`;
 
                     {/* Start / Stop / Restart Quiz Button */}
                     <div className="flex items-center">
-                      {(q.status === "active" || q.status === "draft" || q.status === "scheduled") && (!q.scheduledStartTime || q.scheduledEndTime! <= Date.now()) ? (
-                        <button
-                          onClick={() => handleStartQuiz(q)}
-                          className="flex items-center gap-1.5 px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shadow-sm"
-                        >
-                          <Play className="w-3.5 h-3.5" />
-                          Start Quiz
-                        </button>
-                      ) : q.status === "active" && q.scheduledStartTime && q.scheduledEndTime && q.scheduledEndTime > Date.now() ? (
+                      {q.status === "active" && (!q.scheduledEndTime || q.scheduledEndTime > Date.now()) ? (
                         <button
                           onClick={() => handleStopQuiz(q)}
                           className="flex items-center gap-1.5 px-4 py-1.5 bg-red-500 hover:bg-red-600 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shadow-sm"
@@ -3114,9 +3106,13 @@ Answer: A`;
                           Restart Quiz
                         </button>
                       ) : (
-                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider px-2">
-                          Unavailable
-                        </span>
+                        <button
+                          onClick={() => handleStartQuiz(q)}
+                          className="flex items-center gap-1.5 px-4 py-1.5 bg-emerald-500 hover:bg-emerald-600 text-white text-xs font-bold rounded-xl transition-colors cursor-pointer shadow-sm"
+                        >
+                          <Play className="w-3.5 h-3.5" />
+                          Start Quiz
+                        </button>
                       )}
                     </div>
 
@@ -4648,17 +4644,12 @@ Answer: A`;
                     setIsStarting(true);
                     try {
                       const now = Date.now();
-                      const startTime = (startingQuiz.scheduledStartTime && startingQuiz.scheduledStartTime > now) ? startingQuiz.scheduledStartTime : now;
-                      // Clear scheduledEndTime if it's less than duration to prevent bug
-                      let endTime = (startingQuiz.scheduledEndTime && startingQuiz.scheduledEndTime > startTime) ? startingQuiz.scheduledEndTime : null;
-                      
-                      // If they specify a time limit but the scheduled end time restricts it too much, remove the restriction.
-                      if (endTime && endTime < startTime + startDuration * 60000) {
-                          endTime = null; 
-                      }
+                      const startTime = now;
+                      const endTime = now + (startDuration * 60 * 1000);
 
                       await api.updateQuiz(startingQuiz.id, {
                         status: "active",
+                        isLive: true,
                         durationMinutes: startDuration,
                         scheduledStartTime: startTime,
                         scheduledEndTime: endTime,
@@ -4673,6 +4664,7 @@ Answer: A`;
                         q.id === startingQuiz.id ? { 
                           ...q, 
                           status: "active", 
+                          isLive: true,
                           durationMinutes: startDuration,
                           scheduledStartTime: startTime, 
                           scheduledEndTime: endTime, 
