@@ -853,12 +853,29 @@ const RegistrationPage: React.FC = () => {
           {isQuiz ? (
             <>Your registration for <strong className="text-slate-800 font-bold">{event.title}</strong> is confirmed. You are officially enrolled in this quiz.</>
           ) : (
-            <>Your registration was completed and <strong className="text-amber-700 font-bold">it is currently under review to confirm</strong> by the event coordinators.</>
+            <>Your registration was completed and <strong className="text-amber-700 font-bold">is currently under review</strong> by the event coordinators.</>
           )}
         </p>
 
+        {/* Prominent Under Review Alert Banner */}
+        {!isQuiz && (
+          <div className="mt-6 max-w-2xl w-full mx-auto bg-amber-50/90 border border-amber-200/90 rounded-2xl p-4 flex items-start gap-3.5 text-left shadow-sm">
+            <div className="p-2 bg-amber-100 text-amber-800 rounded-xl shrink-0 mt-0.5">
+              <Info className="h-4 w-4" />
+            </div>
+            <div>
+              <p className="text-xs font-bold text-amber-950">
+                Application Under Review
+              </p>
+              <p className="text-[11px] text-amber-900 mt-1 leading-relaxed font-medium">
+                Your registration has been submitted and is currently <strong>under review</strong>. Once your registration is confirmed by the coordinators, you will receive the <strong>official confirmation email</strong> with your confirmed digital entry pass.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* Details Grid Container */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start w-full max-w-5xl mt-10">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start w-full max-w-5xl mt-8">
           {/* Left Column (span 7) */}
           <div className="lg:col-span-7 space-y-6 text-left">
 
@@ -1034,7 +1051,6 @@ const RegistrationPage: React.FC = () => {
                   <MapPin className="h-4.5 w-4.5 text-blue-600 shrink-0" />
                   <div className="leading-tight">
                     <span>{event.location}</span>
-                    <span className="text-[10px] text-slate-400 font-medium block mt-0.5">Silicon Plaza, Tech District</span>
                   </div>
                 </div>
               </div>
