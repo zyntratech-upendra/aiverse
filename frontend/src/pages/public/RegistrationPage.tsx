@@ -736,7 +736,7 @@ const RegistrationPage: React.FC = () => {
                     <p style="margin: 4px 0;"><strong>Time:</strong> ${event.time}</p>
                     <p style="margin: 4px 0;"><strong>Location:</strong> ${event.location}</p>
                   </div>
-                  <p style="margin-top: 20px;">View and download your digital pass ticket: <a href="https://aiversevitb.in/ticket/${finalRegId}" style="color: #2563eb; font-weight: bold;">View Ticket</a></p>
+                  <p style="margin-top: 20px; font-size: 13px; line-height: 1.6; color: #334155; background-color: #f1f5f9; padding: 12px 16px; border-radius: 8px;"><strong>🎟️ Ticket & Entry Pass:</strong> Your registration is under review by faculty coordinators. Once approved, your official digital entry ticket pass with QR verification will be dispatched directly to your email.</p>
                   <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
                   <p style="font-size: 12px; color: #64748b;">AI Verse Club &bull; Vishnu Institute of Technology, Bhimavaram</p>
                 </div>
@@ -996,9 +996,9 @@ const RegistrationPage: React.FC = () => {
                         3
                       </div>
                       <div className="leading-normal text-left">
-                        <h4 className="text-xs font-black text-slate-850">Access Event Pass</h4>
+                        <h4 className="text-xs font-black text-slate-850">Official Ticket Dispatch via Email</h4>
                         <p className="text-[10px] text-slate-500 font-medium mt-0.5 leading-relaxed">
-                          You can view your provisional check-in pass and track your confirmation status anytime on the ticket page.
+                          Once confirmed by faculty coordinators, your official digital entry pass and ticket with QR verification will be dispatched directly to your personal email.
                         </p>
                       </div>
                     </div>
@@ -1065,9 +1065,9 @@ const RegistrationPage: React.FC = () => {
 
             {/* Actions layout button mapping */}
             <div className="space-y-2">
-              <Link to={`/ticket/${createdRegId}`}>
+              <Link to={`/events/${id || event.id || ""}`}>
                 <Button variant="gradient" className="w-full rounded-2xl py-3.5 font-bold text-xs flex items-center justify-center gap-1.5 shadow-md shadow-blue-600/10">
-                  View Ticket
+                  Back to Event Details
                   <ArrowRight className="h-4 w-4" />
                 </Button>
               </Link>
