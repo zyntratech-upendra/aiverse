@@ -3,6 +3,8 @@
  * Dispatches HTML emails via backend /api/send-email (Nodemailer SMTP).
  */
 
+import { authHeaders } from "../services/apiClient";
+
 export interface SendResendEmailParams {
   to: string | string[];
   subject: string;
@@ -50,7 +52,7 @@ export const sendResendEmail = async ({
   try {
     const response = await fetch(url, {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: authHeaders(),
       body: JSON.stringify({ 
         to: recipients, 
         subject: (subject || "").trim(), 

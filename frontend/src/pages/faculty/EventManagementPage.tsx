@@ -11,7 +11,6 @@ import {
   deleteDoc, 
   getDoc, 
   setDoc, 
-  updateDoc, 
   writeBatch 
 } from "../../config/firebase";
 import { userService } from "../../services/userService";
@@ -46,6 +45,7 @@ import {
   ChevronLeft,
   ChevronRight,
   ChevronDown,
+  ChevronUp,
   MapPin,
   Trash2,
   Upload,
@@ -294,15 +294,47 @@ const EventManagementPage: React.FC = () => {
   // Fetch events from backend API on mount
   useEffect(() => {
     const loadEvents = async () => {
+      setLoadingEvents(true);
       try {
-        setLoadingEvents(true);
-        const rawList = await fetchEvents().catch(() => []);
-        const list = Array.isArray(rawList) ? rawList : (rawList?.events || rawList?.data || []);
-        const mapped = list.map((data: any) => {
-          let image = sparkImg;
-          if (data.posterPreview) image = data.posterPreview;
-          else if (data.imageName === "hackathonImg" || data.category === "HACKATHONS") image = hackathonImg;
-          else if (data.imageName === "seminarImg" || data.category === "LECTURES") image = seminarImg;
+        const [rawEvents, rawRegs] = await Promise.all([
+          fetchEvents().catch(() => []),
+          fetchRegistrations().catch(() => [])
+        ]);
+
+        const rawList = Array.isArray(rawEvents) ? rawEvents : (rawEvents?.events || rawEvents?.data || []);
+        const regList = Array.isArray(rawRegs) ? rawRegs : (rawRegs?.registrations || rawRegs?.data || []);
+
+        // Build dynamic seat count map per event (team members + lead, or individual)
+        const liveSeatCountMap: Record<string, number> = {};
+        regList.forEach((r: any) => {
+          const eid = String(r.eventId || r.event || "").trim();
+          const eTitle = String(r.eventTitle || "").trim().toLowerCase();
+          const membersLen = Array.isArray(r.members) ? r.members.length : 0;
+          const seatCount = membersLen > 0 ? membersLen + 1 : (Number(r.teamSize) || 1);
+
+          if (eid) {
+            liveSeatCountMap[eid] = (liveSeatCountMap[eid] || 0) + seatCount;
+            liveSeatCountMap[eid.toLowerCase()] = liveSeatCountMap[eid];
+          }
+          if (eTitle) {
+            liveSeatCountMap[eTitle] = (liveSeatCountMap[eTitle] || 0) + seatCount;
+          }
+        });
+
+        const mapped = rawList.map((data: any) => {
+          let image = data.image || "";
+          if (!image) {
+            const cat = (data.category || "").toUpperCase();
+            if (cat.includes("HACKATHON")) image = hackathonImg;
+            else if (cat.includes("SPARK")) image = sparkImg;
+            else image = seminarImg;
+          }
+
+          const evId = String(data._id || data.id || "").trim();
+          const evTitle = String(data.title || "").trim().toLowerCase();
+          const liveSeats = liveSeatCountMap[evId] || liveSeatCountMap[evId.toLowerCase()] || (evTitle ? liveSeatCountMap[evTitle] : 0) || 0;
+          const currentReg = Math.max(Number(data.currentReg) || 0, liveSeats);
+
           return {
             ...data,
             id: data._id || data.id,
@@ -311,7 +343,7 @@ const EventManagementPage: React.FC = () => {
             location: data.location || data.venue || "",
             category: data.category || "WORKSHOPS",
             status: data.status || "Draft",
-            currentReg: Math.max(0, Number(data.currentReg) || 0),
+            currentReg,
             maxReg: data.maxReg || 100,
             image
           } as EventItem;
@@ -397,6 +429,9 @@ const EventManagementPage: React.FC = () => {
   const [loginAccessSuccessMsg, setLoginAccessSuccessMsg] = useState<string | null>(null);
   const [isProvisioningLoginAccess, setIsProvisioningLoginAccess] = useState(false);
   const [provisionedTeamIds, setProvisionedTeamIds] = useState<string[]>([]);
+  const [eventRosterViewMode, setEventRosterViewMode] = useState<"teams" | "individuals">("teams");
+  const [eventRosterFilter, setEventRosterFilter] = useState<"all" | "teams" | "individuals" | "confirmed" | "pending">("all");
+  const [expandedTeamIds, setExpandedTeamIds] = useState<string[]>([]);
 
   // Step Lock Modal State & Handlers
   const [stepLockTarget, setStepLockTarget] = useState<{ stepId: number; name: string } | null>(null);
@@ -508,7 +543,6 @@ const EventManagementPage: React.FC = () => {
     const newLocked = { ...currentLocked, [stepId]: !isCurrentlyLocked };
 
     try {
-      const evRef = doc(db, "events", eventAccessEvent.id);
       await updateEvent(eventAccessEvent.id, {
         lockedSteps: newLocked,
         updatedAt: Date.now()
@@ -604,8 +638,7 @@ const EventManagementPage: React.FC = () => {
     if (!confirmed) return;
 
     try {
-      const regRef = doc(db, "registrations", regId);
-      await updateRegistration(recipient?.regId || regId || recipient?.id || user.id, {
+      await updateRegistration(regId, {
         isPsLocked: false,
         problemStatementLocked: false,
         submissionLocked: false,
@@ -797,8 +830,7 @@ const EventManagementPage: React.FC = () => {
         updatedAt: Date.now(),
       };
 
-      // 1. Save to Firestore
-      const evRef = doc(db, "events", eventAccessEvent.id);
+      // 1. Save certificate config
       await updateEvent(eventAccessEvent.id, {
         certificateConfig: certConfig,
         updatedAt: Date.now(),
@@ -1110,9 +1142,8 @@ const EventManagementPage: React.FC = () => {
 
           // Persist status to Firebase
           try {
-            const regRef = doc(db, "registrations", recipient.regId);
             if (recipient.isLead) {
-              await updateRegistration(recipient?.regId || regId || recipient?.id || user.id, {
+              await updateRegistration(recipient.regId, {
                 certificateIssued: true,
                 certificateId: certId,
                 certificateType: certType,
@@ -1144,7 +1175,7 @@ const EventManagementPage: React.FC = () => {
                     certificateId: certId,
                     certificateSentAt: now,
                   };
-                  await updateRegistration(recipient?.regId || regId || recipient?.id || user.id, {
+                  await updateRegistration(recipient.regId, {
                     members: updatedMembers,
                     certificateIssued: true,
                     updatedAt: now,
@@ -1454,7 +1485,6 @@ const EventManagementPage: React.FC = () => {
     if (!eventAccessEvent?.id) return;
     setSavingMultiProblems(true);
     try {
-      const evRef = doc(db, "events", eventAccessEvent.id);
       const primaryPs = problemList[0] || null;
 
       await updateEvent(eventAccessEvent.id, {
@@ -1925,8 +1955,7 @@ const EventManagementPage: React.FC = () => {
             ? teamInfo?.juryScore ?? 0 
             : null;
 
-        const regRef = doc(db, "registrations", regId);
-        await updateRegistration(recipient?.regId || regId || recipient?.id || user.id, {
+        await updateRegistration(regId, {
           currentRound: promoteToRound,
           roundStatus: "Qualified",
           promotedToRound: promoteToRound,
@@ -1972,8 +2001,7 @@ const EventManagementPage: React.FC = () => {
           (t) => t.currentTeamRound === promoteFromRound && !selectedPromoteRegIds.includes(t.id)
         );
         eliminatePromises = unselectedTeams.map(async (t) => {
-          const regRef = doc(db, "registrations", t.id);
-          await updateRegistration(recipient?.regId || regId || recipient?.id || user.id, {
+          await updateRegistration(t.id, {
             roundStatus: "Eliminated",
             eliminatedInRound: promoteFromRound,
             eliminatedAt: now,
@@ -2034,7 +2062,6 @@ const EventManagementPage: React.FC = () => {
 
       // Advance active event stage if requested
       if (advanceEventRoundOnPromote && eventAccessEvent?.id && promoteToRound > (eventAccessEvent.currentRound || 1)) {
-        const evRef = doc(db, "events", eventAccessEvent.id);
         await updateEvent(eventAccessEvent.id, {
           currentRound: promoteToRound,
           updatedAt: now
@@ -2144,7 +2171,6 @@ const EventManagementPage: React.FC = () => {
     if (!eventAccessEvent?.id) return;
     setSavingLiveRounds(true);
     try {
-      const evRef = doc(db, "events", eventAccessEvent.id);
       await updateEvent(eventAccessEvent.id, {
         rounds: liveRoundsList,
         currentRound: liveCurrentRound,
@@ -2414,23 +2440,12 @@ const EventManagementPage: React.FC = () => {
     setIsProvisioningLoginAccess(true);
     try {
       const now = Date.now();
-      const regRef = doc(db, "registrations", regId);
-      await updateRegistration(recipient?.regId || regId || recipient?.id || user.id, {
+      await updateRegistration(regId, {
         accessGranted: true,
         loginAccessGranted: true,
         accessProvisionedAt: now,
         updatedAt: now
       });
-
-      try {
-        await updateRegistration(regId, {
-          accessGranted: true,
-          loginAccessGranted: true,
-          accessProvisionedAt: now
-        });
-      } catch (apiErr) {
-        console.warn("Notice updating registration via API:", apiErr);
-      }
 
       setProvisionedTeamIds((prev) => Array.from(new Set([...prev, regId])));
       setEventAccessRegistrations((prev) =>
@@ -2582,84 +2597,227 @@ const EventManagementPage: React.FC = () => {
     }
   };
 
-  const filteredEventAccessRegistrations = useMemo(() => {
-    if (!eventAccessSearchQuery.trim()) return eventAccessRegistrations;
-    const q = eventAccessSearchQuery.toLowerCase().trim();
-    return eventAccessRegistrations.filter((r) => {
-      const name = (r.teamLeadName || r.name || "").toLowerCase();
-      const email = (r.teamLeadEmail || r.email || "").toLowerCase();
-      const studentId = (r.teamLeadStudentId || r.studentId || "").toLowerCase();
-      const groupName = (r.groupName || "").toLowerCase();
-      return name.includes(q) || email.includes(q) || studentId.includes(q) || groupName.includes(q);
+  // Flattened list of all individual registered attendees (Team Leads + Members + Solo Registrants)
+  const flattenedEventAttendees = useMemo(() => {
+    const list: Array<{
+      id: string;
+      regId: string;
+      teamId: string;
+      name: string;
+      studentId: string;
+      email: string;
+      phone: string;
+      branch: string;
+      section: string;
+      year: string;
+      college: string;
+      role: string;
+      isLead: boolean;
+      isGroup: boolean;
+      groupName: string;
+      status: string;
+      accessGranted: boolean;
+      createdAt: number;
+      teamNumber?: number;
+      foodPreference?: string;
+    }> = [];
+
+    (eventAccessRegistrations || []).forEach((reg, idx) => {
+      const isGroup = Boolean(reg.groupName && reg.groupName !== "Individual RSVP");
+      const groupName = isGroup ? reg.groupName : "Individual RSVP";
+      const status = reg.status || "Not Confirmed";
+      const accessGranted = Boolean(reg.accessGranted || reg.loginAccessGranted);
+      const regId = reg.id || reg._id || `reg_${idx}`;
+      const branch = reg.branch || reg.department || "CSE";
+      const section = reg.section || "";
+      const year = reg.year || "";
+      const college = reg.collegeName || reg.college || "";
+      const teamNum = reg.teamNumber || reg.teamNo || idx + 1;
+      const foodPref = reg.foodPreference || "";
+
+      // 1. Team Lead / Solo Participant
+      const leadName = reg.teamLeadName || reg.fullName || reg.name || "Student Participant";
+      const leadEmail = reg.teamLeadPersonalEmail || reg.personalEmail || reg.teamLeadEmail || reg.email || "";
+      const leadStudentId = reg.teamLeadStudentId || reg.studentId || reg.rollNo || "";
+      const leadPhone = reg.phoneNumber || reg.teamLeadPhone || reg.phone || "";
+
+      list.push({
+        id: `${regId}_lead`,
+        regId,
+        teamId: regId,
+        name: leadName,
+        studentId: leadStudentId,
+        email: leadEmail,
+        phone: leadPhone,
+        branch,
+        section,
+        year,
+        college,
+        role: isGroup ? "Team Lead" : "Solo Participant",
+        isLead: true,
+        isGroup,
+        groupName,
+        status,
+        accessGranted,
+        createdAt: reg.createdAt || Date.now(),
+        teamNumber: teamNum,
+        foodPreference: foodPref
+      });
+
+      // 2. Team Members
+      if (Array.isArray(reg.members)) {
+        reg.members.forEach((m: any, mIdx: number) => {
+          if (m && (m.name || m.email || m.studentId)) {
+            list.push({
+              id: `${regId}_m_${mIdx}`,
+              regId,
+              teamId: regId,
+              name: m.name || `Member #${mIdx + 2}`,
+              studentId: m.studentId || m.rollNo || m.registrationNumber || "",
+              email: m.email || m.personalEmail || "",
+              phone: m.phone || m.phoneNumber || leadPhone,
+              branch: m.branch || branch,
+              section: m.section || section,
+              year: m.year || year,
+              college: m.college || college,
+              role: m.role || `Team Member #${mIdx + 2}`,
+              isLead: false,
+              isGroup: true,
+              groupName,
+              status,
+              accessGranted,
+              createdAt: reg.createdAt || Date.now(),
+              teamNumber: teamNum,
+              foodPreference: foodPref
+            });
+          }
+        });
+      }
     });
-  }, [eventAccessRegistrations, eventAccessSearchQuery]);
+
+    return list;
+  }, [eventAccessRegistrations]);
+
+  const filteredEventAccessRegistrations = useMemo(() => {
+    let list = eventAccessRegistrations;
+
+    if (eventRosterFilter === "teams") {
+      list = list.filter(r => r.groupName && r.groupName !== "Individual RSVP");
+    } else if (eventRosterFilter === "individuals") {
+      list = list.filter(r => !r.groupName || r.groupName === "Individual RSVP");
+    } else if (eventRosterFilter === "confirmed") {
+      list = list.filter(r => String(r.status || "").toLowerCase().trim() === "confirmed");
+    } else if (eventRosterFilter === "pending") {
+      list = list.filter(r => String(r.status || "").toLowerCase().trim() !== "confirmed");
+    }
+
+    if (!eventAccessSearchQuery.trim()) return list;
+    const q = eventAccessSearchQuery.toLowerCase().trim();
+    return list.filter((r) => {
+      const leadName = (r.teamLeadName || r.fullName || r.name || "").toLowerCase();
+      const leadEmail = (r.teamLeadPersonalEmail || r.teamLeadEmail || r.email || "").toLowerCase();
+      const studentId = (r.teamLeadStudentId || r.studentId || r.rollNo || "").toLowerCase();
+      const groupName = (r.groupName || "").toLowerCase();
+      const phone = (r.phoneNumber || r.phone || "").toLowerCase();
+      const membersMatch = Array.isArray(r.members) && r.members.some((m: any) =>
+        (m.name || "").toLowerCase().includes(q) ||
+        (m.email || "").toLowerCase().includes(q) ||
+        (m.studentId || m.rollNo || "").toLowerCase().includes(q)
+      );
+
+      return leadName.includes(q) || leadEmail.includes(q) || studentId.includes(q) || groupName.includes(q) || phone.includes(q) || membersMatch;
+    });
+  }, [eventAccessRegistrations, eventAccessSearchQuery, eventRosterFilter]);
+
+  const filteredIndividualAttendees = useMemo(() => {
+    let list = flattenedEventAttendees;
+
+    if (eventRosterFilter === "teams") {
+      list = list.filter(a => a.isGroup);
+    } else if (eventRosterFilter === "individuals") {
+      list = list.filter(a => !a.isGroup);
+    } else if (eventRosterFilter === "confirmed") {
+      list = list.filter(a => String(a.status || "").toLowerCase().trim() === "confirmed");
+    } else if (eventRosterFilter === "pending") {
+      list = list.filter(a => String(a.status || "").toLowerCase().trim() !== "confirmed");
+    }
+
+    if (!eventAccessSearchQuery.trim()) return list;
+    const q = eventAccessSearchQuery.toLowerCase().trim();
+    return list.filter(a =>
+      a.name.toLowerCase().includes(q) ||
+      a.email.toLowerCase().includes(q) ||
+      a.studentId.toLowerCase().includes(q) ||
+      a.groupName.toLowerCase().includes(q) ||
+      a.phone.toLowerCase().includes(q) ||
+      a.role.toLowerCase().includes(q)
+    );
+  }, [flattenedEventAttendees, eventAccessSearchQuery, eventRosterFilter]);
+
+  const toggleTeamExpand = (teamId: string) => {
+    setExpandedTeamIds(prev =>
+      prev.includes(teamId) ? prev.filter(id => id !== teamId) : [...prev, teamId]
+    );
+  };
+
+  const toggleExpandAllTeams = () => {
+    if (expandedTeamIds.length >= eventAccessRegistrations.length) {
+      setExpandedTeamIds([]);
+    } else {
+      setExpandedTeamIds(eventAccessRegistrations.map(r => r.id));
+    }
+  };
+
+  const handleOpenEventRoster = (eventObj: any) => {
+    handleOpenEventAccess(eventObj);
+    setIsEventRosterModalOpen(true);
+  };
 
   const handleExportEventAccessCsv = () => {
-    if (!eventAccessRegistrations || eventAccessRegistrations.length === 0) {
+    if (!flattenedEventAttendees || flattenedEventAttendees.length === 0) {
       alert("No registered participants found to export.");
       return;
     }
     const headers = [
-      "Participant / Lead Name",
+      "Student / Participant Name",
       "Student ID / Roll No",
       "Email Address",
       "Phone Number",
+      "Role in Team",
+      "Team / Group Name",
+      "Registration Type",
+      "College Name",
       "Branch",
       "Section",
       "Year",
-      "Registration Type",
-      "Team Size",
       "Status",
+      "Login Access",
       "Registered Date"
     ];
 
-    const rows: string[] = [];
-    eventAccessRegistrations.forEach((reg) => {
-      const regType = reg.groupName && reg.groupName !== "Individual RSVP" ? "Group" : "Individual";
-      const regDate = reg.createdAt ? new Date(reg.createdAt).toLocaleDateString("en-US") : "N/A";
-      const status = reg.status || "Confirmed";
+    const rows = flattenedEventAttendees.map(a => [
+      `"${(a.name || "").replace(/"/g, '""')}"`,
+      `"${(a.studentId || "N/A").replace(/"/g, '""')}"`,
+      `"${(a.email || "").replace(/"/g, '""')}"`,
+      `"${(a.phone || "").replace(/"/g, '""')}"`,
+      `"${(a.role || (a.isLead ? "Team Lead" : "Member")).replace(/"/g, '""')}"`,
+      `"${(a.isGroup ? a.groupName : "Individual RSVP").replace(/"/g, '""')}"`,
+      `"${a.isGroup ? "Group Team" : "Individual"}"`,
+      `"${(a.college || "").replace(/"/g, '""')}"`,
+      `"${(a.branch || "").replace(/"/g, '""')}"`,
+      `"${(a.section || "").replace(/"/g, '""')}"`,
+      `"${(a.year || "").replace(/"/g, '""')}"`,
+      `"${a.status}"`,
+      `"${a.accessGranted ? "Granted" : "Pending"}"`,
+      `"${new Date(a.createdAt).toLocaleDateString("en-US")}"`
+    ]);
 
-      if (reg.members && reg.members.length > 0) {
-        reg.members.forEach((m: any) => {
-          const row = [
-            `"${(m.name || reg.teamLeadName || "").replace(/"/g, '""')}"`,
-            `"${(m.studentId || reg.teamLeadStudentId || "").replace(/"/g, '""')}"`,
-            `"${(m.email || reg.teamLeadEmail || "").replace(/"/g, '""')}"`,
-            `"${(reg.phoneNumber || "").replace(/"/g, '""')}"`,
-            `"${(reg.branch || "").replace(/"/g, '""')}"`,
-            `"${(reg.section || "").replace(/"/g, '""')}"`,
-            `"${(reg.year || "").replace(/"/g, '""')}"`,
-            `"${regType}"`,
-            `"${reg.teamSize || 1}"`,
-            `"${status}"`,
-            `"${regDate}"`
-          ];
-          rows.push(row.join(","));
-        });
-      } else {
-        const row = [
-          `"${(reg.teamLeadName || reg.name || "").replace(/"/g, '""')}"`,
-          `"${(reg.teamLeadStudentId || reg.studentId || "").replace(/"/g, '""')}"`,
-          `"${(reg.teamLeadEmail || reg.email || "").replace(/"/g, '""')}"`,
-          `"${(reg.phoneNumber || "").replace(/"/g, '""')}"`,
-          `"${(reg.branch || "").replace(/"/g, '""')}"`,
-          `"${(reg.section || "").replace(/"/g, '""')}"`,
-          `"${(reg.year || "").replace(/"/g, '""')}"`,
-          `"${regType}"`,
-          `"${reg.teamSize || 1}"`,
-          `"${status}"`,
-          `"${regDate}"`
-        ];
-        rows.push(row.join(","));
-      }
-    });
-
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
+    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
     const eventNameSlug = (eventAccessEvent?.title || "event").toLowerCase().replace(/[^a-z0-9]/g, "_");
-    link.setAttribute("download", `${eventNameSlug}_participants_access.csv`);
+    link.setAttribute("download", `${eventNameSlug}_all_registered_members_roster.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -2969,15 +3127,15 @@ const EventManagementPage: React.FC = () => {
         speakerImageFilename: formSpeakerImageFilename,
         hasAgenda: formHasAgenda,
         agendaItems: formHasAgenda ? formAgendaItems : [],
-        agendaTime1: formAgendaItems[0]?.time || "",
-        agendaTitle1: formAgendaItems[0]?.title || "",
-        agendaDesc1: formAgendaItems[0]?.description || "",
-        agendaTime2: formAgendaItems[1]?.time || "",
-        agendaTitle2: formAgendaItems[1]?.title || "",
-        agendaDesc2: formAgendaItems[1]?.description || "",
-        agendaTime3: formAgendaItems[2]?.time || "",
-        agendaTitle3: formAgendaItems[2]?.title || "",
-        agendaDesc3: formAgendaItems[2]?.description || "",
+        agendaTime1: formHasAgenda ? (formAgendaItems[0]?.time || "") : "",
+        agendaTitle1: formHasAgenda ? (formAgendaItems[0]?.title || "") : "",
+        agendaDesc1: formHasAgenda ? (formAgendaItems[0]?.description || "") : "",
+        agendaTime2: formHasAgenda ? (formAgendaItems[1]?.time || "") : "",
+        agendaTitle2: formHasAgenda ? (formAgendaItems[1]?.title || "") : "",
+        agendaDesc2: formHasAgenda ? (formAgendaItems[1]?.description || "") : "",
+        agendaTime3: formHasAgenda ? (formAgendaItems[2]?.time || "") : "",
+        agendaTitle3: formHasAgenda ? (formAgendaItems[2]?.title || "") : "",
+        agendaDesc3: formHasAgenda ? (formAgendaItems[2]?.description || "") : "",
         minTeamSize: formMinTeamSize ? Number(formMinTeamSize) : 1,
         maxTeamSize: formMaxTeamSize ? Number(formMaxTeamSize) : 4,
         isPaidEvent: formIsPaidEvent,
@@ -3146,6 +3304,16 @@ const EventManagementPage: React.FC = () => {
       dataCache.remove("public_events");
       dataCache.remove("all_events");
       dataCache.remove("faculty_events");
+      if (targetEventId) {
+        dataCache.remove(`event_detail_${targetEventId}`);
+        dataCache.remove(`event_${targetEventId}`);
+      }
+      if (editingEventId) {
+        dataCache.remove(`event_detail_${editingEventId}`);
+        dataCache.remove(`event_${editingEventId}`);
+      }
+      dataCache.invalidate("event_detail_");
+      dataCache.invalidate("event_");
       window.dispatchEvent(new Event("eventsUpdated"));
       window.dispatchEvent(new Event("storage"));
 
@@ -3290,7 +3458,7 @@ const EventManagementPage: React.FC = () => {
       // 3. Delete from Firestore if present
       try {
         const docRef = doc(db, "events", id);
-        await deleteRegistration(user.id); // Replaced from docRef
+        await deleteDoc(docRef);
       } catch (e) {}
 
       setEvents(prev => prev.filter(e => e.id !== id));
@@ -3832,11 +4000,16 @@ const EventManagementPage: React.FC = () => {
                                   <ChevronDown className="h-3 w-3 absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none opacity-60 text-slate-600" />
                                 </div>
                               </td>
-                              <td className="px-6 py-4 w-44">
-                                <span className="px-3 py-1 bg-blue-50 text-[#2563EB] font-black text-xs rounded-full border border-blue-100/60 inline-flex items-center gap-1.5 shadow-xs">
-                                  <Users className="h-3.5 w-3.5" />
-                                  {event.currentReg || 0} Registered
-                                </span>
+                              <td className="px-6 py-4 w-48" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  onClick={() => handleOpenEventRoster(event)}
+                                  className="px-3.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-[#2563EB] font-black text-xs rounded-full border border-blue-200/80 inline-flex items-center gap-1.5 shadow-2xs transition-all active:scale-95 cursor-pointer hover:border-blue-400 group/regBtn"
+                                  title={`Click to view all registered teams and individual members for "${event.title}"`}
+                                >
+                                  <Users className="h-3.5 w-3.5 group-hover/regBtn:scale-110 transition-transform" />
+                                  <span>{event.currentReg || 0} Registered</span>
+                                </button>
                               </td>
                               <td className="px-6 py-4 text-right" onClick={(e) => e.stopPropagation()}>
                                 <button
@@ -6321,10 +6494,20 @@ const EventManagementPage: React.FC = () => {
                           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Registrations Count</span>
                           <span className="text-xs font-bold text-slate-700">Total Registered Seats</span>
                         </div>
-                        <div className="px-4 py-2 bg-blue-50 text-[#2563EB] rounded-2xl border border-blue-100/60 font-black text-sm shadow-xs flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (selectedEventDetails) {
+                              setIsDetailsModalOpen(false);
+                              handleOpenEventRoster(selectedEventDetails);
+                            }
+                          }}
+                          className="px-4 py-2 bg-blue-50 hover:bg-blue-100 text-[#2563EB] rounded-2xl border border-blue-200 font-black text-sm shadow-xs flex items-center gap-2 cursor-pointer transition-all active:scale-95"
+                          title="Click to view all registered teams and individual members"
+                        >
                           <Users className="h-4 w-4 text-[#2563EB]" />
-                          <span>{selectedEventDetails?.currentReg || 0} Registered Seats</span>
-                        </div>
+                          <span>{selectedEventDetails?.currentReg || 0} Registered Seats ➔</span>
+                        </button>
                       </div>
 
                       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 pt-1 text-center">
@@ -6539,7 +6722,7 @@ const EventManagementPage: React.FC = () => {
                         </div>
                         10. Event Agenda & Timeline
                       </h3>
-                      {Array.isArray(selectedEventDetails?.agendaItems) && selectedEventDetails.agendaItems.length > 0 ? (
+                      {selectedEventDetails?.hasAgenda !== false && Array.isArray(selectedEventDetails?.agendaItems) && selectedEventDetails.agendaItems.length > 0 ? (
                         <div className="space-y-3 relative before:absolute before:inset-0 before:left-4 before:w-0.5 before:bg-slate-150 pl-2">
                           {selectedEventDetails.agendaItems.map((item: any, idx: number) => (
                             <div key={idx} className="flex items-start gap-4 p-4 rounded-2xl bg-slate-50 border border-slate-200/60 relative z-10">
@@ -6554,7 +6737,7 @@ const EventManagementPage: React.FC = () => {
                           ))}
                         </div>
                       ) : (
-                        <p className="text-xs text-slate-400 italic p-3 bg-slate-50 rounded-xl border border-slate-100">No agenda configured.</p>
+                        <p className="text-xs text-slate-400 italic p-3 bg-slate-50 rounded-xl border border-slate-100">Event agenda is disabled or not configured.</p>
                       )}
                     </div>
 
@@ -7318,42 +7501,124 @@ const EventManagementPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Sub-Header Toolbar (Search & Quick Stats) */}
-              <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/90 shadow-sm flex flex-col sm:flex-row items-center justify-between gap-4">
-                {/* Quick Search Input */}
-                <div className="relative w-full sm:w-96">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4.5 w-4.5 text-slate-400" />
-                  <input
-                    type="text"
-                    placeholder="Search participants by name, student ID, email..."
-                    value={eventAccessSearchQuery}
-                    onChange={(e) => setEventAccessSearchQuery(e.target.value)}
-                    className="w-full pl-11 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all"
-                  />
-                </div>
-
-                {/* Stat Pills */}
-                <div className="flex items-center gap-3.5 w-full sm:w-auto justify-between sm:justify-end">
-                  <div className="px-4 py-2.5 bg-blue-50/80 border border-blue-100/80 rounded-2xl flex items-center gap-3 shadow-2xs">
-                    <div className="w-8 h-8 rounded-xl bg-blue-100 text-[#2563EB] flex items-center justify-center font-bold">
-                      <Users className="h-4.5 w-4.5" />
-                    </div>
-                    <div className="text-left">
-                      <span className="text-[9px] font-extrabold text-slate-400 uppercase block leading-none tracking-wider">REGISTERED PARTICIPANTS</span>
-                      <span className="text-xs font-black text-blue-700 mt-0.5 block">
-                        {eventAccessRegistrations.length} Seats
-                      </span>
-                    </div>
+              {/* Sub-Header Toolbar (Search, View Mode Tabs, Filter & Quick Stats) */}
+              <div className="bg-white p-5 sm:p-6 rounded-3xl border border-slate-200/90 shadow-sm space-y-4">
+                <div className="flex flex-col lg:flex-row items-stretch lg:items-center justify-between gap-4">
+                  {/* Left: View Mode Tabs */}
+                  <div className="flex items-center gap-1.5 p-1 bg-slate-100 rounded-2xl shrink-0 self-start">
+                    <button
+                      onClick={() => setEventRosterViewMode("teams")}
+                      className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                        eventRosterViewMode === "teams"
+                          ? "bg-white text-blue-700 shadow-sm border border-slate-200/60"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      <Layers className="w-4 h-4 text-[#2563EB]" />
+                      <span>Teams & Registrations ({filteredEventAccessRegistrations.length})</span>
+                    </button>
+                    <button
+                      onClick={() => setEventRosterViewMode("individuals")}
+                      className={`px-4 py-2 rounded-xl text-xs font-black transition-all flex items-center gap-2 cursor-pointer ${
+                        eventRosterViewMode === "individuals"
+                          ? "bg-white text-blue-700 shadow-sm border border-slate-200/60"
+                          : "text-slate-600 hover:text-slate-900"
+                      }`}
+                    >
+                      <Users className="w-4 h-4 text-[#2563EB]" />
+                      <span>All Individual Members ({flattenedEventAttendees.length})</span>
+                    </button>
                   </div>
 
-                  <div className="px-4 py-2.5 bg-emerald-50/80 border border-emerald-100/80 rounded-2xl flex items-center gap-3 shadow-2xs">
-                    <div className="w-8 h-8 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
-                      <ShieldCheck className="h-4.5 w-4.5" />
+                  {/* Right: Quick Stats Pills */}
+                  <div className="flex items-center gap-3.5 flex-wrap justify-start lg:justify-end">
+                    <div className="px-4 py-2 bg-blue-50/80 border border-blue-100/80 rounded-2xl flex items-center gap-2.5 shadow-2xs">
+                      <div className="w-7 h-7 rounded-xl bg-blue-100 text-[#2563EB] flex items-center justify-center font-bold">
+                        <Users className="h-4 w-4" />
+                      </div>
+                      <div className="text-left">
+                        <span className="text-[9px] font-extrabold text-slate-400 uppercase block leading-none tracking-wider">TOTAL MEMBERS</span>
+                        <span className="text-xs font-black text-blue-700 mt-0.5 block">
+                          {flattenedEventAttendees.length} Students
+                        </span>
+                      </div>
                     </div>
-                    <div className="text-left">
-                      <span className="text-[9px] font-extrabold text-slate-400 uppercase block leading-none tracking-wider">ACCESS STATUS</span>
-                      <span className="text-xs font-black text-emerald-700 mt-0.5 block">Live Access</span>
+
+                    <div className="px-4 py-2 bg-purple-50/80 border border-purple-100/80 rounded-2xl flex items-center gap-2.5 shadow-2xs">
+                      <div className="w-7 h-7 rounded-xl bg-purple-100 text-purple-700 flex items-center justify-center font-bold">
+                        <Layers className="h-4 w-4" />
+                      </div>
+                      <div className="text-left">
+                        <span className="text-[9px] font-extrabold text-slate-400 uppercase block leading-none tracking-wider">TEAMS / REGISTRATIONS</span>
+                        <span className="text-xs font-black text-purple-700 mt-0.5 block">
+                          {eventAccessRegistrations.length} Groups
+                        </span>
+                      </div>
                     </div>
+
+                    <div className="px-4 py-2 bg-emerald-50/80 border border-emerald-100/80 rounded-2xl flex items-center gap-2.5 shadow-2xs">
+                      <div className="w-7 h-7 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-bold">
+                        <ShieldCheck className="h-4 w-4" />
+                      </div>
+                      <div className="text-left">
+                        <span className="text-[9px] font-extrabold text-slate-400 uppercase block leading-none tracking-wider">CONFIRMED SEATS</span>
+                        <span className="text-xs font-black text-emerald-700 mt-0.5 block">
+                          {eventAccessRegistrations.filter(r => String(r.status || "").toLowerCase().trim() === "confirmed").length} Confirmed
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Filters & Search Row */}
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-3 pt-3 border-t border-slate-100">
+                  {/* Search Input */}
+                  <div className="relative flex-1">
+                    <Search className="absolute left-4 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder={eventRosterViewMode === "teams" ? "Search teams by name, lead, roll no, member details..." : "Search individual members by name, roll no, email, branch..."}
+                      value={eventAccessSearchQuery}
+                      onChange={(e) => setEventAccessSearchQuery(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold text-slate-800 placeholder-slate-400 focus:bg-white focus:outline-none focus:ring-4 focus:ring-blue-500/10 focus:border-[#2563EB] transition-all"
+                    />
+                  </div>
+
+                  {/* Filter Select */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    <SlidersHorizontal className="w-3.5 h-3.5 text-slate-400" />
+                    <select
+                      value={eventRosterFilter}
+                      onChange={(e: any) => setEventRosterFilter(e.target.value)}
+                      className="px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
+                    >
+                      <option value="all">Filter: All Records</option>
+                      <option value="teams">Teams Only</option>
+                      <option value="individuals">Individuals Only</option>
+                      <option value="confirmed">Confirmed Status</option>
+                      <option value="pending">Pending Status</option>
+                    </select>
+
+                    {/* Expand/Collapse All (Teams View Only) */}
+                    {eventRosterViewMode === "teams" && (
+                      <button
+                        onClick={toggleExpandAllTeams}
+                        className="px-3 py-2.5 rounded-2xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-extrabold text-xs transition-all cursor-pointer flex items-center gap-1.5"
+                        title={expandedTeamIds.length >= filteredEventAccessRegistrations.length ? "Collapse all member lists" : "Expand all member lists"}
+                      >
+                        {expandedTeamIds.length >= filteredEventAccessRegistrations.length && filteredEventAccessRegistrations.length > 0 ? (
+                          <>
+                            <ChevronUp className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Collapse All</span>
+                          </>
+                        ) : (
+                          <>
+                            <ChevronDown className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline">Expand All Members</span>
+                          </>
+                        )}
+                      </button>
+                    )}
                   </div>
                 </div>
               </div>
@@ -7362,157 +7627,331 @@ const EventManagementPage: React.FC = () => {
               <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
 
                 {/* LEFT COLUMN: Participants Table Roster (Span 8) */}
-                <div className="lg:col-span-8 space-y-6">
+                <div className="lg:col-span-8 space-y-4">
                   {loadingEventAccessRegs ? (
                     <div className="py-24 text-center flex flex-col items-center justify-center gap-3 bg-white rounded-3xl border border-slate-200/90 shadow-sm">
                       <Loader2 className="h-8 w-8 text-[#2563EB] animate-spin" />
-                      <p className="text-xs font-bold text-slate-500">Fetching registered participants from database...</p>
+                      <p className="text-xs font-bold text-slate-500">Fetching registered participants & team rosters from database...</p>
                     </div>
-                  ) : filteredEventAccessRegistrations.length > 0 ? (
-                    <div className="border border-slate-200/90 rounded-3xl overflow-hidden shadow-sm bg-white">
-                      <div className="overflow-x-auto">
-                        <table className="w-full text-left text-xs border-collapse min-w-[700px]">
-                          <thead>
-                            <tr className="bg-slate-50/90 border-b border-slate-200/80 text-[10px] font-black text-slate-500 uppercase tracking-wider">
-                              <th className="py-3.5 px-4 w-[28%]">Team / Lead</th>
-                              <th className="py-3.5 px-3 w-[16%]">Roll No.</th>
-                              <th className="py-3.5 px-3 w-[22%]">Contact Details</th>
-                              <th className="py-3.5 px-3 w-[12%]">Branch</th>
-                              <th className="py-3.5 px-3 w-[10%]">Type</th>
-                              <th className="py-3.5 px-4 w-[12%] text-right">Login Access</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-100">
-                            {filteredEventAccessRegistrations.map((reg, idx) => {
-                              const isGroup = reg.groupName && reg.groupName !== "Individual RSVP";
-                              const isConfirmed = String(reg.status || "").toLowerCase().trim() === "confirmed";
-                              const isProvisioned = isConfirmed && provisionedTeamIds.includes(reg.id);
-                              const displayTeamName = isGroup ? reg.groupName : (reg.teamLeadName || reg.name || "Individual Participant");
+                  ) : eventRosterViewMode === "teams" ? (
+                    /* ------------------------------------------------------------- */
+                    /* MODE 1: TEAMS & REGISTRATIONS VIEW WITH EXPANDABLE MEMBERS     */
+                    /* ------------------------------------------------------------- */
+                    filteredEventAccessRegistrations.length > 0 ? (
+                      <div className="space-y-4">
+                        {filteredEventAccessRegistrations.map((reg, idx) => {
+                          const isGroup = reg.groupName && reg.groupName !== "Individual RSVP";
+                          const isConfirmed = String(reg.status || "").toLowerCase().trim() === "confirmed";
+                          const isProvisioned = isConfirmed && provisionedTeamIds.includes(reg.id);
+                          const displayTeamName = isGroup ? reg.groupName : (reg.teamLeadName || reg.name || "Individual Participant");
+                          const isExpanded = expandedTeamIds.includes(reg.id);
+                          const membersList = Array.isArray(reg.members) ? reg.members : [];
+                          const totalMemberCount = isGroup ? 1 + membersList.length : 1;
 
-                              return (
-                                <tr key={reg.id || idx} className="hover:bg-blue-50/30 transition-colors">
-                                  {/* Team Name / Lead */}
-                                  <td className="py-3.5 px-4">
-                                    <div className="flex items-center gap-3">
-                                      <div className="w-8.5 h-8.5 rounded-xl bg-blue-50 text-[#2563EB] border border-blue-200/80 font-mono font-black text-xs flex items-center justify-center shrink-0 shadow-2xs">
-                                        {String(reg.teamNumber || reg.teamNo || (idx + 1)).padStart(2, "0")}
+                          return (
+                            <div
+                              key={reg.id || idx}
+                              className={`bg-white rounded-3xl border transition-all duration-200 shadow-sm overflow-hidden ${
+                                isExpanded ? "border-blue-300 ring-4 ring-blue-500/5 shadow-md" : "border-slate-200/90 hover:border-slate-300"
+                              }`}
+                            >
+                              {/* Team Card Header */}
+                              <div className="p-5 sm:p-6 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                                <div className="flex items-start sm:items-center gap-3.5 min-w-0 flex-1">
+                                  {/* Team Number Badge */}
+                                  <div className="w-10 h-10 rounded-2xl bg-blue-50 text-[#2563EB] border border-blue-200/80 font-mono font-black text-sm flex items-center justify-center shrink-0 shadow-2xs">
+                                    {String(reg.teamNumber || reg.teamNo || (idx + 1)).padStart(2, "0")}
+                                  </div>
+
+                                  <div className="min-w-0 flex-1">
+                                    <div className="flex items-center gap-2.5 flex-wrap">
+                                      <h4 className="font-black text-slate-900 text-sm tracking-tight truncate max-w-sm">
+                                        {displayTeamName}
+                                      </h4>
+                                      <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase inline-flex items-center gap-1 shadow-2xs ${
+                                        isGroup ? "bg-purple-100 text-purple-800 border border-purple-200" : "bg-sky-100 text-sky-800 border border-sky-200"
+                                      }`}>
+                                        {isGroup ? `TEAM (${totalMemberCount} MEMBERS)` : "INDIVIDUAL RSVP"}
+                                      </span>
+                                      {isConfirmed ? (
+                                        <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-200 inline-flex items-center gap-1">
+                                          <Check className="w-2.5 h-2.5" /> Confirmed
+                                        </span>
+                                      ) : (
+                                        <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200 inline-flex items-center gap-1">
+                                          <Clock className="w-2.5 h-2.5" /> Pending
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Lead / Subtitle Info */}
+                                    <div className="flex items-center gap-3 flex-wrap text-xs text-slate-500 font-semibold mt-1">
+                                      <span className="inline-flex items-center gap-1 text-slate-800 font-bold">
+                                        <User className="w-3.5 h-3.5 text-[#2563EB]" />
+                                        {reg.teamLeadName || reg.name || "N/A"}
+                                      </span>
+                                      <span>•</span>
+                                      <span className="font-mono text-slate-700 bg-slate-100 px-2 py-0.5 rounded-md text-[11px] font-extrabold">
+                                        {reg.teamLeadStudentId || reg.studentId || "N/A"}
+                                      </span>
+                                      <span>•</span>
+                                      <span className="text-slate-600">
+                                        {reg.branch || "CSE"} {reg.section ? `(${reg.section})` : ""}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                {/* Right Action Buttons */}
+                                <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-center">
+                                  {/* Login Access Action */}
+                                  {!isConfirmed ? (
+                                    <button
+                                      onClick={() => navigate("/faculty/registrations")}
+                                      className="px-3 py-1.5 rounded-xl text-[10px] font-extrabold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-all cursor-pointer active:scale-95 shadow-2xs flex items-center gap-1"
+                                      title="Confirm registration in Registration Directory"
+                                    >
+                                      <Lock className="w-3 h-3 text-amber-600" />
+                                      <span>Confirm Reg</span>
+                                    </button>
+                                  ) : isProvisioned ? (
+                                    <div className="inline-flex items-center gap-1.5">
+                                      <span className="px-2.5 py-1 rounded-xl text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-200 inline-flex items-center gap-1 shadow-2xs">
+                                        <Check className="h-3 w-3 text-emerald-600" />
+                                        Granted
+                                      </span>
+                                      <button
+                                        onClick={() => handleRevokeSingleTeamAccess(reg.id, displayTeamName)}
+                                        disabled={isProvisioningLoginAccess}
+                                        className="px-2.5 py-1 rounded-xl text-[10px] font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 transition-all cursor-pointer active:scale-95 shadow-2xs"
+                                        title="Revoke portal access for this team"
+                                      >
+                                        Revoke
+                                      </button>
+                                    </div>
+                                  ) : (
+                                    <button
+                                      onClick={() => handleGrantSingleTeamAccess(reg.id, displayTeamName)}
+                                      disabled={isProvisioningLoginAccess}
+                                      className="px-3 py-1.5 rounded-xl text-[10px] font-extrabold bg-blue-50 hover:bg-blue-100 text-[#2563EB] border border-blue-200 transition-all cursor-pointer active:scale-95 shadow-2xs flex items-center gap-1"
+                                      title="Allow login access for this team"
+                                    >
+                                      <Key className="w-3 h-3 text-[#2563EB]" />
+                                      <span>Allow Access</span>
+                                    </button>
+                                  )}
+
+                                  {/* Expand / Collapse Members Toggle */}
+                                  {isGroup ? (
+                                    <button
+                                      onClick={() => toggleTeamExpand(reg.id)}
+                                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer border shadow-2xs ${
+                                        isExpanded
+                                          ? "bg-blue-600 text-white border-blue-600 shadow-blue-500/20"
+                                          : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+                                      }`}
+                                    >
+                                      <span>{isExpanded ? "Hide Members" : `Show ${totalMemberCount} Members`}</span>
+                                      {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </div>
+
+                              {/* Expandable Individual Members List */}
+                              {isGroup && isExpanded && (
+                                <div className="border-t border-slate-100 bg-slate-50/70 p-4 sm:p-6 space-y-3 animate-in slide-in-from-top-2 duration-150">
+                                  <div className="flex items-center justify-between pb-2 border-b border-slate-200/70">
+                                    <div className="flex items-center gap-2">
+                                      <Users className="w-4 h-4 text-[#2563EB]" />
+                                      <h5 className="text-xs font-black text-slate-800 uppercase tracking-wider">
+                                        Team Members Roster ({totalMemberCount} Registered Students)
+                                      </h5>
+                                    </div>
+                                    <span className="text-[10px] font-extrabold text-slate-400">
+                                      1 Lead + {membersList.length} Teammate{membersList.length !== 1 ? "s" : ""}
+                                    </span>
+                                  </div>
+
+                                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                                    {/* 1. Team Lead Card */}
+                                    <div className="bg-white p-4 rounded-2xl border-2 border-blue-200/80 shadow-xs relative overflow-hidden">
+                                      <div className="absolute top-0 right-0 bg-gradient-to-l from-blue-600 to-indigo-600 text-white px-3 py-0.5 rounded-bl-xl text-[9px] font-black uppercase tracking-wider flex items-center gap-1">
+                                        👑 TEAM LEAD
+                                      </div>
+                                      <div className="space-y-1.5 pt-1">
+                                        <div className="font-black text-slate-900 text-xs">
+                                          {reg.teamLeadName || reg.name || "N/A"}
+                                        </div>
+                                        <div className="flex items-center gap-2 flex-wrap text-[11px] font-bold text-slate-600">
+                                          <span className="font-mono bg-blue-50 text-[#2563EB] px-2 py-0.5 rounded-md font-black border border-blue-100">
+                                            {reg.teamLeadStudentId || reg.studentId || "N/A"}
+                                          </span>
+                                          <span>{reg.branch || "CSE"} {reg.section ? `• Sec ${reg.section}` : ""}</span>
+                                        </div>
+                                        <div className="text-[11px] text-slate-500 font-semibold truncate pt-1" title={reg.teamLeadPersonalEmail || reg.email}>
+                                          ✉️ {reg.teamLeadPersonalEmail || reg.personalEmail || reg.teamLeadEmail || reg.email || "N/A"}
+                                        </div>
+                                        {reg.phoneNumber && (
+                                          <div className="text-[11px] text-slate-500 font-semibold">
+                                            📞 {reg.phoneNumber}
+                                          </div>
+                                        )}
+                                      </div>
+                                    </div>
+
+                                    {/* 2. Additional Team Members Cards */}
+                                    {membersList.map((m: any, mIdx: number) => (
+                                      <div key={mIdx} className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-xs relative overflow-hidden">
+                                        <div className="absolute top-0 right-0 bg-slate-100 text-slate-600 px-2.5 py-0.5 rounded-bl-xl text-[9px] font-black uppercase tracking-wider border-b border-l border-slate-200">
+                                          👤 MEMBER #{mIdx + 2} {m.role ? `• ${m.role}` : ""}
+                                        </div>
+                                        <div className="space-y-1.5 pt-1">
+                                          <div className="font-black text-slate-900 text-xs">
+                                            {m.name || `Teammate #${mIdx + 2}`}
+                                          </div>
+                                          <div className="flex items-center gap-2 flex-wrap text-[11px] font-bold text-slate-600">
+                                            <span className="font-mono bg-slate-100 text-slate-800 px-2 py-0.5 rounded-md font-extrabold border border-slate-200">
+                                              {m.studentId || m.rollNo || m.registrationNumber || "N/A"}
+                                            </span>
+                                            <span>{m.branch || reg.branch || "CSE"} {m.section ? `• Sec ${m.section}` : reg.section ? `• Sec ${reg.section}` : ""}</span>
+                                          </div>
+                                          <div className="text-[11px] text-slate-500 font-semibold truncate pt-1" title={m.email || m.personalEmail}>
+                                            ✉️ {m.email || m.personalEmail || "N/A"}
+                                          </div>
+                                          {(m.phone || m.phoneNumber || reg.phoneNumber) && (
+                                            <div className="text-[11px] text-slate-500 font-semibold">
+                                              📞 {m.phone || m.phoneNumber || reg.phoneNumber}
+                                            </div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      <div className="py-24 text-center bg-white rounded-3xl border border-dashed border-slate-200 p-8 space-y-3 shadow-xs">
+                        <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#2563EB] flex items-center justify-center mx-auto shadow-inner">
+                          <Users className="h-7 w-7" />
+                        </div>
+                        <h4 className="text-base font-extrabold text-slate-800">No Registrations Found</h4>
+                        <p className="text-xs text-slate-400 font-medium max-w-sm mx-auto">
+                          {eventAccessSearchQuery
+                            ? `No registered teams or members match your search "${eventAccessSearchQuery}".`
+                            : `No registration records found in the database for "${eventAccessEvent?.title || "this event"}".`}
+                        </p>
+                      </div>
+                    )
+                  ) : (
+                    /* ------------------------------------------------------------- */
+                    /* MODE 2: ALL INDIVIDUAL MEMBERS FLAT TABLE ROSTER               */
+                    /* ------------------------------------------------------------- */
+                    filteredIndividualAttendees.length > 0 ? (
+                      <div className="border border-slate-200/90 rounded-3xl overflow-hidden shadow-sm bg-white">
+                        <div className="overflow-x-auto">
+                          <table className="w-full text-left text-xs border-collapse min-w-[760px]">
+                            <thead>
+                              <tr className="bg-slate-50/90 border-b border-slate-200/80 text-[10px] font-black text-slate-500 uppercase tracking-wider">
+                                <th className="py-3.5 px-4 w-[6%] text-center">#</th>
+                                <th className="py-3.5 px-3 w-[26%]">Student Name & Role</th>
+                                <th className="py-3.5 px-3 w-[16%]">Roll No.</th>
+                                <th className="py-3.5 px-3 w-[20%]">Team / Group</th>
+                                <th className="py-3.5 px-3 w-[20%]">Contact Details</th>
+                                <th className="py-3.5 px-3 w-[12%]">Branch</th>
+                              </tr>
+                            </thead>
+                            <tbody className="divide-y divide-slate-100">
+                              {filteredIndividualAttendees.map((attendee, idx) => (
+                                <tr key={attendee.id || idx} className="hover:bg-blue-50/30 transition-colors">
+                                  {/* # */}
+                                  <td className="py-3 px-4 text-center font-mono font-bold text-slate-400 text-[11px]">
+                                    {String(idx + 1).padStart(2, "0")}
+                                  </td>
+
+                                  {/* Student Name & Role */}
+                                  <td className="py-3 px-3">
+                                    <div className="flex items-center gap-2.5">
+                                      <div className={`w-7 h-7 rounded-xl flex items-center justify-center font-black text-[10px] shrink-0 ${
+                                        attendee.isLead
+                                          ? "bg-blue-600 text-white shadow-xs"
+                                          : attendee.isGroup
+                                          ? "bg-purple-100 text-purple-800"
+                                          : "bg-slate-100 text-slate-700"
+                                      }`}>
+                                        {attendee.name ? attendee.name.charAt(0).toUpperCase() : "?"}
                                       </div>
                                       <div className="min-w-0">
-                                        <span className="font-extrabold text-slate-900 text-xs block truncate max-w-[150px]">
-                                          {displayTeamName}
+                                        <span className="font-extrabold text-slate-900 text-xs block truncate max-w-[170px]">
+                                          {attendee.name}
                                         </span>
-                                        <span className="text-[10px] font-semibold text-slate-400 block mt-0.5 truncate max-w-[150px]">
-                                          {isGroup ? `Lead: ${reg.teamLeadName || reg.name}` : "Individual"}
+                                        <span className={`text-[9px] font-black uppercase block mt-0.5 ${
+                                          attendee.isLead ? "text-blue-700" : attendee.isGroup ? "text-purple-700" : "text-slate-500"
+                                        }`}>
+                                          {attendee.isLead ? "👑 Team Lead" : attendee.role || "Member"}
                                         </span>
                                       </div>
                                     </div>
                                   </td>
 
                                   {/* Student Roll ID */}
-                                  <td className="py-3.5 px-3">
-                                    <span className="font-mono font-extrabold text-slate-800 bg-slate-100/90 px-2.5 py-0.5 rounded-lg text-[11px] border border-slate-200/80 inline-block shadow-2xs">
-                                      {reg.teamLeadStudentId || reg.studentId || "N/A"}
+                                  <td className="py-3 px-3">
+                                    <span className="font-mono font-extrabold text-slate-800 bg-slate-100/90 px-2 py-0.5 rounded-lg text-[11px] border border-slate-200/80 inline-block">
+                                      {attendee.studentId || "N/A"}
                                     </span>
                                   </td>
 
-                                  {/* Contact Email & Phone */}
-                                  <td className="py-3.5 px-3 space-y-0.5">
-                                    <span className="font-bold text-slate-800 text-xs block truncate max-w-[170px]" title={reg.teamLeadPersonalEmail || reg.personalEmail || reg.teamLeadEmail || reg.email}>
-                                      {reg.teamLeadPersonalEmail || reg.personalEmail || reg.teamLeadEmail || reg.email || "N/A"}
-                                    </span>
-                                    {reg.teamLeadCollegeEmail && reg.teamLeadCollegeEmail !== (reg.teamLeadPersonalEmail || reg.personalEmail) && (
-                                      <span className="text-[10px] text-slate-400 font-medium block truncate max-w-[170px]" title={`College: ${reg.teamLeadCollegeEmail}`}>
-                                        🏛️ {reg.teamLeadCollegeEmail}
+                                  {/* Team Name */}
+                                  <td className="py-3 px-3">
+                                    <div className="min-w-0">
+                                      <span className="font-bold text-slate-800 text-xs block truncate max-w-[150px]">
+                                        {attendee.isGroup ? attendee.groupName : "Individual RSVP"}
                                       </span>
-                                    )}
-                                    {reg.phoneNumber && (
+                                      <span className={`text-[9px] font-extrabold block uppercase mt-0.5 ${attendee.isGroup ? "text-purple-600" : "text-sky-600"}`}>
+                                        {attendee.isGroup ? "Team Entry" : "Solo RSVP"}
+                                      </span>
+                                    </div>
+                                  </td>
+
+                                  {/* Contact Details */}
+                                  <td className="py-3 px-3 space-y-0.5">
+                                    <span className="font-bold text-slate-700 text-xs block truncate max-w-[160px]" title={attendee.email}>
+                                      {attendee.email || "N/A"}
+                                    </span>
+                                    {attendee.phone && (
                                       <span className="text-[10px] text-slate-400 font-semibold block">
-                                        {reg.phoneNumber}
+                                        {attendee.phone}
                                       </span>
                                     )}
                                   </td>
 
                                   {/* Branch & Sec */}
-                                  <td className="py-3.5 px-3 font-bold text-slate-700">
+                                  <td className="py-3 px-3 font-bold text-slate-700">
                                     <span className="px-2 py-0.5 rounded-md bg-slate-100 text-slate-800 text-[11px] font-extrabold border border-slate-200/60 inline-block">
-                                      {reg.branch || "CSE"} {reg.section ? `• ${reg.section}` : ""}
+                                      {attendee.branch || "CSE"} {attendee.section ? `• ${attendee.section}` : ""}
                                     </span>
-                                  </td>
-
-                                  {/* Registration Type / Members */}
-                                  <td className="py-3.5 px-3">
-                                    <span className={`px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase whitespace-nowrap inline-flex items-center gap-1 shadow-2xs ${isGroup ? "bg-purple-100 text-purple-800 border border-purple-200" : "bg-sky-100 text-sky-800 border border-sky-200"}`}>
-                                      {isGroup ? `GROUP (${reg.teamSize || (reg.members?.length || 1)})` : "INDIVIDUAL"}
-                                    </span>
-                                  </td>
-
-                                  {/* Login Access Status */}
-                                  <td className="py-3.5 px-4 text-right">
-                                    {!isConfirmed ? (
-                                      <div className="inline-flex items-center gap-1.5 justify-end">
-                                        <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200 inline-flex items-center gap-1 shadow-2xs" title="Registration must be confirmed in the Registration Directory before login access can be granted.">
-                                          <Lock className="h-3 w-3 text-amber-600" />
-                                          NOT CONFIRMED
-                                        </span>
-                                        <button
-                                          onClick={() => navigate("/faculty/registrations")}
-                                          className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-blue-50 hover:bg-blue-100 text-[#2563EB] border border-blue-200 transition-all cursor-pointer active:scale-95 shadow-2xs"
-                                          title="Go to Registration Directory to confirm this team"
-                                        >
-                                          Confirm
-                                        </button>
-                                      </div>
-                                    ) : isProvisioned ? (
-                                      <div className="inline-flex items-center gap-1.5 justify-end">
-                                        <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-200 inline-flex items-center gap-1 shadow-2xs">
-                                          <Check className="h-3 w-3 text-emerald-600" />
-                                          GRANTED
-                                        </span>
-                                        <button
-                                          onClick={() => handleRevokeSingleTeamAccess(reg.id, displayTeamName)}
-                                          disabled={isProvisioningLoginAccess}
-                                          className="px-2 py-0.5 rounded-md text-[9px] font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 transition-all cursor-pointer active:scale-95 shadow-2xs"
-                                          title="Revoke portal access for this team"
-                                        >
-                                          Revoke
-                                        </button>
-                                      </div>
-                                    ) : (
-                                      <div className="inline-flex items-center gap-1.5 justify-end">
-                                        <span className="px-2.5 py-0.5 rounded-full text-[9px] font-black uppercase bg-slate-100 text-slate-700 border border-slate-200 inline-flex items-center gap-1 shadow-2xs">
-                                          <Lock className="h-3 w-3 text-slate-500" />
-                                          PENDING
-                                        </span>
-                                        <button
-                                          onClick={() => handleGrantSingleTeamAccess(reg.id, displayTeamName)}
-                                          disabled={isProvisioningLoginAccess}
-                                          className="px-2.5 py-0.5 rounded-md text-[9px] font-extrabold bg-blue-50 hover:bg-blue-100 text-[#2563EB] border border-blue-200 transition-all cursor-pointer active:scale-95 shadow-2xs"
-                                          title="Allow login access for this confirmed team"
-                                        >
-                                          Allow Access
-                                        </button>
-                                      </div>
-                                    )}
                                   </td>
                                 </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="py-24 text-center bg-white rounded-3xl border border-dashed border-slate-200 p-8 space-y-3 shadow-xs">
-                      <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#2563EB] flex items-center justify-center mx-auto shadow-inner">
-                        <Users className="h-7 w-7" />
+                    ) : (
+                      <div className="py-24 text-center bg-white rounded-3xl border border-dashed border-slate-200 p-8 space-y-3 shadow-xs">
+                        <div className="w-14 h-14 rounded-2xl bg-blue-50 text-[#2563EB] flex items-center justify-center mx-auto shadow-inner">
+                          <Users className="h-7 w-7" />
+                        </div>
+                        <h4 className="text-base font-extrabold text-slate-800">No Members Match Filter</h4>
+                        <p className="text-xs text-slate-400 font-medium max-w-sm mx-auto">
+                          Try clearing or changing your search criteria or status filter.
+                        </p>
                       </div>
-                      <h4 className="text-base font-extrabold text-slate-800">No Participants Registered Yet</h4>
-                      <p className="text-xs text-slate-400 font-medium max-w-sm mx-auto">
-                        {eventAccessSearchQuery
-                          ? `No registered participants match your search "${eventAccessSearchQuery}".`
-                          : `No participant records found in the database for "${eventAccessEvent?.title || "this event"}".`}
-                      </p>
-                    </div>
+                    )
                   )}
                 </div>
 

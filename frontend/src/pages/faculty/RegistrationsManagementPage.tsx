@@ -787,9 +787,14 @@ const RegistrationsManagementPage: React.FC = () => {
                             </div>
                             <div className="flex flex-col">
                               <span className="font-extrabold text-slate-800 text-xs">{displayTeamName}</span>
-                              <span className="text-[10px] text-slate-450 font-medium">
-                                Lead: {reg.teamLeadName} {reg.teamLeadStudentId ? `(${reg.teamLeadStudentId})` : ""}
+                              <span className="text-[10px] text-slate-500 font-bold">
+                                {isGroup ? `👑 Lead: ${reg.teamLeadName} ${reg.teamLeadStudentId ? `(${reg.teamLeadStudentId})` : ""}` : `👤 ${reg.teamLeadName} ${reg.teamLeadStudentId ? `(${reg.teamLeadStudentId})` : ""}`}
                               </span>
+                              {isGroup && reg.members && reg.members.length > 0 && (
+                                <span className="text-[10px] text-purple-700 font-semibold mt-0.5 max-w-[280px] truncate" title={reg.members.map((m: any) => `${m.name}${m.studentId ? ` (${m.studentId})` : ''}`).join(', ')}>
+                                  👥 Members: {reg.members.map((m: any) => m.name || m.studentId).filter(Boolean).join(", ")}
+                                </span>
+                              )}
                               {(reg.collegeName || reg.college || reg.collegePlace) && (
                                 <span className="text-[10px] text-slate-400 font-medium whitespace-normal leading-tight mt-0.5 max-w-[250px]">
                                   {reg.collegeName || reg.college || "Unknown College"}{reg.collegePlace ? ` - ${reg.collegePlace}` : ""}

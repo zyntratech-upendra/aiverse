@@ -228,9 +228,9 @@ const RegistrationPage: React.FC = () => {
             backendEvent = await fetchEventById(id);
           } catch (e) {
             const allEvents = await fetchEvents().catch(() => []);
-            backendEvent = (allEvents || []).find((ev: any) => 
-              ev.id === id || 
-              ev._id === id || 
+            backendEvent = (allEvents || []).find((ev: any) =>
+              ev.id === id ||
+              ev._id === id ||
               (ev.title && ev.title.toLowerCase().replace(/[^a-z0-9]/g, "-").includes(id.toLowerCase()))
             );
           }
@@ -583,13 +583,13 @@ const RegistrationPage: React.FC = () => {
       const cleanMembers = isQuiz
         ? []
         : (members || [])
-            .map((m) => ({
-              name: m.name.trim(),
-              email: m.email.trim().toLowerCase(),
-              studentId: m.studentId.trim(),
-              phone: (m.phone || "").trim(),
-            }))
-            .filter((m) => m.name && m.email);
+          .map((m) => ({
+            name: m.name.trim(),
+            email: m.email.trim().toLowerCase(),
+            studentId: m.studentId.trim(),
+            phone: (m.phone || "").trim(),
+          }))
+          .filter((m) => m.name && m.email);
 
       const actualTeamSize = isQuiz ? 1 : Math.max(1, cleanMembers.length + 1);
 
@@ -666,7 +666,7 @@ const RegistrationPage: React.FC = () => {
         if (!finalRegId) finalRegId = regDocRef.id;
         await updateDoc(doc(db, "registrations", regDocRef.id), {
           qrCodeData: finalRegId
-        }).catch(() => {});
+        }).catch(() => { });
       } catch (fErr) {
         console.warn("[RegistrationPage] Firestore save notice:", fErr);
       }
@@ -695,7 +695,7 @@ const RegistrationPage: React.FC = () => {
           registration_id: finalRegId,
           team_name: isQuiz ? displayName : (groupName || displayName),
         }));
-        await userService.bulkUpsertUsers(userProfiles).catch(() => {});
+        await userService.bulkUpsertUsers(userProfiles).catch(() => { });
 
         const authAccounts = allEmails.map(em => ({
           email: em,
@@ -708,40 +708,45 @@ const RegistrationPage: React.FC = () => {
           eventTitle: event.title || "",
           registrationId: finalRegId,
         }));
-        await userService.bulkCreateAuthUsers(authAccounts).catch(() => {});
+        await userService.bulkCreateAuthUsers(authAccounts).catch(() => { });
       } catch (credErr) {
         console.warn("[Registration] Non-critical notice auto-provisioning credentials:", credErr);
       }
 
-      // Send registration confirmation email via Nodemailer SMTP
-      try {
-        const recipientEmail = leadPersonalEmail.trim() || leadCollegeEmail.trim();
-        if (recipientEmail) {
-          await sendEmail({
-            to: recipientEmail,
-            subject: `Registration Confirmed: ${event.title} - AI Verse`,
-            html: `
-              <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; color: #1e293b;">
-                <h2 style="color: #2563eb; margin-top: 0;">🎉 Registration Confirmed!</h2>
-                <p>Hello <strong>${leadName}</strong>,</p>
-                <p>You have successfully registered for <strong>${event.title}</strong>.</p>
-                <div style="background-color: #f8fafc; padding: 16px; border-radius: 8px; margin: 16px 0;">
-                  <p style="margin: 4px 0;"><strong>Registration ID:</strong> ${finalRegId}</p>
-                  <p style="margin: 4px 0;"><strong>Team Name:</strong> ${isQuiz ? "Individual Registration" : (groupName || "Individual")}</p>
-                  <p style="margin: 4px 0;"><strong>Date:</strong> ${event.date}</p>
-                  <p style="margin: 4px 0;"><strong>Time:</strong> ${event.time}</p>
-                  <p style="margin: 4px 0;"><strong>Location:</strong> ${event.location}</p>
+      // Only send registration confirmation email if the registration is already Confirmed upon creation.
+      // For all pending registrations (under review/payment verification), confirmation email is dispatched once faculty confirms it in the management portal.
+      if (payload.status === "Confirmed" && !isQuiz && (payload as any).sendConfirmationEmail !== false) {
+        try {
+          const recipientEmail = leadPersonalEmail.trim() || leadCollegeEmail.trim();
+          if (recipientEmail) {
+            await sendEmail({
+              to: recipientEmail,
+              from: "AI Verse <events@aiversevitb.in>",
+              reply_to: "aiverse@vishnu.edu.in",
+              subject: `Registration Confirmed: ${event.title} - AI Verse`,
+              html: `
+                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; color: #1e293b;">
+                  <h2 style="color: #2563eb; margin-top: 0;">🎉 Registration Confirmed!</h2>
+                  <p>Hello <strong>${leadName}</strong>,</p>
+                  <p>You have successfully registered for <strong>${event.title}</strong>.</p>
+                  <div style="background-color: #f8fafc; padding: 16px; border-radius: 8px; margin: 16px 0;">
+                    <p style="margin: 4px 0;"><strong>Registration ID:</strong> ${finalRegId}</p>
+                    <p style="margin: 4px 0;"><strong>Team Name:</strong> ${isQuiz ? "Individual Registration" : (groupName || "Individual")}</p>
+                    <p style="margin: 4px 0;"><strong>Date:</strong> ${event.date}</p>
+                    <p style="margin: 4px 0;"><strong>Time:</strong> ${event.time}</p>
+                    <p style="margin: 4px 0;"><strong>Location:</strong> ${event.location}</p>
+                  </div>
+                  <p style="margin-top: 20px;">View and download your digital pass ticket: <a href="https://aiversevitb.in/ticket/${finalRegId}" style="color: #2563eb; font-weight: bold;">View Ticket</a></p>
+                  <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+                  <p style="font-size: 12px; color: #64748b;">AI Verse Club &bull; Vishnu Institute of Technology, Bhimavaram</p>
                 </div>
-                <p style="margin-top: 20px;">View and download your digital pass ticket: <a href="https://aiversevitb.in/ticket/${finalRegId}" style="color: #2563eb; font-weight: bold;">View Ticket</a></p>
-                <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
-                <p style="font-size: 12px; color: #64748b;">AI Verse Club &bull; Vishnu Institute of Technology, Bhimavaram</p>
-              </div>
-            `,
-          }).catch((mailErr) => {
-            console.warn("[RegistrationPage] Confirmation email notice:", mailErr);
-          });
-        }
-      } catch (e) {}
+              `,
+            }).catch((mailErr) => {
+              console.warn("[RegistrationPage] Confirmation email notice:", mailErr);
+            });
+          }
+        } catch (e) { }
+      }
 
       // Increment registrations counter on event in Firestore safely
       try {
@@ -749,7 +754,7 @@ const RegistrationPage: React.FC = () => {
         await updateDoc(docRef, {
           currentReg: increment(isQuiz ? 1 : members.length + 1)
         });
-      } catch (e) {}
+      } catch (e) { }
 
       setSuccess(true);
     } catch (err) {
@@ -820,18 +825,17 @@ const RegistrationPage: React.FC = () => {
   if (success) {
     return (
       <div className="min-h-screen bg-[#F8FAFC] flex flex-col items-center justify-center font-sans text-center px-4 py-16">
-        <SEO 
-          title={isQuiz ? "Quiz Registration Confirmed - AI Verse VITB" : "Registration Completed - Under Review - AI Verse VITB"} 
-          description={isQuiz ? "Your quiz registration has been confirmed." : "Your registration was completed and is under review to confirm."} 
+        <SEO
+          title={isQuiz ? "Quiz Registration Confirmed - AI Verse VITB" : "Registration Completed - Under Review - AI Verse VITB"}
+          description={isQuiz ? "Your quiz registration has been confirmed." : "Your registration was completed and is under review to confirm."}
           noIndex={true}
         />
 
         {/* Success Checkmark Badge */}
-        <div className={`w-16 h-16 rounded-full bg-white border flex items-center justify-center mb-6 animate-bounce ${
-          isQuiz 
-            ? "border-emerald-100 text-emerald-600 shadow-[0_8px_30px_rgba(16,185,129,0.18)]" 
+        <div className={`w-16 h-16 rounded-full bg-white border flex items-center justify-center mb-6 animate-bounce ${isQuiz
+            ? "border-emerald-100 text-emerald-600 shadow-[0_8px_30px_rgba(16,185,129,0.18)]"
             : "border-amber-100 text-amber-600 shadow-[0_8px_30px_rgba(217,119,6,0.15)]"
-        }`}>
+          }`}>
           <Check className="h-8 w-8 stroke-[3]" />
         </div>
 
@@ -859,18 +863,15 @@ const RegistrationPage: React.FC = () => {
           <div className="lg:col-span-7 space-y-6 text-left">
 
             {/* Confirmed Registration card */}
-            <div className={`bg-white p-5 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.015)] border-l-4 flex items-center gap-4 ${
-              isQuiz ? "border-l-emerald-500" : "border-l-amber-500"
-            }`}>
-              <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${
-                isQuiz ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
+            <div className={`bg-white p-5 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.015)] border-l-4 flex items-center gap-4 ${isQuiz ? "border-l-emerald-500" : "border-l-amber-500"
               }`}>
+              <div className={`w-11 h-11 rounded-2xl flex items-center justify-center shrink-0 ${isQuiz ? "bg-emerald-50 text-emerald-600" : "bg-amber-50 text-amber-600"
+                }`}>
                 {isQuiz ? <CheckCircle2 className="h-5 w-5" /> : <Users className="h-5 w-5" />}
               </div>
               <div className="leading-normal">
-                <span className={`text-[9px] font-black tracking-widest uppercase block ${
-                  isQuiz ? "text-emerald-600" : "text-amber-600"
-                }`}>
+                <span className={`text-[9px] font-black tracking-widest uppercase block ${isQuiz ? "text-emerald-600" : "text-amber-600"
+                  }`}>
                   {isQuiz ? "Registration Confirmed" : "Application Submitted (Under Review)"}
                 </span>
                 <span className="text-sm font-black text-slate-800 mt-0.5 block">{leadName}</span>
@@ -1183,9 +1184,8 @@ const RegistrationPage: React.FC = () => {
                         placeholder="e.g. 21B01A1201 / Roll No"
                         value={leadStudentId}
                         onChange={(e) => setLeadStudentId(e.target.value)}
-                        className={`w-full px-4 py-2.5 border rounded-2xl focus:outline-none font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all ${
-                          leadStudentId.includes("@") ? "border-red-400 focus:border-red-500 bg-red-50/10" : "border-slate-200 focus:border-blue-500"
-                        }`}
+                        className={`w-full px-4 py-2.5 border rounded-2xl focus:outline-none font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all ${leadStudentId.includes("@") ? "border-red-400 focus:border-red-500 bg-red-50/10" : "border-slate-200 focus:border-blue-500"
+                          }`}
                       />
                       {leadStudentId.includes("@") && (
                         <span className="text-[10px] text-red-500 font-semibold mt-1 block">Regd No / Roll No should not contain '@'</span>
@@ -1205,12 +1205,11 @@ const RegistrationPage: React.FC = () => {
                           placeholder="e.g. student@college.edu.in or rollno@university.ac.in"
                           value={leadCollegeEmail}
                           onChange={(e) => setLeadCollegeEmail(e.target.value)}
-                          className={`w-full px-4 py-2.5 border rounded-2xl focus:outline-none font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all ${
-                            leadCollegeEmail.trim().toLowerCase().endsWith("@gmail.com") ||
-                            leadCollegeEmail.trim().toLowerCase().endsWith("@googlemail.com")
+                          className={`w-full px-4 py-2.5 border rounded-2xl focus:outline-none font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all ${leadCollegeEmail.trim().toLowerCase().endsWith("@gmail.com") ||
+                              leadCollegeEmail.trim().toLowerCase().endsWith("@googlemail.com")
                               ? "border-red-400 focus:border-red-500 bg-red-50/10"
                               : "border-slate-200 focus:border-blue-500"
-                          }`}
+                            }`}
                         />
                         {leadCollegeEmail.trim().toLowerCase().endsWith("@gmail.com") || leadCollegeEmail.trim().toLowerCase().endsWith("@googlemail.com") ? (
                           <span className="text-[10px] text-red-500 font-semibold mt-1 block">
@@ -1235,9 +1234,8 @@ const RegistrationPage: React.FC = () => {
                           placeholder="personal@gmail.com"
                           value={leadPersonalEmail}
                           onChange={(e) => setLeadPersonalEmail(e.target.value)}
-                          className={`w-full px-4 py-2.5 border rounded-2xl focus:outline-none font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all ${
-                            leadPersonalEmail.trim() && !EMAIL_REGEX.test(leadPersonalEmail.trim()) ? "border-red-400 focus:border-red-500 bg-red-50/10" : "border-slate-200 focus:border-blue-500"
-                          }`}
+                          className={`w-full px-4 py-2.5 border rounded-2xl focus:outline-none font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all ${leadPersonalEmail.trim() && !EMAIL_REGEX.test(leadPersonalEmail.trim()) ? "border-red-400 focus:border-red-500 bg-red-50/10" : "border-slate-200 focus:border-blue-500"
+                            }`}
                         />
                         {leadPersonalEmail.trim() && !EMAIL_REGEX.test(leadPersonalEmail.trim()) ? (
                           <span className="text-[10px] text-red-500 font-semibold mt-1 block">Enter a valid personal email (e.g. name@gmail.com)</span>
@@ -1335,9 +1333,8 @@ const RegistrationPage: React.FC = () => {
                           placeholder="e.g. Roll No / Student ID"
                           value={leadStudentId}
                           onChange={(e) => setLeadStudentId(e.target.value)}
-                          className={`w-full px-4 py-2.5 border rounded-2xl focus:outline-none font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all ${
-                            leadStudentId.includes("@") ? "border-red-400 focus:border-red-500 bg-red-50/10" : "border-slate-200 focus:border-blue-500"
-                          }`}
+                          className={`w-full px-4 py-2.5 border rounded-2xl focus:outline-none font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all ${leadStudentId.includes("@") ? "border-red-400 focus:border-red-500 bg-red-50/10" : "border-slate-200 focus:border-blue-500"
+                            }`}
                         />
                         {leadStudentId.includes("@") && (
                           <span className="text-[10px] text-red-500 font-semibold mt-1 block">Student ID should not contain '@'</span>
@@ -1358,12 +1355,11 @@ const RegistrationPage: React.FC = () => {
                           placeholder="e.g. student@college.edu.in or rollno@university.ac.in"
                           value={leadCollegeEmail}
                           onChange={(e) => setLeadCollegeEmail(e.target.value)}
-                          className={`w-full px-4 py-2.5 border rounded-2xl focus:outline-none font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all ${
-                            leadCollegeEmail.trim().toLowerCase().endsWith("@gmail.com") ||
-                            leadCollegeEmail.trim().toLowerCase().endsWith("@googlemail.com")
+                          className={`w-full px-4 py-2.5 border rounded-2xl focus:outline-none font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all ${leadCollegeEmail.trim().toLowerCase().endsWith("@gmail.com") ||
+                              leadCollegeEmail.trim().toLowerCase().endsWith("@googlemail.com")
                               ? "border-red-400 focus:border-red-500 bg-red-50/10"
                               : "border-slate-200 focus:border-blue-500"
-                          }`}
+                            }`}
                         />
                         {leadCollegeEmail.trim().toLowerCase().endsWith("@gmail.com") || leadCollegeEmail.trim().toLowerCase().endsWith("@googlemail.com") ? (
                           <span className="text-[10px] text-red-500 font-semibold mt-1 block">
@@ -1388,9 +1384,8 @@ const RegistrationPage: React.FC = () => {
                           placeholder="personal@gmail.com"
                           value={leadPersonalEmail}
                           onChange={(e) => setLeadPersonalEmail(e.target.value)}
-                          className={`w-full px-4 py-2.5 border rounded-2xl focus:outline-none font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all ${
-                            leadPersonalEmail.trim() && !EMAIL_REGEX.test(leadPersonalEmail.trim()) ? "border-red-400 focus:border-red-500 bg-red-50/10" : "border-slate-200 focus:border-blue-500"
-                          }`}
+                          className={`w-full px-4 py-2.5 border rounded-2xl focus:outline-none font-medium text-sm text-slate-850 bg-slate-50/30 focus:bg-white transition-all ${leadPersonalEmail.trim() && !EMAIL_REGEX.test(leadPersonalEmail.trim()) ? "border-red-400 focus:border-red-500 bg-red-50/10" : "border-slate-200 focus:border-blue-500"
+                            }`}
                         />
                         {leadPersonalEmail.trim() && !EMAIL_REGEX.test(leadPersonalEmail.trim()) ? (
                           <span className="text-[10px] text-red-500 font-semibold mt-1 block">Enter a valid personal email (e.g. name@gmail.com)</span>
@@ -1674,9 +1669,8 @@ const RegistrationPage: React.FC = () => {
                               placeholder="e.g. member@college.edu.in or member@gmail.com"
                               value={member.email}
                               onChange={(e) => handleMemberChange(idx, "email", e.target.value)}
-                              className={`w-full px-3 py-2 border rounded-xl focus:outline-none font-semibold text-xs text-slate-800 bg-white transition-colors ${
-                                member.email.trim() && !EMAIL_REGEX.test(member.email.trim()) ? "border-red-400 focus:border-red-500 bg-red-50/10" : "border-slate-200 focus:border-blue-500"
-                              }`}
+                              className={`w-full px-3 py-2 border rounded-xl focus:outline-none font-semibold text-xs text-slate-800 bg-white transition-colors ${member.email.trim() && !EMAIL_REGEX.test(member.email.trim()) ? "border-red-400 focus:border-red-500 bg-red-50/10" : "border-slate-200 focus:border-blue-500"
+                                }`}
                             />
                             {member.email.trim() && !EMAIL_REGEX.test(member.email.trim()) && (
                               <span className="text-[9px] text-red-500 font-semibold mt-1 block">Must be a valid email with a domain (e.g. name@domain.com)</span>
@@ -1694,9 +1688,8 @@ const RegistrationPage: React.FC = () => {
                               placeholder="e.g. Roll No / Student ID"
                               value={member.studentId}
                               onChange={(e) => handleMemberChange(idx, "studentId", e.target.value)}
-                              className={`w-full px-3 py-2 border rounded-xl focus:outline-none font-semibold text-xs text-slate-800 bg-white transition-colors ${
-                                member.studentId.includes("@") ? "border-red-400 focus:border-red-500 bg-red-50/10" : "border-slate-200 focus:border-blue-500"
-                              }`}
+                              className={`w-full px-3 py-2 border rounded-xl focus:outline-none font-semibold text-xs text-slate-800 bg-white transition-colors ${member.studentId.includes("@") ? "border-red-400 focus:border-red-500 bg-red-50/10" : "border-slate-200 focus:border-blue-500"
+                                }`}
                             />
                             {member.studentId.includes("@") && (
                               <span className="text-[9px] text-red-500 font-semibold mt-1 block">Student ID should not contain '@'</span>

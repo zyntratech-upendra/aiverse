@@ -19,7 +19,7 @@ import {
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
-import { fetchEvents, fetchOrganizers } from "../../services/apiClient";
+import { fetchEvents, fetchEventById, fetchOrganizers } from "../../services/apiClient";
 import { userService } from "../../services/userService";
 import { dataCache } from "../../utils/dataCache";
 import { formatEventDateRange } from "../../utils/dateFormatter";
@@ -79,6 +79,7 @@ interface DetailedEvent {
   paymentQrImagePreview?: string;
   paymentQr?: string;
   upiId?: string;
+  hasAgenda?: boolean;
   agendaTime1?: string;
   agendaTitle1?: string;
   agendaDesc1?: string;
@@ -110,9 +111,9 @@ interface DetailedEvent {
 const EventDetailsPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const [event, setEvent] = useState<DetailedEvent | null>(null);
-  const [relatedEvents, setRelatedEvents] = useState<any[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [currentImageIndex, setCurrentImageIndex] = useState(0);
+  const [loading, setLoading] = useState<boolean>(true);
+  const [relatedEvents, setRelatedEvents] = useState<DetailedEvent[]>([]);
+  const [currentImageIndex, setCurrentImageIndex] = useState<number>(0);
 
   const [facultyProfile, setFacultyProfile] = useState<{
     name: string;
@@ -145,12 +146,17 @@ const EventDetailsPage: React.FC = () => {
     const fetchEventDetails = async () => {
       try {
         if (!cachedEvent) setLoading(true);
-        const allEvents: any[] = await fetchEvents();
-        const docSnap = (allEvents || []).find((e: any) => 
-          e.id === id || 
-          e._id === id || 
-          (e.title && e.title.toLowerCase().replace(/[^a-z0-9]/g, "-").includes(id.toLowerCase()))
-        ) || null;
+        // Try direct ID fetch first
+        let docSnap: any = await fetchEventById(id).catch(() => null);
+        if (!docSnap) {
+          const allEvents: any[] = await fetchEvents().catch(() => []);
+          docSnap = (allEvents || []).find((e: any) => 
+            e.id === id || 
+            e._id === id || 
+            (e.title && e.title.toLowerCase().replace(/[^a-z0-9]/g, "-").includes(id.toLowerCase()))
+          ) || null;
+        }
+
         if (docSnap) {
           const data = docSnap || {};
           
@@ -199,37 +205,28 @@ const EventDetailsPage: React.FC = () => {
             ]);
 
             if (supaRes.status === "fulfilled" && Array.isArray(supaRes.value)) {
-              supaRes.value.forEach((u: any) => allPeople.push(u));
+              allPeople.push(...supaRes.value);
             }
-            if (orgsRes.status === "fulfilled") {
-              (orgsRes.value || []).forEach((d: any) => allPeople.push({ id: d.id || d._id, ...d }));
+            if (orgsRes.status === "fulfilled" && Array.isArray(orgsRes.value)) {
+              allPeople.push(...orgsRes.value);
             }
 
-            const facEmail = (data.facultyCoordinatorEmail || "").toLowerCase().trim();
-            const stuEmail = (data.studentCoordinatorEmail || "").toLowerCase().trim();
-
-            if (facName || facEmail) {
-              const facLower = facName.toLowerCase().trim();
+            if (facName) {
+              const facClean = facName.toLowerCase().replace(/dr\.|mr\.|mrs\.|prof\./g, "").trim();
+              const facEmail = (data.facultyCoordinatorEmail || "").toLowerCase().trim();
               const found = allPeople.find(p => {
                 const pEmail = (p.email || "").toLowerCase().trim();
+                const pName = (p.name || p.fullName || "").toLowerCase().replace(/dr\.|mr\.|mrs\.|prof\./g, "").trim();
                 if (facEmail && pEmail === facEmail) return true;
-                const pRole = (p.role || p.position || "").toLowerCase();
-                const isFaculty = pRole.includes("faculty") || pEmail.startsWith("facultycoordinator@");
-                const pName = (p.name || p.displayName || "").toLowerCase().trim();
-                return isFaculty && (pName === facLower || pEmail === facLower);
-              }) || allPeople.find(p => {
-                const pEmail = (p.email || "").toLowerCase().trim();
-                const pRole = (p.role || p.position || "").toLowerCase();
-                const isFaculty = pRole.includes("faculty") || pEmail.startsWith("facultycoordinator@");
-                const pName = (p.name || p.displayName || "").toLowerCase().trim();
-                return isFaculty && (pName.includes(facLower) || facLower.includes(pName));
+                if (facClean && pName && (pName.includes(facClean) || facClean.includes(pName))) return true;
+                return false;
               });
 
               if (found) {
                 matchedFac = {
-                  name: found.name || found.displayName || facName,
+                  name: found.name || found.fullName || facName,
                   role: found.role || "Faculty Coordinator",
-                  position: found.position || "Faculty Coordinator",
+                  position: found.position || "Faculty In-Charge",
                   image: found.image || "",
                   email: found.email || facEmail || "",
                   phone: found.phone || found.phoneNumber || ""
@@ -238,7 +235,7 @@ const EventDetailsPage: React.FC = () => {
                 matchedFac = {
                   name: facName,
                   role: "Faculty Coordinator",
-                  position: "Faculty Coordinator",
+                  position: "Faculty In-Charge",
                   image: "",
                   email: facEmail || "",
                   phone: ""
@@ -246,26 +243,20 @@ const EventDetailsPage: React.FC = () => {
               }
             }
 
-            if (stuName || stuEmail) {
-              const stuLower = stuName.toLowerCase().trim();
+            if (stuName) {
+              const stuClean = stuName.toLowerCase().trim();
+              const stuEmail = (data.studentCoordinatorEmail || "").toLowerCase().trim();
               const found = allPeople.find(p => {
                 const pEmail = (p.email || "").toLowerCase().trim();
+                const pName = (p.name || p.fullName || "").toLowerCase().trim();
                 if (stuEmail && pEmail === stuEmail) return true;
-                const pRole = (p.role || p.position || "").toLowerCase();
-                const isNotFaculty = !pRole.includes("faculty") && !pEmail.startsWith("facultycoordinator@");
-                const pName = (p.name || p.displayName || "").toLowerCase().trim();
-                return isNotFaculty && (pName === stuLower || pEmail === stuLower);
-              }) || allPeople.find(p => {
-                const pEmail = (p.email || "").toLowerCase().trim();
-                const pRole = (p.role || p.position || "").toLowerCase();
-                const isNotFaculty = !pRole.includes("faculty") && !pEmail.startsWith("facultycoordinator@");
-                const pName = (p.name || p.displayName || "").toLowerCase().trim();
-                return isNotFaculty && (pName.includes(stuLower) || stuLower.includes(pName));
+                if (stuClean && pName && (pName.includes(stuClean) || stuClean.includes(pName))) return true;
+                return false;
               });
 
               if (found) {
                 matchedStu = {
-                  name: found.name || found.displayName || stuName,
+                  name: found.name || found.fullName || stuName,
                   role: found.role || "Student Organizer",
                   position: found.position || "Student Coordinator",
                   image: found.image || "",
@@ -290,8 +281,14 @@ const EventDetailsPage: React.FC = () => {
           setFacultyProfile(matchedFac);
           setStudentProfile(matchedStu);
 
+          const hasAgenda = data.hasAgenda === false || data.hasAgenda === "false"
+            ? false
+            : data.hasAgenda === true || data.hasAgenda === "true"
+            ? true
+            : Boolean((Array.isArray(data.agendaItems) && data.agendaItems.length > 0) || (data.agendaTitle1 && data.agendaTitle1 !== "Morning Keynote: The Future of Compute"));
+
           const eventDetailObj: DetailedEvent = {
-            id: docSnap.id,
+            id: docSnap.id || docSnap._id || id,
             title: data.title || "",
             type: eventType,
             date: data.date || "Oct 24",
@@ -330,16 +327,17 @@ const EventDetailsPage: React.FC = () => {
             paymentQrImagePreview: data.paymentQrImagePreview || data.paymentQr || "",
             paymentQr: data.paymentQr || data.paymentQrImagePreview || "",
             upiId: data.upiId || "",
-            agendaTime1: data.agendaTime1 || "09:00 AM - 10:30 AM",
-            agendaTitle1: data.agendaTitle1 || "Morning Keynote: The Future of Compute",
-            agendaDesc1: data.agendaDesc1 || "Opening session detailing next-generation silicon and computation architectural design patterns.",
-            agendaTime2: data.agendaTime2 || "11:30 AM - 01:00 PM",
-            agendaTitle2: data.agendaTitle2 || "Workshop: Transformer Efficiency",
-            agendaDesc2: data.agendaDesc2 || "Hands-on session covering FlashAttention, quantization techniques, and sparse computation models.",
-            agendaTime3: data.agendaTime3 || "03:00 PM - 04:30 PM",
-            agendaTitle3: data.agendaTitle3 || "Panel: Ethical Scaling",
-            agendaDesc3: data.agendaDesc3 || "A roundtable discussion with industry leaders on the societal implications of massive model deployment.",
-            agendaItems: data.agendaItems || [],
+            hasAgenda,
+            agendaTime1: hasAgenda ? (data.agendaTime1 || "") : "",
+            agendaTitle1: hasAgenda ? (data.agendaTitle1 || "") : "",
+            agendaDesc1: hasAgenda ? (data.agendaDesc1 || "") : "",
+            agendaTime2: hasAgenda ? (data.agendaTime2 || "") : "",
+            agendaTitle2: hasAgenda ? (data.agendaTitle2 || "") : "",
+            agendaDesc2: hasAgenda ? (data.agendaDesc2 || "") : "",
+            agendaTime3: hasAgenda ? (data.agendaTime3 || "") : "",
+            agendaTitle3: hasAgenda ? (data.agendaTitle3 || "") : "",
+            agendaDesc3: hasAgenda ? (data.agendaDesc3 || "") : "",
+            agendaItems: hasAgenda ? (Array.isArray(data.agendaItems) ? data.agendaItems : []) : [],
             regDeadline: data.regDeadline || data.registrationDeadline || "",
             regDeadlineTime: data.regDeadlineTime || data.registrationDeadlineTime || "",
             registrationDeadline: data.regDeadline || data.registrationDeadline || "",
@@ -821,36 +819,43 @@ const EventDetailsPage: React.FC = () => {
             </div>
 
             {/* Event Agenda */}
-            {!isPast && (
-              <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.01)] space-y-6">
-                <h2 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2 border-b border-slate-50 pb-3">
-                  <SlidersHorizontal className="h-4.5 w-4.5 text-blue-600" />
-                  Event Agenda
-                </h2>
-                
-                <div className="relative pl-6 space-y-6 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[2px] before:bg-slate-100 text-left">
-                  {(event.agendaItems && event.agendaItems.length > 0
-                    ? event.agendaItems
-                    : [
-                        { time: event.agendaTime1, title: event.agendaTitle1, description: event.agendaDesc1 },
-                        { time: event.agendaTime2, title: event.agendaTitle2, description: event.agendaDesc2 },
-                        { time: event.agendaTime3, title: event.agendaTitle3, description: event.agendaDesc3 }
-                      ].filter(it => it.time || it.title)
-                  ).map((item, idx) => (
-                    <div key={idx} className="relative group">
-                      <div className="absolute -left-[23px] top-1.5 w-3.5 h-3.5 rounded-full border-2 border-white bg-blue-600 shadow-sm" />
-                      <div className="space-y-1">
-                        <span className="text-[10px] font-black text-blue-600">{item.time}</span>
-                        <h4 className="text-sm font-bold text-slate-850">{item.title}</h4>
-                        <p className="text-xs text-slate-550 font-semibold leading-relaxed">
-                          {item.description}
-                        </p>
+            {!isPast && event.hasAgenda && (() => {
+              const items = (Array.isArray(event.agendaItems) && event.agendaItems.length > 0)
+                ? event.agendaItems.filter(it => it && (it.time || it.title || it.description))
+                : [
+                    { time: event.agendaTime1, title: event.agendaTitle1, description: event.agendaDesc1 },
+                    { time: event.agendaTime2, title: event.agendaTitle2, description: event.agendaDesc2 },
+                    { time: event.agendaTime3, title: event.agendaTitle3, description: event.agendaDesc3 }
+                  ].filter(it => it && (it.time || it.title || it.description));
+
+              if (items.length === 0) return null;
+
+              return (
+                <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.01)] space-y-6">
+                  <h2 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2 border-b border-slate-50 pb-3">
+                    <SlidersHorizontal className="h-4.5 w-4.5 text-blue-600" />
+                    Event Agenda
+                  </h2>
+                  
+                  <div className="relative pl-6 space-y-6 before:absolute before:left-2 before:top-2 before:bottom-2 before:w-[2px] before:bg-slate-100 text-left">
+                    {items.map((item, idx) => (
+                      <div key={idx} className="relative group">
+                        <div className="absolute -left-[23px] top-1.5 w-3.5 h-3.5 rounded-full border-2 border-white bg-blue-600 shadow-sm" />
+                        <div className="space-y-1">
+                          {item.time && <span className="text-[10px] font-black text-blue-600">{item.time}</span>}
+                          {item.title && <h4 className="text-sm font-bold text-slate-850">{item.title}</h4>}
+                          {item.description && (
+                            <p className="text-xs text-slate-550 font-semibold leading-relaxed">
+                              {item.description}
+                            </p>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    ))}
+                  </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
             {/* Competition Rounds & Timeline (if configured) */}
             {!isPast && event.rounds && event.rounds.length > 0 && (

@@ -2,9 +2,46 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Event = require('../models/Event');
+const Registration = require('../models/Registration');
 const { optionalAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { pick } = require('../utils/sanitize');
+
+// Helper to compute registration counts for events
+async function getRegistrationCountsMap() {
+  try {
+    const regCounts = await Registration.aggregate([
+      {
+        $project: {
+          eventId: 1,
+          seatCount: {
+            $cond: {
+              if: { $and: [{ $isArray: '$members' }, { $gt: [{ $size: '$members' }, 0] }] },
+              then: { $add: [{ $size: '$members' }, 1] },
+              else: { $ifNull: ['$teamSize', 1] }
+            }
+          }
+        }
+      },
+      {
+        $group: {
+          _id: '$eventId',
+          totalSeats: { $sum: '$seatCount' }
+        }
+      }
+    ]);
+    const map = {};
+    regCounts.forEach((r) => {
+      if (r._id) {
+        map[String(r._id).trim()] = r.totalSeats;
+      }
+    });
+    return map;
+  } catch (err) {
+    console.warn('[events route] Error calculating registration counts:', err.message);
+    return {};
+  }
+}
 
 // GET /api/events - List events
 router.get(
@@ -17,8 +54,22 @@ router.get(
     if (track) filter.track = track;
     if (isLive !== undefined) filter.isLive = isLive === 'true';
 
-    const events = await Event.find(filter).sort({ createdAt: -1 }).lean();
-    res.json(events.map((e) => ({ ...e, id: e._id })));
+    const [events, regMap] = await Promise.all([
+      Event.find(filter).sort({ createdAt: -1 }).lean(),
+      getRegistrationCountsMap()
+    ]);
+
+    res.json(
+      events.map((e) => {
+        const id = e._id;
+        const computedSeats = regMap[String(id).trim()] || regMap[String(e.id || '').trim()] || 0;
+        return {
+          ...e,
+          id: e._id,
+          currentReg: Math.max(Number(e.currentReg) || 0, computedSeats)
+        };
+      })
+    );
   })
 );
 
@@ -32,7 +83,15 @@ router.get(
     if (!event) {
       return res.status(404).json({ success: false, error: 'Event not found' });
     }
-    res.json({ ...event, id: event._id });
+
+    const regMap = await getRegistrationCountsMap();
+    const computedSeats = regMap[String(event._id).trim()] || regMap[String(event.id || id).trim()] || 0;
+
+    res.json({
+      ...event,
+      id: event._id,
+      currentReg: Math.max(Number(event.currentReg) || 0, computedSeats)
+    });
   })
 );
 
