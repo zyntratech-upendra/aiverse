@@ -14,6 +14,7 @@ import Button from "../../components/ui/Button";
 import SEO from "../../components/layout/SEO";
 
 import { dataCache } from "../../utils/dataCache";
+import { fetchSettings } from "../../services/apiClient";
 import HeroImageCarousel from "../../components/home/HeroImageCarousel";
 import { formatEventDateRange } from "../../utils/dateFormatter";
 
@@ -55,6 +56,55 @@ const defaultHighlights: HighlightEvent[] = [
 
 const HomePage: React.FC = () => {
   const [highlights, setHighlights] = useState<HighlightEvent[]>(() => dataCache.get<HighlightEvent[]>("home_highlights") || defaultHighlights);
+  const [heroImages, setHeroImages] = useState<string[]>(() => {
+    const cached = dataCache.get<any>("portal_config");
+    return cached?.heroImages && Array.isArray(cached.heroImages) && cached.heroImages.length > 0
+      ? cached.heroImages
+      : ["/homepage/p.png", "/homepage/vice.png", "/homepage/all.jpeg"];
+  });
+  const [aboutImage, setAboutImage] = useState<string>(() => {
+    const cached = dataCache.get<any>("portal_config");
+    return cached?.aboutImage || "/homepage/g.jpeg";
+  });
+
+  // Load dynamic portal settings (hero images, about image)
+  useEffect(() => {
+    let isMounted = true;
+    const loadPortalConfig = async () => {
+      try {
+        const config = await fetchSettings("portal_config");
+        if (config && isMounted) {
+          if (config.heroImages && Array.isArray(config.heroImages) && config.heroImages.length > 0) {
+            setHeroImages(config.heroImages);
+          }
+          if (config.aboutImage) {
+            setAboutImage(config.aboutImage);
+          }
+          dataCache.set("portal_config", config);
+        }
+      } catch (err) {
+        console.error("Error loading homepage portal config:", err);
+      }
+    };
+    loadPortalConfig();
+
+    const handlePortalSettingsUpdated = () => {
+      const cached = dataCache.get<any>("portal_config");
+      if (cached) {
+        if (cached.heroImages && Array.isArray(cached.heroImages)) {
+          setHeroImages(cached.heroImages);
+        }
+        if (cached.aboutImage) {
+          setAboutImage(cached.aboutImage);
+        }
+      }
+    };
+    window.addEventListener("portalSettingsUpdated", handlePortalSettingsUpdated);
+    return () => {
+      isMounted = false;
+      window.removeEventListener("portalSettingsUpdated", handlePortalSettingsUpdated);
+    };
+  }, []);
 
   useEffect(() => {
     const fetchHighlights = async () => {
@@ -275,7 +325,7 @@ const HomePage: React.FC = () => {
               transition={{ duration: 0.8, ease: "easeOut" as const }}
             >
               {/* Auto-sliding Image Carousel */}
-              <HeroImageCarousel />
+              <HeroImageCarousel images={heroImages} />
             </motion.div>
 
           </div>
@@ -302,9 +352,15 @@ const HomePage: React.FC = () => {
               <motion.div variants={fadeInUp} className="lg:col-span-5 space-y-4">
                 <div className="relative rounded-2xl overflow-hidden aspect-[4/3] bg-slate-900 shadow-md group border border-slate-100">
                   <img
-                    src="/homepage/g.jpeg"
+                    src={aboutImage || "/homepage/g.jpeg"}
                     alt="AI Verse Community at VIT Bhimavaram"
                     className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                    onError={(e) => {
+                      const target = e.currentTarget as HTMLImageElement;
+                      if (target.src !== `${window.location.origin}/homepage/g.jpeg`) {
+                        target.src = "/homepage/g.jpeg";
+                      }
+                    }}
                   />
                   <div className="absolute inset-0 bg-gradient-to-t from-slate-950/75 via-slate-950/20 to-transparent" />
                   

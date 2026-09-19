@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
 import { useAuth } from "../../context/AuthContext";
-import { fetchEvents, fetchSettings, updateSettings, updatePassword as apiUpdatePassword } from "../../services/apiClient";
+import { fetchEvents, fetchSettings, updateSettings, updatePassword as apiUpdatePassword, uploadImage } from "../../services/apiClient";
 import { userService } from "../../services/userService";
+import { dataCache } from "../../utils/dataCache";
 import { 
   Globe, 
   Palette, 
@@ -30,7 +31,11 @@ import {
   Edit3,
   Check,
   RotateCcw,
-  Layers
+  Layers,
+  Image as ImageIcon,
+  Plus,
+  Sparkles,
+  Loader2
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -62,6 +67,9 @@ interface PortalConfig {
   juryPortalActive: boolean;
   activeJuryEventId?: string;
   activeJuryEventTitle?: string;
+  heroImages?: string[];
+  aboutImage?: string;
+  aboutImages?: string[];
 }
 
 const SettingsPage: React.FC = () => {
@@ -87,7 +95,10 @@ const SettingsPage: React.FC = () => {
     availableRoles: ["Faculty Coordinator", "Student Lead", "Organizer", "Volunteer"],
     juryPortalActive: true,
     activeJuryEventId: "ALL_EVENTS",
-    activeJuryEventTitle: "All Events"
+    activeJuryEventTitle: "All Events",
+    heroImages: ["/homepage/p.png", "/homepage/vice.png", "/homepage/all.jpeg"],
+    aboutImage: "/homepage/g.jpeg",
+    aboutImages: ["/homepage/g.jpeg"]
   };
 
   // Real events list fetched from backend for Jury Control selector
@@ -124,6 +135,14 @@ const SettingsPage: React.FC = () => {
   const [toastQueue, setToastQueue] = useState<ToastMessage[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [isDiscarding, setIsDiscarding] = useState(false);
+
+  // Hero & About Image Management states
+  const [newHeroUrl, setNewHeroUrl] = useState("");
+  const [isUploadingHero, setIsUploadingHero] = useState(false);
+  const [newAboutUrl, setNewAboutUrl] = useState("");
+  const [isUploadingAbout, setIsUploadingAbout] = useState(false);
+  const heroFileInputRef = useRef<HTMLInputElement | null>(null);
+  const aboutFileInputRef = useRef<HTMLInputElement | null>(null);
   
   // Authentication & Password Change State
   const { user, updateUserPassword } = useAuth();
@@ -204,9 +223,11 @@ const SettingsPage: React.FC = () => {
           const mergedConfig = { ...defaultConfigs, ...fetchedData };
           setSavedConfig(mergedConfig);
           setCurrentConfig(mergedConfig);
+          dataCache.set("portal_config", mergedConfig);
         } else {
           setSavedConfig(defaultConfigs);
           setCurrentConfig(defaultConfigs);
+          dataCache.set("portal_config", defaultConfigs);
         }
       } catch (err) {
         console.error("Error loading settings from database:", err);
@@ -361,6 +382,218 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  // Hero Images Management Handlers
+  const handleHeroFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingHero(true);
+    addToast("Uploading hero photo...", "info");
+
+    try {
+      const res = await uploadImage(file, "ai_verse/homepage");
+      if (res?.url) {
+        const currentHeroList = currentConfig.heroImages || ["/homepage/p.png", "/homepage/vice.png", "/homepage/all.jpeg"];
+        const updatedHeroList = [...currentHeroList, res.url];
+        const updatedConfig = { ...currentConfig, heroImages: updatedHeroList };
+        setCurrentConfig(updatedConfig);
+        dataCache.set("portal_config", updatedConfig);
+
+        try {
+          await updateSettings("portal_config", updatedConfig);
+          setSavedConfig(updatedConfig);
+          window.dispatchEvent(new Event("portalSettingsUpdated"));
+          addToast("Hero photo uploaded and saved successfully!", "success");
+        } catch {
+          addToast("Hero photo uploaded. Click 'Save Changes' to sync.", "info");
+        }
+      }
+    } catch (err: any) {
+      console.error("Error uploading hero photo:", err);
+      addToast(err?.message || "Failed to upload hero photo.", "error");
+    } finally {
+      setIsUploadingHero(false);
+      if (heroFileInputRef.current) {
+        heroFileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleAddHeroUrl = async () => {
+    const trimmed = newHeroUrl.trim();
+    if (!trimmed) {
+      addToast("Please enter a valid image URL.", "warning");
+      return;
+    }
+    const currentHeroList = currentConfig.heroImages || ["/homepage/p.png", "/homepage/vice.png", "/homepage/all.jpeg"];
+    const updatedHeroList = [...currentHeroList, trimmed];
+    const updatedConfig = { ...currentConfig, heroImages: updatedHeroList };
+    setCurrentConfig(updatedConfig);
+    setNewHeroUrl("");
+    dataCache.set("portal_config", updatedConfig);
+
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      window.dispatchEvent(new Event("portalSettingsUpdated"));
+      addToast("Hero photo added and saved successfully!", "success");
+    } catch {
+      addToast("Hero photo added. Click 'Save Changes' to sync.", "info");
+    }
+  };
+
+  const handleRemoveHeroImage = async (index: number) => {
+    const currentHeroList = currentConfig.heroImages || ["/homepage/p.png", "/homepage/vice.png", "/homepage/all.jpeg"];
+    if (currentHeroList.length <= 1) {
+      addToast("Hero carousel must have at least one image.", "warning");
+      return;
+    }
+    const updatedHeroList = currentHeroList.filter((_, i) => i !== index);
+    const updatedConfig = { ...currentConfig, heroImages: updatedHeroList };
+    setCurrentConfig(updatedConfig);
+    dataCache.set("portal_config", updatedConfig);
+
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      window.dispatchEvent(new Event("portalSettingsUpdated"));
+      addToast(`Hero slide #${index + 1} removed and saved!`, "warning");
+    } catch {
+      addToast(`Hero slide #${index + 1} removed.`, "warning");
+    }
+  };
+
+  const handleMoveHeroImageUp = async (index: number) => {
+    if (index <= 0) return;
+    const currentHeroList = [...(currentConfig.heroImages || ["/homepage/p.png", "/homepage/vice.png", "/homepage/all.jpeg"])];
+    const temp = currentHeroList[index - 1];
+    currentHeroList[index - 1] = currentHeroList[index];
+    currentHeroList[index] = temp;
+    const updatedConfig = { ...currentConfig, heroImages: currentHeroList };
+    setCurrentConfig(updatedConfig);
+    dataCache.set("portal_config", updatedConfig);
+
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      window.dispatchEvent(new Event("portalSettingsUpdated"));
+      addToast(`Moved hero slide #${index + 1} to position #${index}.`, "success");
+    } catch (err) {
+      console.error("Error auto-saving hero order:", err);
+    }
+  };
+
+  const handleMoveHeroImageDown = async (index: number) => {
+    const currentHeroList = [...(currentConfig.heroImages || ["/homepage/p.png", "/homepage/vice.png", "/homepage/all.jpeg"])];
+    if (index >= currentHeroList.length - 1) return;
+    const temp = currentHeroList[index + 1];
+    currentHeroList[index + 1] = currentHeroList[index];
+    currentHeroList[index] = temp;
+    const updatedConfig = { ...currentConfig, heroImages: currentHeroList };
+    setCurrentConfig(updatedConfig);
+    dataCache.set("portal_config", updatedConfig);
+
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      window.dispatchEvent(new Event("portalSettingsUpdated"));
+      addToast(`Moved hero slide #${index + 1} to position #${index + 2}.`, "success");
+    } catch (err) {
+      console.error("Error auto-saving hero order:", err);
+    }
+  };
+
+  const handleResetDefaultHeroImages = async () => {
+    if (window.confirm("Reset hero carousel to default photos?")) {
+      const defaultHeroList = ["/homepage/p.png", "/homepage/vice.png", "/homepage/all.jpeg"];
+      const updatedConfig = { ...currentConfig, heroImages: defaultHeroList };
+      setCurrentConfig(updatedConfig);
+      dataCache.set("portal_config", updatedConfig);
+
+      try {
+        await updateSettings("portal_config", updatedConfig);
+        setSavedConfig(updatedConfig);
+        window.dispatchEvent(new Event("portalSettingsUpdated"));
+        addToast("Hero carousel reset to default photos!", "success");
+      } catch {
+        addToast("Hero carousel reset. Click 'Save Changes' to apply.", "info");
+      }
+    }
+  };
+
+  // About Us Photo Management Handlers
+  const handleAboutFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploadingAbout(true);
+    addToast("Uploading About Us featured photo...", "info");
+
+    try {
+      const res = await uploadImage(file, "ai_verse/homepage");
+      if (res?.url) {
+        const updatedConfig = { ...currentConfig, aboutImage: res.url, aboutImages: [res.url] };
+        setCurrentConfig(updatedConfig);
+        dataCache.set("portal_config", updatedConfig);
+
+        try {
+          await updateSettings("portal_config", updatedConfig);
+          setSavedConfig(updatedConfig);
+          window.dispatchEvent(new Event("portalSettingsUpdated"));
+          addToast("About Us photo updated and saved successfully!", "success");
+        } catch {
+          addToast("About Us photo uploaded. Click 'Save Changes' to sync.", "info");
+        }
+      }
+    } catch (err: any) {
+      console.error("Error uploading About Us photo:", err);
+      addToast(err?.message || "Failed to upload About Us photo.", "error");
+    } finally {
+      setIsUploadingAbout(false);
+      if (aboutFileInputRef.current) {
+        aboutFileInputRef.current.value = "";
+      }
+    }
+  };
+
+  const handleApplyAboutUrl = async () => {
+    const trimmed = newAboutUrl.trim();
+    if (!trimmed) {
+      addToast("Please enter a valid image URL.", "warning");
+      return;
+    }
+    const updatedConfig = { ...currentConfig, aboutImage: trimmed, aboutImages: [trimmed] };
+    setCurrentConfig(updatedConfig);
+    setNewAboutUrl("");
+    dataCache.set("portal_config", updatedConfig);
+
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      window.dispatchEvent(new Event("portalSettingsUpdated"));
+      addToast("About Us photo updated and saved successfully!", "success");
+    } catch {
+      addToast("About Us photo updated. Click 'Save Changes' to sync.", "info");
+    }
+  };
+
+  const handleResetDefaultAboutImage = async () => {
+    if (window.confirm("Reset About Us section to default photo?")) {
+      const updatedConfig = { ...currentConfig, aboutImage: "/homepage/g.jpeg", aboutImages: ["/homepage/g.jpeg"] };
+      setCurrentConfig(updatedConfig);
+      dataCache.set("portal_config", updatedConfig);
+
+      try {
+        await updateSettings("portal_config", updatedConfig);
+        setSavedConfig(updatedConfig);
+        window.dispatchEvent(new Event("portalSettingsUpdated"));
+        addToast("About Us photo reset to default!", "success");
+      } catch {
+        addToast("About Us photo reset. Click 'Save Changes' to apply.", "info");
+      }
+    }
+  };
+
   // Save Portal Configurations
   const handleSaveConfig = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -377,6 +610,9 @@ const SettingsPage: React.FC = () => {
     try {
       await updateSettings("portal_config", currentConfig);
       setSavedConfig(currentConfig);
+      dataCache.set("portal_config", currentConfig);
+      window.dispatchEvent(new Event("portalSettingsUpdated"));
+      window.dispatchEvent(new Event("storage"));
       addToast("Portal configurations updated successfully!");
     } catch (err) {
       console.error("Error writing settings to database:", err);
@@ -419,6 +655,9 @@ const SettingsPage: React.FC = () => {
       await updateSettings("portal_config", defaultConfigs);
       setCurrentConfig(defaultConfigs);
       setSavedConfig(defaultConfigs);
+      dataCache.set("portal_config", defaultConfigs);
+      window.dispatchEvent(new Event("portalSettingsUpdated"));
+      window.dispatchEvent(new Event("storage"));
       addToast("All configurations restored to system defaults.");
     } catch (err) {
       console.error("Error resetting settings in database:", err);
@@ -564,6 +803,194 @@ const SettingsPage: React.FC = () => {
                   onChange={(e) => handleChange("officeLocation", e.target.value)}
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 font-semibold text-slate-700 bg-slate-50 resize-none"
                 />
+              </div>
+            </div>
+          </div>
+
+          {/* Card: Hero Section Carousel Photos */}
+          <div className="bg-white p-6 rounded-card border border-slate-100 shadow-card text-left space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-50 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                  <ImageIcon className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-slate-800">Hero Carousel Photos</h2>
+                    <span className="px-2 py-0.5 bg-blue-50 text-blue-600 rounded-full text-[10px] font-extrabold border border-blue-100">
+                      {(currentConfig.heroImages || []).length} Slides
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                    Manage photos rotating in the Hero section carousel on the Public Home Page.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Actions: Upload Image File + Add via URL */}
+            <div className="space-y-3">
+              <div className="flex flex-col sm:flex-row gap-2">
+                {/* Upload File Button */}
+                <input
+                  type="file"
+                  ref={heroFileInputRef}
+                  onChange={handleHeroFileUpload}
+                  accept="image/*"
+                  className="hidden"
+                />
+                <button
+                  type="button"
+                  disabled={isUploadingHero}
+                  onClick={() => heroFileInputRef.current?.click()}
+                  className="px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-2 border border-blue-200 cursor-pointer disabled:opacity-50"
+                >
+                  {isUploadingHero ? (
+                    <>
+                      <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                      <span>Uploading Photo...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Upload className="h-4 w-4 text-blue-600" />
+                      <span>Upload Photo File</span>
+                    </>
+                  )}
+                </button>
+
+                {/* Add URL Field */}
+                <div className="flex flex-1 gap-2">
+                  <input
+                    type="text"
+                    placeholder="Paste photo URL (or /homepage/p.png)..."
+                    value={newHeroUrl}
+                    onChange={(e) => setNewHeroUrl(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleAddHeroUrl();
+                      }
+                    }}
+                    className="flex-1 px-3.5 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 bg-slate-50/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleAddHeroUrl}
+                    className="px-4 py-2 bg-[#2563EB] hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-colors shrink-0 flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    <span>Add</span>
+                  </button>
+                </div>
+              </div>
+
+              {/* Order & Reset bar */}
+              <div className="flex items-center justify-between pt-1">
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                  Active Hero Slides (Sequential Order)
+                </label>
+                <button
+                  type="button"
+                  onClick={handleResetDefaultHeroImages}
+                  className="text-[10px] font-bold text-slate-400 hover:text-blue-600 transition-colors flex items-center gap-1 cursor-pointer"
+                  title="Reset to default hero images"
+                >
+                  <RotateCcw className="h-3 w-3" />
+                  <span>Reset Defaults</span>
+                </button>
+              </div>
+
+              {/* Images List */}
+              <div className="divide-y divide-slate-100 border border-slate-200 rounded-2xl overflow-hidden bg-white">
+                {(currentConfig.heroImages || []).map((imgUrl, index) => {
+                  const isFirst = index === 0;
+                  const isLast = index === (currentConfig.heroImages || []).length - 1;
+
+                  return (
+                    <div
+                      key={`${imgUrl}-${index}`}
+                      className="flex items-center justify-between px-3.5 py-2.5 hover:bg-slate-50/80 transition-colors group"
+                    >
+                      {/* Left: Thumbnail & Info */}
+                      <div className="flex items-center gap-3 flex-1 min-w-0 pr-2">
+                        <span className="w-6 h-6 rounded-lg bg-blue-50 text-blue-600 text-[11px] font-black flex items-center justify-center shrink-0 border border-blue-100">
+                          {index + 1}
+                        </span>
+                        <div className="w-14 h-10 rounded-lg overflow-hidden bg-slate-100 border border-slate-200 shrink-0 relative group/thumb">
+                          <img
+                            src={imgUrl}
+                            alt={`Slide ${index + 1}`}
+                            className="w-full h-full object-cover group-hover/thumb:scale-110 transition-transform duration-300"
+                            onError={(e) => {
+                              (e.currentTarget as HTMLImageElement).src = "/homepage/all.jpeg";
+                            }}
+                          />
+                        </div>
+                        <div className="truncate flex-1 min-w-0">
+                          <span className="text-xs font-bold text-slate-800 block truncate">
+                            Slide #{index + 1}
+                          </span>
+                          <span className="text-[10px] font-mono text-slate-400 block truncate" title={imgUrl}>
+                            {imgUrl}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Right: Actions */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => handleMoveHeroImageUp(index)}
+                          disabled={isFirst}
+                          className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                            isFirst
+                              ? "text-slate-200 border-slate-100 cursor-not-allowed bg-slate-50/50"
+                              : "text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200"
+                          }`}
+                          title="Move Earlier in Slide Sequence"
+                        >
+                          <ArrowUp className="h-3.5 w-3.5" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleMoveHeroImageDown(index)}
+                          disabled={isLast}
+                          className={`p-1.5 rounded-lg border transition-all cursor-pointer ${
+                            isLast
+                              ? "text-slate-200 border-slate-100 cursor-not-allowed bg-slate-50/50"
+                              : "text-slate-600 border-slate-200 hover:bg-blue-50 hover:text-blue-600 hover:border-blue-200"
+                          }`}
+                          title="Move Later in Slide Sequence"
+                        >
+                          <ArrowDown className="h-3.5 w-3.5" />
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => handleRemoveHeroImage(index)}
+                          className="p-1.5 rounded-lg border border-slate-200 text-slate-400 hover:bg-red-50 hover:text-red-600 hover:border-red-200 transition-colors cursor-pointer"
+                          title="Remove Photo"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+
+                {(currentConfig.heroImages || []).length === 0 && (
+                  <div className="px-4 py-8 text-center space-y-2">
+                    <p className="text-xs font-bold text-slate-500">No hero photos configured.</p>
+                    <button
+                      type="button"
+                      onClick={handleResetDefaultHeroImages}
+                      className="text-xs font-bold text-blue-600 underline cursor-pointer"
+                    >
+                      Click to load standard hero photos
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           </div>
@@ -1104,6 +1531,124 @@ const SettingsPage: React.FC = () => {
                   <option value="Inter (Classic)">Inter (Classic)</option>
                   <option value="Poppins (Geometrical)">Poppins (Geometrical)</option>
                 </select>
+              </div>
+            </div>
+          </div>
+
+          {/* Card: About Us Section Photo */}
+          <div className="bg-white p-6 rounded-card border border-slate-100 shadow-card text-left space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-50 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-blue-50 text-blue-600 rounded-xl">
+                  <Sparkles className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-base font-bold text-slate-800">About Us Section Photo</h2>
+                    <span className="px-2 py-0.5 bg-emerald-50 text-emerald-600 rounded-full text-[10px] font-extrabold border border-emerald-100">
+                      Public Spotlight
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                    Featured photo in the About Us spotlight card on the Public Home Page.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              {/* Live Public Card Simulation Preview */}
+              <div className="relative rounded-2xl overflow-hidden aspect-[4/3] bg-slate-900 shadow-md border border-slate-100 group">
+                <img
+                  src={currentConfig.aboutImage || "/homepage/g.jpeg"}
+                  alt="About Us Spotlight Preview"
+                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  onError={(e) => {
+                    (e.currentTarget as HTMLImageElement).src = "/homepage/g.jpeg";
+                  }}
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/75 via-slate-950/20 to-transparent pointer-events-none" />
+                
+                {/* Floating Badges Simulation */}
+                <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white text-xs pointer-events-none">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-black/50 backdrop-blur-md border border-white/20 font-semibold text-[10px]">
+                    <Sparkles className="h-3 w-3 text-blue-400" />
+                    VIT Bhimavaram
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-blue-600/85 backdrop-blur-md font-bold text-[9px] uppercase tracking-wider">
+                    Estd. 2022
+                  </span>
+                </div>
+              </div>
+
+              {/* File Uploader & URL Input */}
+              <div className="space-y-2.5">
+                <input
+                  type="file"
+                  ref={aboutFileInputRef}
+                  onChange={handleAboutFileUpload}
+                  accept="image/*"
+                  className="hidden"
+                />
+
+                <div className="flex gap-2">
+                  <button
+                    type="button"
+                    disabled={isUploadingAbout}
+                    onClick={() => aboutFileInputRef.current?.click()}
+                    className="w-full px-4 py-2.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs transition-colors flex items-center justify-center gap-2 border border-blue-200 cursor-pointer disabled:opacity-50"
+                  >
+                    {isUploadingAbout ? (
+                      <>
+                        <Loader2 className="h-4 w-4 animate-spin text-blue-600" />
+                        <span>Uploading About Photo...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="h-4 w-4 text-blue-600" />
+                        <span>Upload New Photo File</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    placeholder="Paste photo URL (or /homepage/g.jpeg)..."
+                    value={newAboutUrl}
+                    onChange={(e) => setNewAboutUrl(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        handleApplyAboutUrl();
+                      }
+                    }}
+                    className="flex-1 px-3.5 py-2 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 bg-slate-50/40 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                  />
+                  <button
+                    type="button"
+                    onClick={handleApplyAboutUrl}
+                    className="px-4 py-2 bg-[#2563EB] hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-colors shrink-0 flex items-center gap-1.5 shadow-xs cursor-pointer"
+                  >
+                    <span>Apply URL</span>
+                  </button>
+                </div>
+
+                <div className="flex items-center justify-between pt-1">
+                  <span className="text-[10px] font-mono text-slate-400 truncate max-w-[220px]" title={currentConfig.aboutImage}>
+                    {currentConfig.aboutImage || "/homepage/g.jpeg"}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleResetDefaultAboutImage}
+                    className="text-[10px] font-bold text-slate-400 hover:text-blue-600 transition-colors flex items-center gap-1 cursor-pointer shrink-0"
+                    title="Reset to default about photo"
+                  >
+                    <RotateCcw className="h-3 w-3" />
+                    <span>Reset Default</span>
+                  </button>
+                </div>
               </div>
             </div>
           </div>

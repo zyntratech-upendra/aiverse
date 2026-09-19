@@ -37,6 +37,8 @@ router.get(
           id: 'portal_config',
           key: 'portal_config',
           availableRoles: ["Faculty Coordinator", "Student Lead", "Organizer", "Volunteer"],
+          heroImages: ["/homepage/p.png", "/homepage/vice.png", "/homepage/all.jpeg"],
+          aboutImage: "/homepage/g.jpeg",
           activeEventId: null,
           allowPublicRegistrations: true,
           allowTeamLogin: true,
@@ -55,6 +57,8 @@ router.get(
       _id: doc._id,
       key: doc.key,
       availableRoles: doc.availableRoles || val.availableRoles || ["Faculty Coordinator", "Student Lead", "Organizer", "Volunteer"],
+      heroImages: doc.heroImages || val.heroImages || ["/homepage/p.png", "/homepage/vice.png", "/homepage/all.jpeg"],
+      aboutImage: doc.aboutImage || val.aboutImage || "/homepage/g.jpeg",
     };
     res.json(data);
   })
