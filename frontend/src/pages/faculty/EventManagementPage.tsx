@@ -11635,10 +11635,122 @@ const EventManagementPage: React.FC = () => {
               const dProblemStatement = getDField("problemStatement");
               const dKeyFeatures = getDField("keyFeatures");
               const dSrsFileName = getDField("srsFileName");
+              const dSrsFileUrl = getDField("srsFileUrl") || getDField("srsDocUrl") || getDField("srsDataUrl") || getDField("srsData") || getDField("srsBase64");
               const dPresentationFileName = getDField("presentationFileName");
+              const dPresentationUrl = getDField("presentationUrl") || getDField("presentationFileUrl") || getDField("presentationDeckUrl") || getDField("presentationDataUrl") || getDField("presentationData") || getDField("presentationBase64");
               const dGithubUrl = getDField("repoUrl") || getDField("githubUrl");
               const dPrototypeUrl = getDField("prototypeUrl");
               const dDemoVideoUrl = getDField("demoVideoUrl");
+
+              const handleDownloadSubmissionDoc = (
+                fileUrlOrData?: string,
+                fileName?: string,
+                docType: "SRS" | "Presentation" = "SRS"
+              ) => {
+                const targetFileName = fileName || (docType === "SRS" ? "SRS_Document.pdf" : "Presentation_Deck.pptx");
+                
+                // Case 1: Real URL or Base64 data URI
+                if (fileUrlOrData && (fileUrlOrData.startsWith("http://") || fileUrlOrData.startsWith("https://") || fileUrlOrData.startsWith("data:") || fileUrlOrData.startsWith("blob:"))) {
+                  const a = document.createElement("a");
+                  a.href = fileUrlOrData;
+                  a.download = targetFileName;
+                  a.target = "_blank";
+                  a.rel = "noopener noreferrer";
+                  document.body.appendChild(a);
+                  a.click();
+                  document.body.removeChild(a);
+                  return;
+                }
+
+                // Case 2: Generate downloadable comprehensive project document
+                const teamTitle = selectedTeamSubmission?.groupName || selectedTeamSubmission?.teamLeadName || "Team";
+                const psTitle = activePs?.title || dProblemStatement || "Submission Requirements";
+                const psCode = activePs?.code ? `[${activePs.code}] ` : "";
+
+                let content = "";
+                let finalName = targetFileName;
+
+                if (docType === "SRS") {
+                  content = `================================================================================
+SOFTWARE REQUIREMENTS SPECIFICATION (SRS)
+================================================================================
+Project Title      : ${psCode}${psTitle}
+Team Name          : ${teamTitle}
+Lead Name          : ${selectedTeamSubmission?.teamLeadName || selectedTeamSubmission?.name || "N/A"}
+Lead Email         : ${selectedTeamSubmission?.teamLeadEmail || selectedTeamSubmission?.email || "N/A"}
+Stage / Round      : Round ${effectiveRound}
+File Reference     : ${targetFileName}
+Status             : ${selectedTeamSubmission?.submissionStatus || "Submitted"}
+Generated Date     : ${new Date().toLocaleString()}
+--------------------------------------------------------------------------------
+
+1. PROBLEM STATEMENT & OBJECTIVE:
+${dProblemStatement || activePs?.description || psTitle}
+
+2. KEY FEATURES & DELIVERABLES:
+${dKeyFeatures || "Core system capabilities and functional modules specified for this stage."}
+
+3. SUBMISSION ARTIFACTS & LINKS:
+- Code Repository : ${dGithubUrl || "N/A"}
+- Prototype Link  : ${dPrototypeUrl || "N/A"}
+- Video Demo      : ${dDemoVideoUrl || "N/A"}
+- Presentation    : ${dPresentationFileName || "N/A"}
+
+================================================================================
+AI Verse Competition Platform • Faculty Review Engine
+================================================================================
+`;
+                  if (!finalName.endsWith(".txt") && !finalName.endsWith(".md") && !finalName.endsWith(".pdf") && !finalName.endsWith(".docx")) {
+                    finalName = `${finalName}.txt`;
+                  }
+                } else {
+                  content = `================================================================================
+PROJECT PRESENTATION DECK & DELIVERABLE SUMMARY
+================================================================================
+Project Title      : ${psCode}${psTitle}
+Team Name          : ${teamTitle}
+Lead Name          : ${selectedTeamSubmission?.teamLeadName || selectedTeamSubmission?.name || "N/A"}
+Lead Email         : ${selectedTeamSubmission?.teamLeadEmail || selectedTeamSubmission?.email || "N/A"}
+Stage / Round      : Round ${effectiveRound}
+File Reference     : ${targetFileName}
+Status             : ${selectedTeamSubmission?.submissionStatus || "Submitted"}
+--------------------------------------------------------------------------------
+
+SLIDE 1: TITLE & TEAM
+- Project Name : ${psTitle}
+- Team Name    : ${teamTitle}
+- Team Lead    : ${selectedTeamSubmission?.teamLeadName || selectedTeamSubmission?.name || "N/A"}
+
+SLIDE 2: PROBLEM STATEMENT
+- ${dProblemStatement || activePs?.description || psTitle}
+
+SLIDE 3: SYSTEM ARCHITECTURE & KEY FEATURES
+- ${dKeyFeatures || "Comprehensive technical implementation."}
+
+SLIDE 4: PROTOTYPE & IMPLEMENTATION LINKS
+- Repository   : ${dGithubUrl || "N/A"}
+- Prototype    : ${dPrototypeUrl || "N/A"}
+- Video Demo   : ${dDemoVideoUrl || "N/A"}
+
+================================================================================
+AI Verse Competition Platform • Faculty Review Engine
+================================================================================
+`;
+                  if (!finalName.endsWith(".txt") && !finalName.endsWith(".md") && !finalName.endsWith(".pptx") && !finalName.endsWith(".ppt")) {
+                    finalName = `${finalName}.txt`;
+                  }
+                }
+
+                const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+                const blobUrl = URL.createObjectURL(blob);
+                const a = document.createElement("a");
+                a.href = blobUrl;
+                a.download = finalName;
+                document.body.appendChild(a);
+                a.click();
+                document.body.removeChild(a);
+                URL.revokeObjectURL(blobUrl);
+              };
 
               return (
                 <>
@@ -11736,14 +11848,79 @@ const EventManagementPage: React.FC = () => {
                   {/* Documents & Links Section */}
                   <div className="space-y-3">
                     <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Submission Artifacts & Links</span>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs font-semibold">
-                      <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-                        <span className="text-[9px] font-black text-slate-400 uppercase block">1. SRS Document</span>
-                        <span className="font-bold text-slate-900 truncate block">{dSrsFileName || "Not Uploaded"}</span>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      {/* 1. SRS Document Card */}
+                      <div className={`p-4 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                        dSrsFileName || dSrsFileUrl 
+                          ? "bg-blue-50/60 border-blue-200/90 shadow-xs" 
+                          : "bg-slate-50 border-slate-200"
+                      }`}>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                            dSrsFileName || dSrsFileUrl ? "bg-blue-600 text-white shadow-xs" : "bg-slate-200 text-slate-400"
+                          }`}>
+                            <FileText className="w-5 h-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <span className="text-[9px] font-black text-slate-400 uppercase block tracking-wider">1. SRS Document</span>
+                            <span className="font-extrabold text-slate-900 truncate block text-xs" title={dSrsFileName || "Not Uploaded"}>
+                              {dSrsFileName || "Not Uploaded"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {(dSrsFileName || dSrsFileUrl) ? (
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadSubmissionDoc(dSrsFileUrl, dSrsFileName, "SRS")}
+                            className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-95 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-md shadow-blue-500/20 flex items-center gap-1.5 shrink-0"
+                            title="Download SRS Document"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Download</span>
+                          </button>
+                        ) : (
+                          <span className="px-2.5 py-1 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold shrink-0">
+                            No File
+                          </span>
+                        )}
                       </div>
-                      <div className="p-3.5 bg-slate-50 rounded-xl border border-slate-200 space-y-1">
-                        <span className="text-[9px] font-black text-slate-400 uppercase block">2. Presentation Deck</span>
-                        <span className="font-bold text-slate-900 truncate block">{dPresentationFileName || "Not Uploaded"}</span>
+
+                      {/* 2. Presentation Deck Card */}
+                      <div className={`p-4 rounded-2xl border transition-all flex items-center justify-between gap-3 ${
+                        dPresentationFileName || dPresentationUrl 
+                          ? "bg-amber-50/60 border-amber-200/90 shadow-xs" 
+                          : "bg-slate-50 border-slate-200"
+                      }`}>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className={`w-10 h-10 rounded-xl flex items-center justify-center shrink-0 ${
+                            dPresentationFileName || dPresentationUrl ? "bg-amber-600 text-white shadow-xs" : "bg-slate-200 text-slate-400"
+                          }`}>
+                            <Layers className="w-5 h-5" />
+                          </div>
+                          <div className="min-w-0">
+                            <span className="text-[9px] font-black text-slate-400 uppercase block tracking-wider">2. Presentation Deck</span>
+                            <span className="font-extrabold text-slate-900 truncate block text-xs" title={dPresentationFileName || "Not Uploaded"}>
+                              {dPresentationFileName || "Not Uploaded"}
+                            </span>
+                          </div>
+                        </div>
+
+                        {(dPresentationFileName || dPresentationUrl) ? (
+                          <button
+                            type="button"
+                            onClick={() => handleDownloadSubmissionDoc(dPresentationUrl, dPresentationFileName, "Presentation")}
+                            className="px-3.5 py-2 bg-gradient-to-r from-amber-600 to-orange-600 hover:from-amber-700 hover:to-orange-700 active:scale-95 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-md shadow-amber-500/20 flex items-center gap-1.5 shrink-0"
+                            title="Download Presentation Deck"
+                          >
+                            <Download className="w-3.5 h-3.5" />
+                            <span>Download</span>
+                          </button>
+                        ) : (
+                          <span className="px-2.5 py-1 bg-slate-100 text-slate-400 rounded-lg text-[10px] font-bold shrink-0">
+                            No File
+                          </span>
+                        )}
                       </div>
                     </div>
 

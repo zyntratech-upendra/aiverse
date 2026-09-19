@@ -12,10 +12,12 @@ import {
   Loader2,
   CheckCircle2,
   Sparkles,
-  ShieldCheck
+  ShieldCheck,
+  Download
 } from "lucide-react";
 import { db } from "../../config/firebase";
 import { doc, updateDoc, getDoc, collection, getDocs } from "../../config/firebase";
+import { uploadImage } from "../../services/apiClient";
 import SEO from "../../components/layout/SEO";
 
 interface ProjectSubmissionPageProps {
@@ -1019,18 +1021,35 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
       return;
     }
     if (e.target.files && e.target.files[0]) {
-      const fileName = e.target.files[0].name;
-      const fileUrl = `uploaded://${fileName}`;
-      setSrsFileName(fileName);
-      setSrsFileUrl(fileUrl);
-      srsFileNameRefVal.current = fileName;
-      srsFileUrlRefVal.current = fileUrl;
-      lastUserEditTimeRef.current = Date.now();
-      isDirtyRef.current = true;
-      persistDraftToStorage({ srsFileName: fileName, srsFileUrl: fileUrl });
-      await saveStepDataToFirestore({ srsFileName: fileName, srsFileUrl: fileUrl });
-      setStatusNotice({ type: "success", message: `SRS Document "${fileName}" saved to database!` });
-      setTimeout(() => setStatusNotice(null), 3500);
+      const file = e.target.files[0];
+      const fileName = file.name;
+      
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64Data = (reader.result as string) || `uploaded://${fileName}`;
+        let finalUrl = base64Data;
+        
+        try {
+          const uploadRes = await uploadImage(file, 'ai_verse_submissions');
+          if (uploadRes?.url) {
+            finalUrl = uploadRes.url;
+          }
+        } catch (uploadErr) {
+          console.warn("Cloud upload fallback to local data URI:", uploadErr);
+        }
+
+        setSrsFileName(fileName);
+        setSrsFileUrl(finalUrl);
+        srsFileNameRefVal.current = fileName;
+        srsFileUrlRefVal.current = finalUrl;
+        lastUserEditTimeRef.current = Date.now();
+        isDirtyRef.current = true;
+        persistDraftToStorage({ srsFileName: fileName, srsFileUrl: finalUrl });
+        await saveStepDataToFirestore({ srsFileName: fileName, srsFileUrl: finalUrl });
+        setStatusNotice({ type: "success", message: `SRS Document "${fileName}" saved successfully!` });
+        setTimeout(() => setStatusNotice(null), 3500);
+      };
+      reader.readAsDataURL(file);
     }
   };
 
@@ -1042,19 +1061,135 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
       return;
     }
     if (e.target.files && e.target.files[0]) {
-      const fileName = e.target.files[0].name;
-      const fileUrl = `uploaded://${fileName}`;
-      setPresentationFileName(fileName);
-      setPresentationUrl(fileUrl);
-      presentationFileNameRefVal.current = fileName;
-      presentationUrlRefVal.current = fileUrl;
-      lastUserEditTimeRef.current = Date.now();
-      isDirtyRef.current = true;
-      persistDraftToStorage({ presentationFileName: fileName, presentationUrl: fileUrl });
-      await saveStepDataToFirestore({ presentationFileName: fileName, presentationUrl: fileUrl });
-      setStatusNotice({ type: "success", message: `PPT Presentation "${fileName}" saved to database!` });
-      setTimeout(() => setStatusNotice(null), 3500);
+      const file = e.target.files[0];
+      const fileName = file.name;
+
+      const reader = new FileReader();
+      reader.onload = async () => {
+        const base64Data = (reader.result as string) || `uploaded://${fileName}`;
+        let finalUrl = base64Data;
+
+        try {
+          const uploadRes = await uploadImage(file, 'ai_verse_submissions');
+          if (uploadRes?.url) {
+            finalUrl = uploadRes.url;
+          }
+        } catch (uploadErr) {
+          console.warn("Cloud upload fallback to local data URI:", uploadErr);
+        }
+
+        setPresentationFileName(fileName);
+        setPresentationUrl(finalUrl);
+        presentationFileNameRefVal.current = fileName;
+        presentationUrlRefVal.current = finalUrl;
+        lastUserEditTimeRef.current = Date.now();
+        isDirtyRef.current = true;
+        persistDraftToStorage({ presentationFileName: fileName, presentationUrl: finalUrl });
+        await saveStepDataToFirestore({ presentationFileName: fileName, presentationUrl: finalUrl });
+        setStatusNotice({ type: "success", message: `PPT Presentation "${fileName}" saved successfully!` });
+        setTimeout(() => setStatusNotice(null), 3500);
+      };
+      reader.readAsDataURL(file);
     }
+  };
+
+  // Download Handler for Participant Deliverables
+  const handleDownloadDoc = (
+    fileUrlOrData?: string,
+    fileName?: string,
+    docType: "SRS" | "Presentation" = "SRS"
+  ) => {
+    const targetFileName = fileName || (docType === "SRS" ? "SRS_Document.pdf" : "Presentation_Deck.pptx");
+
+    if (fileUrlOrData && (fileUrlOrData.startsWith("http://") || fileUrlOrData.startsWith("https://") || fileUrlOrData.startsWith("data:") || fileUrlOrData.startsWith("blob:"))) {
+      const a = document.createElement("a");
+      a.href = fileUrlOrData;
+      a.download = targetFileName;
+      a.target = "_blank";
+      a.rel = "noopener noreferrer";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      return;
+    }
+
+    const curPs = problemStatementRefVal.current || problemStatement;
+    const curKf = keyFeaturesRefVal.current || keyFeatures;
+    const curGh = githubUrlRefVal.current || githubUrl;
+    const curProto = prototypeUrlRefVal.current || prototypeUrl;
+    const curVid = demoVideoUrlRefVal.current || demoVideoUrl;
+
+    let content = "";
+    let finalName = targetFileName;
+
+    if (docType === "SRS") {
+      content = `================================================================================
+SOFTWARE REQUIREMENTS SPECIFICATION (SRS)
+================================================================================
+Stage / Round      : Round ${currentTeamRound}
+File Reference     : ${targetFileName}
+Status             : ${submissionStatus || "In Progress"}
+Generated Date     : ${new Date().toLocaleString()}
+--------------------------------------------------------------------------------
+
+1. PROBLEM STATEMENT & OBJECTIVE:
+${curPs || "Problem statement not specified."}
+
+2. KEY FEATURES & DELIVERABLES:
+${curKf || "Core system capabilities and functional modules specified for this stage."}
+
+3. SUBMISSION ARTIFACTS & LINKS:
+- Code Repository : ${curGh || "N/A"}
+- Prototype Link  : ${curProto || "N/A"}
+- Video Demo      : ${curVid || "N/A"}
+- Presentation    : ${presentationFileName || "N/A"}
+
+================================================================================
+AI Verse Competition Platform • Participant Submission
+================================================================================
+`;
+      if (!finalName.endsWith(".txt") && !finalName.endsWith(".md") && !finalName.endsWith(".pdf") && !finalName.endsWith(".docx")) {
+        finalName = `${finalName}.txt`;
+      }
+    } else {
+      content = `================================================================================
+PROJECT PRESENTATION DECK & DELIVERABLE SUMMARY
+================================================================================
+Stage / Round      : Round ${currentTeamRound}
+File Reference     : ${targetFileName}
+Status             : ${submissionStatus || "In Progress"}
+Generated Date     : ${new Date().toLocaleString()}
+--------------------------------------------------------------------------------
+
+SLIDE 1: TITLE & PROJECT
+- Problem Statement : ${curPs || "N/A"}
+
+SLIDE 2: KEY FEATURES & ARCHITECTURE
+- ${curKf || "Comprehensive technical implementation."}
+
+SLIDE 3: IMPLEMENTATION LINKS
+- Repository   : ${curGh || "N/A"}
+- Prototype    : ${curProto || "N/A"}
+- Video Demo   : ${curVid || "N/A"}
+
+================================================================================
+AI Verse Competition Platform • Participant Submission
+================================================================================
+`;
+      if (!finalName.endsWith(".txt") && !finalName.endsWith(".md") && !finalName.endsWith(".pptx") && !finalName.endsWith(".ppt")) {
+        finalName = `${finalName}.txt`;
+      }
+    }
+
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const blobUrl = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = blobUrl;
+    a.download = finalName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(blobUrl);
   };
 
   const isIdeationRound = activeRoundType === "Ideation & Video Submission" || activeRoundType === "Ideation" || activeRoundType === "Video Submission";
@@ -1661,9 +1796,24 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
                 </div>
 
                 {srsFileName ? (
-                  <div className="pt-2 text-xs font-black text-emerald-600 bg-emerald-50 py-2 px-4 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 w-max mx-auto">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span className="truncate max-w-[240px]">{srsFileName}</span>
+                  <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2.5 relative z-20">
+                    <div className="text-xs font-black text-emerald-700 bg-emerald-50 py-2 px-4 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-2xs">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span className="truncate max-w-[200px]">{srsFileName}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        handleDownloadDoc(srsFileUrl, srsFileName, "SRS");
+                      }}
+                      className="px-3.5 py-2 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 active:scale-95 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-md shadow-blue-500/20 flex items-center gap-1.5 shrink-0"
+                      title="Download Uploaded SRS"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download</span>
+                    </button>
                   </div>
                 ) : (
                   <span className="inline-block text-[11px] font-extrabold text-slate-400 bg-slate-100 px-3 py-1 rounded-lg">
@@ -1754,9 +1904,24 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
                 </div>
 
                 {presentationFileName ? (
-                  <div className="pt-2 text-xs font-black text-emerald-600 bg-emerald-50 py-2 px-4 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 w-max mx-auto">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-600" />
-                    <span className="truncate max-w-[240px]">{presentationFileName}</span>
+                  <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-2.5 relative z-20">
+                    <div className="text-xs font-black text-emerald-700 bg-emerald-50 py-2 px-4 rounded-xl flex items-center justify-center gap-2 border border-emerald-200 shadow-2xs">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                      <span className="truncate max-w-[200px]">{presentationFileName}</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        handleDownloadDoc(presentationUrl, presentationFileName, "Presentation");
+                      }}
+                      className="px-3.5 py-2 bg-gradient-to-r from-indigo-600 to-purple-600 hover:from-indigo-700 hover:to-purple-700 active:scale-95 text-white rounded-xl text-xs font-black transition-all cursor-pointer shadow-md shadow-indigo-500/20 flex items-center gap-1.5 shrink-0"
+                      title="Download Uploaded PPT"
+                    >
+                      <Download className="w-3.5 h-3.5" />
+                      <span>Download</span>
+                    </button>
                   </div>
                 ) : (
                   <span className="inline-block text-[11px] font-extrabold text-slate-400 bg-slate-100 px-3 py-1 rounded-lg">
@@ -2088,25 +2253,49 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
                 {!isIdeationRound && (
                   <>
                     {/* 2. SRS */}
-                    <div className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-2">
-                      <div className="flex items-center gap-2 text-slate-500 mb-1">
-                        <FileUp className="w-4 h-4" />
-                        <span className="text-[10px] font-black uppercase tracking-wider">2. SRS Document</span>
+                    <div className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-3 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 text-slate-500 mb-1">
+                          <FileUp className="w-4 h-4 text-blue-600" />
+                          <span className="text-[10px] font-black uppercase tracking-wider">2. SRS Document</span>
+                        </div>
+                        <p className="font-bold text-slate-900 text-sm break-all">
+                          {srsFileName || "SRS Pending"}
+                        </p>
                       </div>
-                      <p className="font-bold text-slate-900 text-sm break-all">
-                        {srsFileName || "SRS Pending"}
-                      </p>
+                      {srsFileName && (
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadDoc(srsFileUrl, srsFileName, "SRS")}
+                          className="w-max px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs active:scale-95"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download SRS</span>
+                        </button>
+                      )}
                     </div>
 
                     {/* 3. PPT */}
-                    <div className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-2">
-                      <div className="flex items-center gap-2 text-slate-500 mb-1">
-                        <Video className="w-4 h-4" />
-                        <span className="text-[10px] font-black uppercase tracking-wider">3. PPT Document</span>
+                    <div className="p-5 bg-white rounded-2xl border border-slate-200/80 shadow-sm space-y-3 flex flex-col justify-between">
+                      <div>
+                        <div className="flex items-center gap-2 text-slate-500 mb-1">
+                          <Video className="w-4 h-4 text-indigo-600" />
+                          <span className="text-[10px] font-black uppercase tracking-wider">3. PPT Document</span>
+                        </div>
+                        <p className="font-bold text-slate-900 text-sm break-all">
+                          {presentationFileName || "PPT Pending"}
+                        </p>
                       </div>
-                      <p className="font-bold text-slate-900 text-sm break-all">
-                        {presentationFileName || "PPT Pending"}
-                      </p>
+                      {presentationFileName && (
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadDoc(presentationUrl, presentationFileName, "Presentation")}
+                          className="w-max px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-black transition-all cursor-pointer flex items-center gap-1.5 shadow-2xs active:scale-95"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download PPT</span>
+                        </button>
+                      )}
                     </div>
 
                     {/* 4. Features */}
