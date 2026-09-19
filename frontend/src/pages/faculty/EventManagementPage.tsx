@@ -2244,8 +2244,11 @@ const EventManagementPage: React.FC = () => {
 
   const handleOpenEventRoundsModal = () => {
     const existingRounds = eventAccessEvent?.rounds || [];
+    const eventCurrentRound = Number(eventAccessEvent?.currentRound);
     const activeRoundFromList = Array.isArray(existingRounds) ? existingRounds.find((r: any) => r.status === "Active") : null;
-    const currRound = activeRoundFromList ? (Number(activeRoundFromList.roundNumber) || 1) : (Number(eventAccessEvent?.currentRound) || 1);
+    const currRound = (eventCurrentRound && eventCurrentRound >= 1)
+      ? eventCurrentRound
+      : (activeRoundFromList ? (Number(activeRoundFromList.roundNumber) || 1) : 1);
     const totRounds = Number(eventAccessEvent?.totalRounds) || (Array.isArray(existingRounds) && existingRounds.length > 0 ? existingRounds.length : 3);
 
     if (Array.isArray(existingRounds) && existingRounds.length > 0) {
@@ -2270,13 +2273,13 @@ const EventManagementPage: React.FC = () => {
       const evStart = eventAccessEvent?.startDate || eventAccessEvent?.date || "";
       const evEnd = eventAccessEvent?.endDate || "";
       const defaultRounds = [
-        { roundNumber: 1, name: "Screening & Online Assessment", type: "Screening", description: "Initial abstract, quiz test, problem track selection, and idea deck evaluation.", startDate: evStart, endDate: evEnd, startTime: eventAccessEvent?.startTime || "", endTime: eventAccessEvent?.endTime || "", status: "Active" },
-        { roundNumber: 2, name: "Prototype & SRS Assessment", type: "Assessment", description: "Working code submission, system requirements specification, or MVP demonstration.", startDate: "", endDate: "", startTime: "", endTime: "", status: "Upcoming" },
-        { roundNumber: 3, name: "Grand Finale & Jury Pitch", type: "Finals", description: "Live onstage presentation, demo execution, and final jury evaluation.", startDate: "", endDate: "", startTime: "", endTime: "", status: "Upcoming" }
+        { roundNumber: 1, name: "Screening & Online Assessment", type: "Screening", description: "Initial abstract, quiz test, problem track selection, and idea deck evaluation.", startDate: evStart, endDate: evEnd, startTime: eventAccessEvent?.startTime || "", endTime: eventAccessEvent?.endTime || "", status: currRound === 1 ? "Active" : (currRound > 1 ? "Completed" : "Upcoming") },
+        { roundNumber: 2, name: "Prototype & SRS Assessment", type: "Assessment", description: "Working code submission, system requirements specification, or MVP demonstration.", startDate: "", endDate: "", startTime: "", endTime: "", status: currRound === 2 ? "Active" : (currRound > 2 ? "Completed" : "Upcoming") },
+        { roundNumber: 3, name: "Grand Finale & Jury Pitch", type: "Finals", description: "Live onstage presentation, demo execution, and final jury evaluation.", startDate: "", endDate: "", startTime: "", endTime: "", status: currRound === 3 ? "Active" : "Upcoming" }
       ];
       setLiveRoundsList(defaultRounds);
       setLiveTotalRounds(3);
-      setLiveCurrentRound(1);
+      setLiveCurrentRound(currRound);
     }
     setPromoteFromRound(currRound);
     setPromoteToRound(Math.min((existingRounds.length || 3), currRound + 1));
@@ -2793,6 +2796,48 @@ const EventManagementPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const handleSetActiveRound = async (targetRoundNum: number) => {
+    if (!targetRoundNum || targetRoundNum < 1) return;
+    const sanitizedRounds = liveRoundsList.map((r) => ({
+      ...r,
+      status: r.roundNumber === targetRoundNum ? "Active" : (r.roundNumber < targetRoundNum ? "Completed" : "Upcoming")
+    }));
+
+    setLiveCurrentRound(targetRoundNum);
+    setLiveRoundsList(sanitizedRounds);
+
+    if (eventAccessEvent?.id) {
+      setEventAccessEvent((prev: any) => ({
+        ...prev,
+        rounds: sanitizedRounds,
+        currentRound: targetRoundNum,
+        allowRoundManagement: true
+      }));
+
+      setEvents((prev) =>
+        prev.map((ev) =>
+          ev.id === eventAccessEvent.id
+            ? { ...ev, rounds: sanitizedRounds, currentRound: targetRoundNum, allowRoundManagement: true }
+            : ev
+        )
+      );
+
+      try {
+        await updateEvent(eventAccessEvent.id, {
+          rounds: sanitizedRounds,
+          currentRound: targetRoundNum,
+          totalRounds: liveTotalRounds || sanitizedRounds.length,
+          allowRoundManagement: true,
+          updatedAt: Date.now()
+        });
+        setRoundsSuccessMsg(`Stage ${targetRoundNum} is now ACTIVE!`);
+        setTimeout(() => setRoundsSuccessMsg(null), 4000);
+      } catch (err) {
+        console.error("Error setting active round:", err);
+      }
+    }
+  };
+
   const handleSaveLiveEventRounds = async () => {
     if (!eventAccessEvent?.id) return;
     setSavingLiveRounds(true);
@@ -3164,9 +3209,14 @@ const EventManagementPage: React.FC = () => {
     let fullEvent = eventObj;
     if (eventObj?.id) {
       try {
-        const evDoc = await getDoc(doc(db, "events", eventObj.id));
-        if (evDoc.exists()) {
-          fullEvent = { id: evDoc.id, ...evDoc.data() };
+        const backendEvent = await fetchEventById(eventObj.id).catch(() => null);
+        if (backendEvent) {
+          fullEvent = { ...eventObj, ...backendEvent, id: backendEvent.id || backendEvent._id || eventObj.id };
+        } else {
+          const evDoc = await getDoc(doc(db, "events", eventObj.id)).catch(() => null);
+          if (evDoc && evDoc.exists()) {
+            fullEvent = { id: evDoc.id, ...evDoc.data() };
+          }
         }
       } catch (err) {
         console.warn("Could not fetch full event document:", err);
@@ -10439,13 +10489,7 @@ const EventManagementPage: React.FC = () => {
                           value={liveCurrentRound}
                           onChange={(e) => {
                             const newRoundNum = Number(e.target.value);
-                            setLiveCurrentRound(newRoundNum);
-                            setLiveRoundsList((prev) =>
-                              prev.map((r) => ({
-                                ...r,
-                                status: r.roundNumber === newRoundNum ? "Active" : r.roundNumber < newRoundNum ? "Completed" : "Upcoming"
-                              }))
-                            );
+                            handleSetActiveRound(newRoundNum);
                           }}
                           className="px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-black text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer"
                         >
@@ -10472,13 +10516,7 @@ const EventManagementPage: React.FC = () => {
                         type="button"
                         onClick={() => {
                           const nextRoundNum = liveCurrentRound + 1;
-                          setLiveCurrentRound(nextRoundNum);
-                          setLiveRoundsList((prev) =>
-                            prev.map((r) => ({
-                              ...r,
-                              status: r.roundNumber === nextRoundNum ? "Active" : r.roundNumber < nextRoundNum ? "Completed" : "Upcoming"
-                            }))
-                          );
+                          handleSetActiveRound(nextRoundNum);
                         }}
                         className="px-4 py-2 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer active:scale-95"
                       >
@@ -10563,20 +10601,11 @@ const EventManagementPage: React.FC = () => {
                             <div className="flex items-center gap-2">
                               <button
                                 type="button"
-                                onClick={() => {
-                                  const targetRound = round.roundNumber;
-                                  setLiveCurrentRound(targetRound);
-                                  setLiveRoundsList((prev) =>
-                                    prev.map((r) => ({
-                                      ...r,
-                                      status: r.roundNumber === targetRound ? "Active" : r.roundNumber < targetRound ? "Completed" : "Upcoming"
-                                    }))
-                                  );
-                                }}
-                                className={`px-3 py-1 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                                onClick={() => handleSetActiveRound(round.roundNumber)}
+                                className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
                                   isActive
-                                    ? "bg-blue-50 text-blue-600 border border-blue-200 pointer-events-none"
-                                    : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                                    ? "bg-blue-50 text-blue-600 border border-blue-200 pointer-events-none font-extrabold"
+                                    : "bg-slate-100 hover:bg-blue-600 hover:text-white text-slate-700 active:scale-95 shadow-xs"
                                 }`}
                               >
                                 {isActive ? "Currently Active" : "Set as Active Round"}
@@ -10654,14 +10683,7 @@ const EventManagementPage: React.FC = () => {
                                 onChange={(e) => {
                                   const val = e.target.value as "Active" | "Upcoming" | "Completed";
                                   if (val === "Active") {
-                                    const targetRound = round.roundNumber;
-                                    setLiveCurrentRound(targetRound);
-                                    setLiveRoundsList((prev) =>
-                                      prev.map((r) => ({
-                                        ...r,
-                                        status: r.roundNumber === targetRound ? "Active" : r.roundNumber < targetRound ? "Completed" : "Upcoming"
-                                      }))
-                                    );
+                                    handleSetActiveRound(round.roundNumber);
                                   } else {
                                     setLiveRoundsList((prev) =>
                                       prev.map((r, rIdx) => (rIdx === idx ? { ...r, status: val } : r))
