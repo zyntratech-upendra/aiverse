@@ -446,6 +446,18 @@ const EventManagementPage: React.FC = () => {
   const [copiedWhatsLink, setCopiedWhatsLink] = useState(false);
   const [activeImageLightbox, setActiveImageLightbox] = useState<string | null>(null);
 
+  // Close lightbox on Escape key
+  useEffect(() => {
+    if (!activeImageLightbox) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setActiveImageLightbox(null);
+      }
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [activeImageLightbox]);
+
   // Event Access Modal State & Handlers
   const [isEventAccessModalOpen, setIsEventAccessModalOpen] = useState(false);
   const [isEventRosterModalOpen, setIsEventRosterModalOpen] = useState(false);
@@ -7312,48 +7324,76 @@ const EventManagementPage: React.FC = () => {
                     </div>
 
                     {/* 5. WhatsApp Group Link */}
-                    <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-3">
-                      <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2 border-b border-slate-100 pb-3">
-                        <div className="w-7 h-7 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center">
-                          <MessageSquare className="h-4 w-4" />
-                        </div>
-                        5. WhatsApp Community Link
-                      </h3>
-                      {selectedEventDetails?.whatsGroupLink ? (
-                        <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-emerald-700 p-4 rounded-2xl text-white shadow-lg flex flex-col sm:flex-row items-center justify-between gap-3">
-                          <div className="space-y-0.5 text-center sm:text-left">
-                            <span className="text-[10px] font-bold uppercase text-emerald-200 tracking-wider">Official Group</span>
-                            <p className="text-xs font-mono font-bold text-white truncate max-w-xs sm:max-w-md">
-                              {selectedEventDetails.whatsGroupLink}
-                            </p>
+                    <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                        <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-xl bg-emerald-50 text-emerald-600 flex items-center justify-center shadow-inner">
+                            <MessageSquare className="h-4 w-4" />
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <button
-                              onClick={() => {
-                                if (selectedEventDetails?.whatsGroupLink) {
-                                  navigator.clipboard.writeText(selectedEventDetails.whatsGroupLink);
-                                  setCopiedWhatsLink(true);
-                                  setTimeout(() => setCopiedWhatsLink(false), 2000);
-                                }
-                              }}
-                              className="px-3.5 py-2 bg-white/20 hover:bg-white/30 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 backdrop-blur-md border border-white/20 active:scale-95"
-                            >
-                              {copiedWhatsLink ? <Check className="h-3.5 w-3.5 text-emerald-300" /> : <Copy className="h-3.5 w-3.5" />}
-                              {copiedWhatsLink ? "Copied!" : "Copy"}
-                            </button>
-                            <a
-                              href={selectedEventDetails.whatsGroupLink}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="px-4 py-2 bg-white text-emerald-800 rounded-xl text-xs font-black hover:bg-emerald-50 transition-all shadow flex items-center gap-1.5 active:scale-95"
-                            >
-                              <ExternalLink className="h-3.5 w-3.5" />
-                              Join Group
-                            </a>
+                          5. WhatsApp Community Link
+                        </h3>
+                        <span className="text-[10px] font-extrabold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full uppercase tracking-wider border border-emerald-200/60">
+                          Official Chat
+                        </span>
+                      </div>
+
+                      {selectedEventDetails?.whatsGroupLink ? (
+                        <div className="relative overflow-hidden bg-gradient-to-br from-emerald-600 via-emerald-700 to-teal-800 p-5 rounded-2xl text-white shadow-md border border-emerald-500/30">
+                          {/* Background Glow */}
+                          <div className="absolute -top-12 -right-12 w-36 h-36 bg-white/10 rounded-full blur-2xl pointer-events-none" />
+
+                          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 relative z-10">
+                            {/* Left Text & Link */}
+                            <div className="flex-1 min-w-0 space-y-1.5 text-left">
+                              <div className="flex items-center gap-2">
+                                <span className="w-2 h-2 rounded-full bg-emerald-300 animate-pulse shrink-0" />
+                                <span className="text-[10px] font-black uppercase tracking-widest text-emerald-200">
+                                  Official WhatsApp Group
+                                </span>
+                              </div>
+                              <p className="text-xs text-white/95 font-medium leading-relaxed">
+                                Connect with organizers and participants for live announcements, schedules, and queries.
+                              </p>
+                              <div className="pt-0.5 max-w-full">
+                                <div className="inline-flex items-center gap-2 px-3 py-1.5 bg-black/25 rounded-xl border border-white/15 max-w-full overflow-hidden">
+                                  <span className="text-[11px] font-mono font-bold text-emerald-200 truncate select-all">
+                                    {selectedEventDetails.whatsGroupLink}
+                                  </span>
+                                </div>
+                              </div>
+                            </div>
+
+                            {/* Right Action Buttons */}
+                            <div className="flex items-center gap-2.5 shrink-0 self-start md:self-center">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  if (selectedEventDetails?.whatsGroupLink) {
+                                    navigator.clipboard.writeText(selectedEventDetails.whatsGroupLink);
+                                    setCopiedWhatsLink(true);
+                                    setTimeout(() => setCopiedWhatsLink(false), 2000);
+                                  }
+                                }}
+                                className="px-4 py-2.5 bg-white/15 hover:bg-white/25 active:scale-95 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 backdrop-blur-md border border-white/25 shadow-xs cursor-pointer"
+                                title="Copy Group Invite Link"
+                              >
+                                {copiedWhatsLink ? <Check className="h-3.5 w-3.5 text-emerald-300" /> : <Copy className="h-3.5 w-3.5" />}
+                                <span>{copiedWhatsLink ? "Copied!" : "Copy"}</span>
+                              </button>
+                              <a
+                                href={selectedEventDetails.whatsGroupLink}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="px-5 py-2.5 bg-white text-emerald-800 hover:bg-emerald-50 active:scale-95 rounded-xl text-xs font-black transition-all shadow-md flex items-center gap-2 cursor-pointer"
+                              >
+                                <ExternalLink className="h-3.5 w-3.5 text-emerald-700" />
+                                <span>Join Group</span>
+                              </a>
+                            </div>
                           </div>
                         </div>
                       ) : (
-                        <p className="text-xs text-slate-400 italic p-3 bg-slate-50 rounded-xl border border-slate-100">
+                        <p className="text-xs text-slate-400 italic p-4 bg-slate-50 rounded-2xl border border-slate-100 text-center">
                           No WhatsApp group link configured for this event.
                         </p>
                       )}
@@ -7585,18 +7625,51 @@ const EventManagementPage: React.FC = () => {
       )}
 
       {/* ================= LIGHTBOX FULL POSTER PREVIEW MODAL ================= */}
-      {activeImageLightbox && (
+      {activeImageLightbox && createPortal(
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 sm:p-8 animate-in fade-in duration-200 cursor-pointer"
+          className="fixed inset-0 z-[9999999] w-screen h-screen flex items-center justify-center bg-slate-950/90 backdrop-blur-md p-4 sm:p-8 animate-in fade-in duration-200 cursor-pointer select-none"
           onClick={() => setActiveImageLightbox(null)}
         >
-          <img
-            src={activeImageLightbox}
-            alt="Full Resolution Event Poster"
+          {/* Top Right Floating Close Button */}
+          <button
+            type="button"
+            onClick={(e) => {
+              e.stopPropagation();
+              setActiveImageLightbox(null);
+            }}
+            className="absolute top-4 right-4 sm:top-6 sm:right-6 w-11 h-11 bg-white/15 hover:bg-white/30 active:scale-95 text-white rounded-full flex items-center justify-center transition-all backdrop-blur-md border border-white/20 shadow-2xl cursor-pointer z-10"
+            title="Close Lightbox (Esc)"
+          >
+            <X className="w-5 h-5 text-white" />
+          </button>
+
+          {/* Centered Image Container */}
+          <div
             onClick={(e) => e.stopPropagation()}
-            className="max-h-[90vh] max-w-full object-contain rounded-2xl shadow-2xl border border-white/20 bg-slate-900 cursor-default select-none"
-          />
-        </div>
+            className="relative max-h-[92vh] max-w-[92vw] flex flex-col items-center justify-center my-auto mx-auto"
+          >
+            <img
+              src={activeImageLightbox}
+              alt="Full Resolution Event Poster"
+              className="max-h-[85vh] max-w-full object-contain rounded-2xl shadow-2xl border border-white/20 bg-slate-900 cursor-default select-none"
+            />
+            {/* Bottom helper bar */}
+            <div className="mt-3 flex items-center gap-3">
+              <span className="px-3.5 py-1 bg-black/60 text-white/90 text-xs font-semibold rounded-full border border-white/15 backdrop-blur-md shadow-lg">
+                Click anywhere or Esc to close
+              </span>
+              <a
+                href={activeImageLightbox}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="px-3.5 py-1 bg-blue-600/90 hover:bg-blue-600 active:scale-95 text-white text-xs font-bold rounded-full border border-blue-400/40 backdrop-blur-md shadow-lg flex items-center gap-1.5 transition-all"
+              >
+                <ExternalLink className="w-3 h-3" /> Open Full Image
+              </a>
+            </div>
+          </div>
+        </div>,
+        document.body
       )}
 
       {/* ================= EVENT ACCESS PARTICIPANTS FULL PAGE ================= */}
