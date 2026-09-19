@@ -75,6 +75,7 @@ router.get(
       getRegistrationCountsMap()
     ]);
 
+    res.set('Cache-Control', 'public, max-age=10, stale-while-revalidate=30');
     res.json(
       events.map((e) => {
         const id = String(e._id || e.id || '').trim();
@@ -115,6 +116,7 @@ router.get(
       $or: [{ eventId: evId }, { eventTitle: evTitle }]
     }).catch(() => event.currentReg || 0);
 
+    res.set('Cache-Control', 'public, max-age=10, stale-while-revalidate=30');
     res.json({
       ...event,
       id: event._id,

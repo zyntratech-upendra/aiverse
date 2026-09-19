@@ -35,6 +35,33 @@ async function fetchWithRetry(url: string, options: RequestInit, retries = 2, de
   }
   throw new Error(`Failed after ${retries} retries: ${url}`);
 }
+// In-memory client cache with TTL to eliminate redundant network fetches and accelerate page rendering
+const apiMemoryCache = new Map<string, { data: any; expiresAt: number }>();
+
+export function getCachedApiData<T>(key: string): T | null {
+  const item = apiMemoryCache.get(key);
+  if (!item) return null;
+  if (Date.now() > item.expiresAt) {
+    apiMemoryCache.delete(key);
+    return null;
+  }
+  return item.data as T;
+}
+
+export function setCachedApiData<T>(key: string, data: T, ttlMs = 15000): void {
+  apiMemoryCache.set(key, { data, expiresAt: Date.now() + ttlMs });
+}
+
+export function clearApiCache(prefix?: string): void {
+  if (!prefix) {
+    apiMemoryCache.clear();
+    return;
+  }
+  for (const k of apiMemoryCache.keys()) {
+    if (k.startsWith(prefix)) apiMemoryCache.delete(k);
+  }
+}
+
 let TOKEN: string | null = null;
 
 // Initialize token from localStorage if available
@@ -439,21 +466,36 @@ export async function deleteQuizzesByEvent(eventId?: string, eventTitle?: string
 // ==========================================
 // Events
 // ==========================================
-export async function fetchEvents(query?: { category?: string; track?: string; isLive?: boolean }) {
+export async function fetchEvents(query?: { category?: string; track?: string; isLive?: boolean }, forceRefresh = false) {
   const params = new URLSearchParams(query as any).toString();
+  const cacheKey = `events:${params}`;
+  if (!forceRefresh) {
+    const cached = getCachedApiData(cacheKey);
+    if (cached) return cached;
+  }
   const res = await fetch(`${API_BASE}/events${params ? `?${params}` : ''}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to fetch events');
-  return res.json();
+  const data = await res.json();
+  setCachedApiData(cacheKey, data, 15000);
+  return data;
 }
 
-export async function fetchEventById(id: string) {
+export async function fetchEventById(id: string, forceRefresh = false) {
+  const cacheKey = `event:${id}`;
+  if (!forceRefresh) {
+    const cached = getCachedApiData(cacheKey);
+    if (cached) return cached;
+  }
   const res = await fetch(`${API_BASE}/events/${id}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to fetch event');
-  return res.json();
+  const data = await res.json();
+  setCachedApiData(cacheKey, data, 15000);
+  return data;
 }
 
 export async function createEvent(eventObj: any) {
   await ensureAuthToken();
+  clearApiCache('event');
   const res = await fetch(`${API_BASE}/events`, {
     method: 'POST',
     headers: authHeaders(),
@@ -468,6 +510,7 @@ export async function createEvent(eventObj: any) {
 
 export async function updateEvent(eventId: string, patch: any) {
   await ensureAuthToken();
+  clearApiCache('event');
   const res = await fetch(`${API_BASE}/events/${encodeURIComponent(eventId)}`, {
     method: 'PUT',
     headers: authHeaders(),
@@ -482,6 +525,7 @@ export async function updateEvent(eventId: string, patch: any) {
 
 export async function deleteEvent(eventId: string) {
   await ensureAuthToken();
+  clearApiCache('event');
   const res = await fetch(`${API_BASE}/events/${encodeURIComponent(eventId)}`, {
     method: 'DELETE',
     headers: authHeaders(),
@@ -561,7 +605,12 @@ export async function fetchUsers(query?: { role?: string; email?: string }) {
 }
 
 // Public endpoint - no auth required, returns only show_in_about members
-export async function fetchTeamMembers() {
+export async function fetchTeamMembers(forceRefresh = false) {
+  const cacheKey = 'team_members';
+  if (!forceRefresh) {
+    const cached = getCachedApiData(cacheKey);
+    if (cached) return cached;
+  }
   try {
     const headers: Record<string, string> = {
       'Content-Type': 'application/json'
@@ -573,7 +622,9 @@ export async function fetchTeamMembers() {
 
     const res = await fetch(`${API_BASE}/users/team`, { headers });
     if (res.ok) {
-      return await res.json();
+      const data = await res.json();
+      setCachedApiData(cacheKey, data, 60000); // 60s cache
+      return data;
     }
   } catch (e) {
     console.warn('[apiClient] Notice fetching /users/team:', e);
@@ -583,7 +634,9 @@ export async function fetchTeamMembers() {
   try {
     const orgRes = await fetch(`${API_BASE}/organizers`);
     if (orgRes.ok) {
-      return await orgRes.json();
+      const data = await orgRes.json();
+      setCachedApiData(cacheKey, data, 60000);
+      return data;
     }
   } catch {}
 

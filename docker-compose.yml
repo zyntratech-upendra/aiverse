@@ -1,0 +1,73 @@
+version: '3.8'
+
+services:
+  # ─── Nginx Layer-7 Load Balancer ──────────────────────────────────────────
+  load-balancer:
+    image: nginx:alpine
+    container_name: aiverse-load-balancer
+    restart: always
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/load-balancer.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./frontend/dist:/var/www/aiverse/frontend/dist:ro
+      - nginx-cache:/var/cache/nginx
+    depends_on:
+      - backend-node-1
+      - backend-node-2
+      - backend-node-3
+    networks:
+      - aiverse-network
+
+  # ─── Backend Instance 1 ───────────────────────────────────────────────────
+  backend-node-1:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aiverse-backend-1
+    restart: always
+    environment:
+      - PORT=4000
+      - NODE_ENV=production
+    env_file:
+      - ./backend/.env
+    networks:
+      - aiverse-network
+
+  # ─── Backend Instance 2 ───────────────────────────────────────────────────
+  backend-node-2:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aiverse-backend-2
+    restart: always
+    environment:
+      - PORT=4000
+      - NODE_ENV=production
+    env_file:
+      - ./backend/.env
+    networks:
+      - aiverse-network
+
+  # ─── Backend Instance 3 ───────────────────────────────────────────────────
+  backend-node-3:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aiverse-backend-3
+    restart: always
+    environment:
+      - PORT=4000
+      - NODE_ENV=production
+    env_file:
+      - ./backend/.env
+    networks:
+      - aiverse-network
+
+networks:
+  aiverse-network:
+    driver: bridge
+
+volumes:
+  nginx-cache:

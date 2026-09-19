@@ -5,6 +5,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "start:cluster": "node src/cluster.js",
     "dev": "nodemon --watch src --exec node src/index.js",
     "seed": "node src/scripts/seedData.js",
     "migrate": "node src/scripts/migrateFirestoreToMongo.js"

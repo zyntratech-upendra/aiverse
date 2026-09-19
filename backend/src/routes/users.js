@@ -49,6 +49,7 @@ router.get(
       return true;
     });
 
+    res.set('Cache-Control', 'public, max-age=30, stale-while-revalidate=60');
     res.json(filteredUsers.map((u) => ({ ...u, id: u._id })));
   })
 );
