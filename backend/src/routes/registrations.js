@@ -16,14 +16,19 @@ router.get(
   '/',
   optionalAuth,
   asyncHandler(async (req, res) => {
-    const { eventId, userId, userEmail, status } = req.query;
+    const { eventId, userId, userEmail, status, includeProof } = req.query;
     const filter = {};
     if (eventId) filter.eventId = eventId;
     if (userId) filter.userId = userId;
     if (userEmail) filter.userEmail = userEmail.toLowerCase();
     if (status) filter.status = status;
 
-    const docs = await Registration.find(filter).sort({ createdAt: -1 }).limit(2000).lean();
+    let query = Registration.find(filter).sort({ createdAt: -1 }).limit(2000).lean();
+    if (includeProof !== 'true') {
+      query = query.select('-paymentProof -paymentProofPreview');
+    }
+
+    const docs = await query;
     res.json(docs.map((d) => ({ ...d, id: d._id })));
   })
 );
@@ -151,7 +156,7 @@ router.post(
 
     const allSubmittedEmails = Array.from(new Set([...leadEmailSet, ...memberEmailSet]));
 
-    // 3. Check if any submitted email is already registered in MongoDB for this event
+    // 3. Fast indexed check: Check if any submitted email is already registered in MongoDB for this event
     if (allSubmittedEmails.length > 0) {
       const existingReg = await Registration.findOne({
         eventId: eventId,
@@ -165,7 +170,9 @@ router.post(
           { collegeEmail: { $in: allSubmittedEmails } },
           { 'members.email': { $in: allSubmittedEmails } },
         ],
-      }).lean();
+      })
+        .select('_id eventId teamLeadEmail teamLeadPersonalEmail teamLeadCollegeEmail userEmail email personalEmail collegeEmail members.email')
+        .lean();
 
       if (existingReg) {
         const existingEmails = [
@@ -205,14 +212,34 @@ router.post(
       updatedAt: now,
     });
 
-    const saved = await newReg.save();
+    let saved;
+    try {
+      saved = await newReg.save();
+    } catch (saveErr) {
+      if (saveErr.code === 11000) {
+        return res.status(409).json({
+          success: false,
+          error: 'A registration for this participant or ticket already exists in the system.',
+        });
+      }
+      throw saveErr;
+    }
 
-    // Increment currentReg on the Event if eventId provided
+    // Atomic increment on currentReg for the Event
     if (payload.eventId) {
       await Event.findByIdAndUpdate(payload.eventId, { $inc: { currentReg: teamSize } }).catch(() => {});
     }
 
-    res.status(201).json({ success: true, id: saved._id, registration: { ...saved.toObject(), id: saved._id } });
+    // Lean response to minimize payload size and egress bandwidth under concurrent load
+    const savedObj = saved.toObject ? saved.toObject() : { ...saved };
+    if (savedObj.paymentProof && savedObj.paymentProof.startsWith('data:image')) {
+      savedObj.paymentProof = '[IMAGE_ATTACHED]';
+    }
+    if (savedObj.paymentProofPreview && savedObj.paymentProofPreview.startsWith('data:image')) {
+      savedObj.paymentProofPreview = '[IMAGE_ATTACHED]';
+    }
+
+    res.status(201).json({ success: true, id: saved._id, registration: { ...savedObj, id: saved._id } });
   })
 );
 

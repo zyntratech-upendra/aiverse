@@ -5,6 +5,7 @@ const mongoose = require('mongoose');
 const connectDB = require('./config/db');
 const { errorHandler, notFoundHandler } = require('./middleware/errorHandler');
 const helmet = require('helmet');
+const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 const mongoSanitize = require('express-mongo-sanitize');
 
@@ -27,7 +28,6 @@ const settingsRouter = require('./routes/settings');
 const juryEvaluationsRouter = require('./routes/juryEvaluations');
 
 // Initialize Express App
-// Initialize Express App
 const app = express();
 
 // Trust proxy for AWS ALB / ELB / CloudFront / Nginx reverse proxies
@@ -37,6 +37,10 @@ app.set('trust proxy', 1);
 connectDB();
 
 // Middlewares
+app.use(compression({
+  threshold: 1024, // compress responses above 1KB
+  level: 6,
+}));
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: 'cross-origin' },
@@ -53,12 +57,14 @@ app.use(
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 
+// High-capacity rate limiter configured for campus LANs / shared NAT IPs during mass registrations
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 1000, // limit each IP to 1000 requests per windowMs
-  message: { success: false, error: 'Too many requests, please try again later.' },
+  max: 10000, // allow high concurrent traffic for shared campus IPs
   standardHeaders: true,
   legacyHeaders: false,
+  skip: (req) => req.path === '/health' || req.path === '/api/health' || req.method === 'OPTIONS',
+  message: { success: false, error: 'Too many requests from this network, please try again shortly.' },
 });
 app.use('/api', apiLimiter);
 

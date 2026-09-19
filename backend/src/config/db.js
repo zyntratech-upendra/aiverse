@@ -24,7 +24,10 @@ const connectDB = async () => {
     try {
       console.log(`MongoDB connection attempt ${attempt}/${MAX_RETRIES}...`);
       const conn = await mongoose.connect(mongoURI, {
-        serverSelectionTimeoutMS: 30000,
+        maxPoolSize: 100,
+        minPoolSize: 10,
+        maxIdleTimeMS: 30000,
+        serverSelectionTimeoutMS: 15000,
         connectTimeoutMS: 30000,
         socketTimeoutMS: 45000,
         heartbeatFrequencyMS: 10000,
@@ -32,7 +35,7 @@ const connectDB = async () => {
         retryReads: true,
       });
       isConnected = true;
-      console.log(`MongoDB Connected: ${conn.connection.host}/${conn.connection.name}`);
+      console.log(`MongoDB Connected: ${conn.connection.host}/${conn.connection.name} (Pool: min=10, max=100)`);
       return conn;
     } catch (error) {
       console.error(`MongoDB Connection Error (attempt ${attempt}/${MAX_RETRIES}): ${error.message}`);

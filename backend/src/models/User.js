@@ -38,6 +38,11 @@ const UserSchema = new Schema(
   }
 );
 
+UserSchema.index({ email: 1 });
+UserSchema.index({ personal_email: 1 });
+UserSchema.index({ registration_id: 1 });
+UserSchema.index({ role: 1, show_in_about: 1, order: 1 });
+
 UserSchema.virtual('id').get(function () {
   return this._id;
 });

@@ -79,6 +79,7 @@ const RegistrationPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [step, setStep] = useState(1);
   const [submitting, setSubmitting] = useState(false);
+  const isSubmittingRef = useRef(false);
   const [success, setSuccess] = useState(false);
   const [createdRegId, setCreatedRegId] = useState("");
 
@@ -552,7 +553,7 @@ const RegistrationPage: React.FC = () => {
   };
 
   const handleSubmit = async () => {
-    if (!id || !event) return;
+    if (isSubmittingRef.current || submitting || !id || !event) return;
     if (isRegistrationClosed(event)) {
       alert("Registrations for this event are currently closed.");
       return;
@@ -570,6 +571,7 @@ const RegistrationPage: React.FC = () => {
       }
     }
 
+    isSubmittingRef.current = true;
     setSubmitting(true);
     try {
       const foodPreferenceText = "Standard Entry";
@@ -756,6 +758,7 @@ const RegistrationPage: React.FC = () => {
     } catch (err: any) {
       console.error("Error submitting registration:", err);
       alert(err.message || "Failed to submit registration. Please try again.");
+      isSubmittingRef.current = false;
       setSubmitting(false);
     }
   };

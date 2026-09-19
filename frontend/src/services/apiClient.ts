@@ -511,11 +511,11 @@ export async function fetchRegistrationById(id: string) {
 }
 
 export async function createRegistration(regObj: any) {
-  const res = await fetch(`${API_BASE}/registrations`, {
+  const res = await fetchWithRetry(`${API_BASE}/registrations`, {
     method: 'POST',
     headers: authHeaders(),
     body: JSON.stringify(regObj),
-  });
+  }, 2, 800);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     throw new Error(data.error || data.message || 'Failed to create registration');

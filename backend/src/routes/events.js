@@ -10,6 +10,7 @@ const { pick } = require('../utils/sanitize');
 // Helper to compute registration counts for events (counting active teams/registrations)
 let cachedCounts = null;
 let lastCountsFetch = 0;
+let inFlightCountsPromise = null;
 const COUNTS_CACHE_TTL = 15000; // 15s in-memory cache
 
 async function getRegistrationCountsMap() {
@@ -17,37 +18,45 @@ async function getRegistrationCountsMap() {
   if (cachedCounts && (now - lastCountsFetch < COUNTS_CACHE_TTL)) {
     return cachedCounts;
   }
-  try {
-    const regCounts = await Registration.aggregate([
-      {
-        $group: {
-          _id: {
-            eventId: '$eventId',
-            eventTitle: { $toLower: { $trim: { input: { $ifNull: ['$eventTitle', ''] } } } }
-          },
-          totalTeams: { $sum: 1 }
-        }
-      }
-    ]);
-    const idMap = {};
-    const titleMap = {};
-    regCounts.forEach((r) => {
-      const eid = r._id?.eventId ? String(r._id.eventId).trim() : '';
-      const etitle = r._id?.eventTitle ? String(r._id.eventTitle).trim().toLowerCase() : '';
-      if (eid) {
-        idMap[eid] = (idMap[eid] || 0) + r.totalTeams;
-      }
-      if (etitle) {
-        titleMap[etitle] = (titleMap[etitle] || 0) + r.totalTeams;
-      }
-    });
-    cachedCounts = { idMap, titleMap };
-    lastCountsFetch = now;
-    return cachedCounts;
-  } catch (err) {
-    console.warn('[events route] Error calculating registration counts:', err.message);
-    return { idMap: {}, titleMap: {} };
+  if (inFlightCountsPromise) {
+    return inFlightCountsPromise;
   }
+  inFlightCountsPromise = (async () => {
+    try {
+      const regCounts = await Registration.aggregate([
+        {
+          $group: {
+            _id: {
+              eventId: '$eventId',
+              eventTitle: { $toLower: { $trim: { input: { $ifNull: ['$eventTitle', ''] } } } }
+            },
+            totalTeams: { $sum: 1 }
+          }
+        }
+      ]);
+      const idMap = {};
+      const titleMap = {};
+      regCounts.forEach((r) => {
+        const eid = r._id?.eventId ? String(r._id.eventId).trim() : '';
+        const etitle = r._id?.eventTitle ? String(r._id.eventTitle).trim().toLowerCase() : '';
+        if (eid) {
+          idMap[eid] = (idMap[eid] || 0) + r.totalTeams;
+        }
+        if (etitle) {
+          titleMap[etitle] = (titleMap[etitle] || 0) + r.totalTeams;
+        }
+      });
+      cachedCounts = { idMap, titleMap };
+      lastCountsFetch = Date.now();
+      return cachedCounts;
+    } catch (err) {
+      console.warn('[events route] Error calculating registration counts:', err.message);
+      return cachedCounts || { idMap: {}, titleMap: {} };
+    } finally {
+      inFlightCountsPromise = null;
+    }
+  })();
+  return inFlightCountsPromise;
 }
 
 // GET /api/events - List events
