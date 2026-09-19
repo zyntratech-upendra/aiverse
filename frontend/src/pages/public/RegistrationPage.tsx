@@ -573,30 +573,6 @@ const RegistrationPage: React.FC = () => {
     setSubmitting(true);
     try {
       const foodPreferenceText = "Standard Entry";
-
-      // Ensure payment proof is well compressed before writing to Firestore document (safely under 1MB limit)
-      let compressedProof = "";
-      if (requiresPaymentProof && paymentProofPreview) {
-        if (paymentProofPreview.length > 400000) {
-          compressedProof = await compressPaymentProof(paymentProofPreview, 850, 0.65);
-        } else {
-          compressedProof = paymentProofPreview;
-        }
-      }
-
-      // Upload Payment Proof to Cloudinary
-      let cloudinaryProofUrl = "";
-      if (requiresPaymentProof && paymentProofPreview) {
-        try {
-          const uploadRes = await uploadImage(paymentProofPreview, "ai_verse_payment_proofs");
-          if (uploadRes?.secure_url) {
-            cloudinaryProofUrl = uploadRes.secure_url;
-          }
-        } catch (upErr) {
-          console.warn("[RegistrationPage] Cloudinary upload notice, using compressed data URI:", upErr);
-        }
-      }
-
       const commonQuizPassword = "Aiverse@vitb";
       const isEventLoginAllowed = Boolean((event as any)?.allowLoginAccess);
 
@@ -650,9 +626,9 @@ const RegistrationPage: React.FC = () => {
         pricingType: isQuiz ? "per_person" : (isPricingPerTeam ? "per_team" : "per_person"),
         registrationFee: isQuiz ? 0 : (isPricingPerTeam ? (event?.registrationFee || 0) : perPersonFee),
         totalFeePaid: isQuiz ? 0 : totalRegistrationFee,
-        paymentProofPreview: isQuiz ? "" : (cloudinaryProofUrl || compressedProof),
+        paymentProofPreview: isQuiz ? "" : paymentProofPreview,
         paymentProofFilename: isQuiz ? "" : (requiresPaymentProof ? (paymentProofFilename || "") : ""),
-        paymentProof: isQuiz ? "" : (cloudinaryProofUrl || compressedProof),
+        paymentProof: isQuiz ? "" : paymentProofPreview,
         transactionId: isQuiz ? "FREE_QUIZ_ENTRY" : (requiresPaymentProof ? transactionId.trim() : "EXEMPT_VISHNU_FREE"),
         paymentStatus: isQuiz ? "Confirmed" : (requiresPaymentProof ? "Submitted (Pending Verification)" : "Free (Pending Review)"),
         status: isQuiz ? "Confirmed" : "Pending",
@@ -664,123 +640,122 @@ const RegistrationPage: React.FC = () => {
 
       let finalRegId = `REG-${Date.now()}`;
 
-      // 1. Create in Backend MongoDB API (enforces uniqueness per event)
-      try {
-        const backendRes = await createRegistration(payload);
-        if (backendRes?.id || backendRes?.registration?.id || backendRes?._id) {
-          finalRegId = backendRes.id || backendRes?.registration?.id || backendRes?._id;
-        }
-      } catch (backendErr: any) {
-        console.error("[RegistrationPage] Backend createRegistration error:", backendErr);
-        alert(backendErr.message || "Failed to create registration. Duplicate registration or invalid data.");
-        setSubmitting(false);
-        return;
-      }
-
-      // 2. Add document to Firestore registrations collection (sync)
-      try {
-        const regDocRef = await addDoc(collection(db, "registrations"), {
-          ...payload,
-          backendId: finalRegId,
-        });
-        if (!finalRegId) finalRegId = regDocRef.id;
-        await updateDoc(doc(db, "registrations", regDocRef.id), {
-          qrCodeData: finalRegId
-        }).catch(() => { });
-      } catch (fErr) {
-        console.warn("[RegistrationPage] Firestore save notice:", fErr);
+      // 1. Submit Registration to Primary Backend MongoDB API (Fast, indexed, enforcer of uniqueness)
+      const backendRes = await createRegistration(payload);
+      if (backendRes?.id || backendRes?.registration?.id || backendRes?._id) {
+        finalRegId = backendRes.id || backendRes?.registration?.id || backendRes?._id;
       }
 
       setCreatedRegId(finalRegId);
-
-      // Auto-provision login credentials for participant registrations with initial default password Aiverse@vitb
-      const personalEmail = (leadPersonalEmail.trim() || leadCollegeEmail.trim() || "").toLowerCase();
-      const displayName = leadName.trim() || "Participant";
-      const userPhone = leadPhone.trim();
-      try {
-        const leadEmails = [personalEmail, leadCollegeEmail.trim().toLowerCase()].filter(e => e && e.includes("@"));
-        const memberEmails = (cleanMembers || []).map(m => (m.email || "").trim().toLowerCase()).filter(e => e && e.includes("@"));
-        const allEmails = Array.from(new Set([...leadEmails, ...memberEmails]));
-
-        const userProfiles = allEmails.map(em => ({
-          email: em,
-          personal_email: em,
-          phone: userPhone || null,
-          name: em === personalEmail ? displayName : (cleanMembers.find(m => m.email === em)?.name || displayName),
-          display_name: em === personalEmail ? displayName : (cleanMembers.find(m => m.email === em)?.name || displayName),
-          role: "participant",
-          status: "Active",
-          requiresPasswordChange: true,
-          event_title: event.title || "",
-          registration_id: finalRegId,
-          team_name: isQuiz ? displayName : (groupName || displayName),
-        }));
-        await userService.bulkUpsertUsers(userProfiles).catch(() => { });
-
-        const authAccounts = allEmails.map(em => ({
-          email: em,
-          password: commonQuizPassword,
-          name: em === personalEmail ? displayName : (cleanMembers.find(m => m.email === em)?.name || displayName),
-          phone: userPhone,
-          role: "participant",
-          requiresPasswordChange: true,
-          isQuiz: Boolean(isQuiz),
-          eventTitle: event.title || "",
-          registrationId: finalRegId,
-        }));
-        await userService.bulkCreateAuthUsers(authAccounts).catch(() => { });
-      } catch (credErr) {
-        console.warn("[Registration] Non-critical notice auto-provisioning credentials:", credErr);
-      }
-
-      // Only send registration confirmation email if the registration is already Confirmed upon creation.
-      // For all pending registrations (under review/payment verification), confirmation email is dispatched once faculty confirms it in the management portal.
-      if (payload.status === "Confirmed" && !isQuiz && (payload as any).sendConfirmationEmail !== false) {
-        try {
-          const recipientEmail = leadPersonalEmail.trim() || leadCollegeEmail.trim();
-          if (recipientEmail) {
-            await sendEmail({
-              to: recipientEmail,
-              from: "AI Verse <events@aiversevitb.in>",
-              reply_to: "aiverse@vishnu.edu.in",
-              subject: `Registration Confirmed: ${event.title} - AI Verse`,
-              html: `
-                <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; color: #1e293b;">
-                  <h2 style="color: #2563eb; margin-top: 0;">🎉 Registration Confirmed!</h2>
-                  <p>Hello <strong>${leadName}</strong>,</p>
-                  <p>You have successfully registered for <strong>${event.title}</strong>.</p>
-                  <div style="background-color: #f8fafc; padding: 16px; border-radius: 8px; margin: 16px 0;">
-                    <p style="margin: 4px 0;"><strong>Registration ID:</strong> ${finalRegId}</p>
-                    <p style="margin: 4px 0;"><strong>Team Name:</strong> ${isQuiz ? "Individual Registration" : (groupName || "Individual")}</p>
-                    <p style="margin: 4px 0;"><strong>Date:</strong> ${event.date}</p>
-                    <p style="margin: 4px 0;"><strong>Time:</strong> ${event.time}</p>
-                    <p style="margin: 4px 0;"><strong>Location:</strong> ${event.location}</p>
-                  </div>
-                  <p style="margin-top: 20px; font-size: 13px; line-height: 1.6; color: #334155; background-color: #f1f5f9; padding: 12px 16px; border-radius: 8px;"><strong>🎟️ Ticket & Entry Pass:</strong> Your registration is under review by faculty coordinators. Once approved, your official digital entry ticket pass with QR verification will be dispatched directly to your email.</p>
-                  <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
-                  <p style="font-size: 12px; color: #64748b;">AI Verse Club &bull; Vishnu Institute of Technology, Bhimavaram</p>
-                </div>
-              `,
-            }).catch((mailErr) => {
-              console.warn("[RegistrationPage] Confirmation email notice:", mailErr);
-            });
-          }
-        } catch (e) { }
-      }
-
-      // Increment registrations counter on event in Firestore safely
-      try {
-        const docRef = doc(db, "events", event.id);
-        await updateDoc(docRef, {
-          currentReg: increment(isQuiz ? 1 : members.length + 1)
-        });
-      } catch (e) { }
-
+      // Immediately transition UI to Success State for instant, lag-free user experience
       setSuccess(true);
-    } catch (err) {
+      setSubmitting(false);
+
+      // 2. Perform all auxiliary background synchronization & provisioning non-blockingly
+      (async () => {
+        try {
+          // A. Asynchronous background upload of payment proof to Cloudinary if needed
+          let secureCloudinaryUrl = "";
+          if (requiresPaymentProof && paymentProofPreview && paymentProofPreview.startsWith("data:image")) {
+            try {
+              const uploadRes = await uploadImage(paymentProofPreview, "ai_verse_payment_proofs");
+              if (uploadRes?.secure_url) {
+                secureCloudinaryUrl = uploadRes.secure_url;
+              }
+            } catch (upErr) {
+              console.warn("[RegistrationPage] Cloudinary background upload notice:", upErr);
+            }
+          }
+
+          // B. Firestore mirror sync & event registration count increment
+          const firestoreSyncPromise = (async () => {
+            try {
+              const regDocRef = await addDoc(collection(db, "registrations"), {
+                ...payload,
+                paymentProof: secureCloudinaryUrl || payload.paymentProof,
+                paymentProofPreview: secureCloudinaryUrl || payload.paymentProofPreview,
+                backendId: finalRegId,
+                qrCodeData: finalRegId
+              });
+              const docRef = doc(db, "events", event.id);
+              await updateDoc(docRef, {
+                currentReg: increment(isQuiz ? 1 : actualTeamSize)
+              }).catch(() => {});
+            } catch (fErr) {
+              console.warn("[RegistrationPage] Firestore background sync notice:", fErr);
+            }
+          })();
+
+          // C. User account & auth credentials auto-provisioning
+          const personalEmail = (leadPersonalEmail.trim() || leadCollegeEmail.trim() || "").toLowerCase();
+          const displayName = leadName.trim() || "Participant";
+          const userPhone = leadPhone.trim();
+
+          const leadEmails = [personalEmail, leadCollegeEmail.trim().toLowerCase()].filter(e => e && e.includes("@"));
+          const memberEmails = (cleanMembers || []).map(m => (m.email || "").trim().toLowerCase()).filter(e => e && e.includes("@"));
+          const allEmails = Array.from(new Set([...leadEmails, ...memberEmails]));
+
+          const userProfiles = allEmails.map(em => ({
+            email: em,
+            personal_email: em,
+            phone: userPhone || null,
+            name: em === personalEmail ? displayName : (cleanMembers.find(m => m.email === em)?.name || displayName),
+            display_name: em === personalEmail ? displayName : (cleanMembers.find(m => m.email === em)?.name || displayName),
+            role: "participant",
+            status: "Active",
+            requiresPasswordChange: true,
+            event_title: event.title || "",
+            registration_id: finalRegId,
+            team_name: isQuiz ? displayName : (groupName || displayName),
+          }));
+
+          const userProvisioningPromise = userService.bulkUpsertUsers(userProfiles).catch((err) => {
+            console.warn("[RegistrationPage] Background user provisioning notice:", err);
+          });
+
+          // D. Optional confirmation email dispatch for auto-confirmed events
+          const emailPromise = (async () => {
+            if (payload.status === "Confirmed" && !isQuiz && (payload as any).sendConfirmationEmail !== false) {
+              try {
+                const recipientEmail = leadPersonalEmail.trim() || leadCollegeEmail.trim();
+                if (recipientEmail) {
+                  await sendEmail({
+                    to: recipientEmail,
+                    from: "AI Verse <events@aiversevitb.in>",
+                    reply_to: "aiverse@vishnu.edu.in",
+                    subject: `Registration Confirmed: ${event.title} - AI Verse`,
+                    html: `
+                      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 24px; border: 1px solid #e2e8f0; border-radius: 12px; color: #1e293b;">
+                        <h2 style="color: #2563eb; margin-top: 0;">🎉 Registration Confirmed!</h2>
+                        <p>Hello <strong>${leadName}</strong>,</p>
+                        <p>You have successfully registered for <strong>${event.title}</strong>.</p>
+                        <div style="background-color: #f8fafc; padding: 16px; border-radius: 8px; margin: 16px 0;">
+                          <p style="margin: 4px 0;"><strong>Registration ID:</strong> ${finalRegId}</p>
+                          <p style="margin: 4px 0;"><strong>Team Name:</strong> ${isQuiz ? "Individual Registration" : (groupName || "Individual")}</p>
+                          <p style="margin: 4px 0;"><strong>Date:</strong> ${event.date}</p>
+                          <p style="margin: 4px 0;"><strong>Time:</strong> ${event.time}</p>
+                          <p style="margin: 4px 0;"><strong>Location:</strong> ${event.location}</p>
+                        </div>
+                        <p style="margin-top: 20px; font-size: 13px; line-height: 1.6; color: #334155; background-color: #f1f5f9; padding: 12px 16px; border-radius: 8px;"><strong>🎟️ Ticket & Entry Pass:</strong> Your registration is under review by faculty coordinators. Once approved, your official digital entry ticket pass with QR verification will be dispatched directly to your email.</p>
+                        <hr style="border: 0; border-top: 1px solid #e2e8f0; margin: 20px 0;" />
+                        <p style="font-size: 12px; color: #64748b;">AI Verse Club &bull; Vishnu Institute of Technology, Bhimavaram</p>
+                      </div>
+                    `,
+                  }).catch(() => {});
+                }
+              } catch (e) {}
+            }
+          })();
+
+          await Promise.allSettled([firestoreSyncPromise, userProvisioningPromise, emailPromise]);
+        } catch (bgErr) {
+          console.warn("[RegistrationPage] Background operations completed with notice:", bgErr);
+        }
+      })();
+
+    } catch (err: any) {
       console.error("Error submitting registration:", err);
-      alert("Failed to submit registration. Please try again.");
-    } finally {
+      alert(err.message || "Failed to submit registration. Please try again.");
       setSubmitting(false);
     }
   };

@@ -8,7 +8,15 @@ const { asyncHandler } = require('../middleware/errorHandler');
 const { pick } = require('../utils/sanitize');
 
 // Helper to compute registration counts for events (counting active teams/registrations)
+let cachedCounts = null;
+let lastCountsFetch = 0;
+const COUNTS_CACHE_TTL = 15000; // 15s in-memory cache
+
 async function getRegistrationCountsMap() {
+  const now = Date.now();
+  if (cachedCounts && (now - lastCountsFetch < COUNTS_CACHE_TTL)) {
+    return cachedCounts;
+  }
   try {
     const regCounts = await Registration.aggregate([
       {
@@ -33,7 +41,9 @@ async function getRegistrationCountsMap() {
         titleMap[etitle] = (titleMap[etitle] || 0) + r.totalTeams;
       }
     });
-    return { idMap, titleMap };
+    cachedCounts = { idMap, titleMap };
+    lastCountsFetch = now;
+    return cachedCounts;
   } catch (err) {
     console.warn('[events route] Error calculating registration counts:', err.message);
     return { idMap: {}, titleMap: {} };
@@ -77,15 +87,24 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
-    const event = await Event.findOne({ $or: [{ _id: id }, { id: id }] }).lean();
+    let event = null;
+    if (mongoose.Types.ObjectId.isValid(id)) {
+      event = await Event.findById(id).lean();
+    }
+    if (!event) {
+      event = await Event.findOne({ $or: [{ id: id }, { _id: id }] }).lean();
+    }
     if (!event) {
       return res.status(404).json({ success: false, error: 'Event not found' });
     }
 
-    const { idMap, titleMap } = await getRegistrationCountsMap();
     const evId = String(event._id || event.id || id).trim();
-    const evTitle = String(event.title || '').trim().toLowerCase();
-    const computedSeats = (evId && idMap[evId]) || (evTitle && titleMap[evTitle]) || 0;
+    const evTitle = String(event.title || '').trim();
+
+    // Fast indexed count for single event
+    const computedSeats = await Registration.countDocuments({
+      $or: [{ eventId: evId }, { eventTitle: evTitle }]
+    }).catch(() => event.currentReg || 0);
 
     res.json({
       ...event,

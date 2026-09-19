@@ -61,6 +61,13 @@ const RegistrationSchema = new Schema(
   }
 );
 
+RegistrationSchema.index({ eventId: 1, teamLeadEmail: 1 });
+RegistrationSchema.index({ eventId: 1, teamLeadPersonalEmail: 1 });
+RegistrationSchema.index({ eventId: 1, teamLeadCollegeEmail: 1 });
+RegistrationSchema.index({ eventId: 1, 'members.email': 1 });
+RegistrationSchema.index({ eventId: 1, email: 1 });
+RegistrationSchema.index({ eventId: 1, createdAt: -1 });
+
 RegistrationSchema.virtual('id').get(function () {
   return this._id;
 });

@@ -133,7 +133,7 @@ router.post(
 
       return {
         updateOne: {
-          filter: { $or: [{ email }, { uid: u.uid || id }, { _id: id }] },
+          filter: { email },
           update: {
             $set: {
               ...payload,
