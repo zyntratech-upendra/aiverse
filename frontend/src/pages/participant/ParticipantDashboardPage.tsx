@@ -119,7 +119,14 @@ export const ParticipantDashboardPage: React.FC = () => {
 
     // Members
     const regMembers = Array.isArray(targetReg.members) ? targetReg.members : [];
-    setMembers(regMembers);
+    const leadEmail = (targetReg.teamLeadEmail || "").toLowerCase().trim();
+    const filteredMembers = regMembers.filter((m: any) => {
+      const r = (m.role || "").toLowerCase().trim();
+      const isExplicitLead = r === "leader" || r === "team lead" || r === "lead" || m.isLead === true;
+      const isLeadEmail = leadEmail && m.email && m.email.toLowerCase().trim() === leadEmail;
+      return !(isExplicitLead && isLeadEmail);
+    });
+    setMembers(filteredMembers);
 
     // Round & Promotion Data
     const cRound = Number(targetReg.currentRound || targetReg.promotedToRound || 1);

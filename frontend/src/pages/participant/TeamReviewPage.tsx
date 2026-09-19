@@ -197,10 +197,12 @@ export const TeamReviewPage: React.FC<TeamReviewPageProps> = ({ embedded = false
           let loadedMembers: TeamMember[] = [];
 
           if (Array.isArray(targetReg.members) && targetReg.members.length > 0) {
-            // Check if the members array contains an explicit leader entry
+            // Check if the members array contains an explicit leader entry (e.g. role is leader or matches exact leader email)
             const leaderIndex = targetReg.members.findIndex((m: any) => {
               const r = (m.role || "").toLowerCase().trim();
-              return r === "leader" || r === "team lead" || r === "lead" || m.isLead === true;
+              const isLeadRole = r === "leader" || r === "team lead" || r === "lead" || m.isLead === true;
+              const isLeadEmail = leaderInfo.email && m.email && m.email.toLowerCase().trim() === leaderInfo.email.toLowerCase().trim();
+              return isLeadRole && isLeadEmail;
             });
 
             if (leaderIndex !== -1) {
@@ -223,16 +225,8 @@ export const TeamReviewPage: React.FC<TeamReviewPageProps> = ({ embedded = false
                   phone: m.phoneNumber || m.phone || "N/A"
                 }));
             } else {
-              // The members array contains ONLY additional teammates (or leader is not in members array)
-              // If the first member matches the leader exactly by name & studentId, exclude it; otherwise include all
-              const isFirstMemberLeader = 
-                targetReg.members.length > 1 &&
-                targetReg.members[0].name === leaderInfo.name &&
-                (targetReg.members[0].studentId === leaderInfo.rollNo || targetReg.members[0].rollNo === leaderInfo.rollNo);
-
-              const membersToMap = isFirstMemberLeader ? targetReg.members.slice(1) : targetReg.members;
-
-              loadedMembers = membersToMap.map((m: any) => ({
+              // The members array contains all teammates (standard registration flow)
+              loadedMembers = targetReg.members.map((m: any) => ({
                 name: m.name || "Team Member",
                 role: m.role || "Developer",
                 rollNo: m.studentId || m.rollNo || "N/A",
@@ -477,109 +471,108 @@ export const TeamReviewPage: React.FC<TeamReviewPageProps> = ({ embedded = false
       <div className="space-y-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
           
-          {/* Left Header */}
-          <div className="md:col-span-1">
-            <span className="text-xs font-bold text-[#0F172A] uppercase tracking-wider">
+          {/* Left Column: Team Leader */}
+          <div className="md:col-span-1 space-y-4">
+            <span className="text-xs font-bold text-[#0F172A] uppercase tracking-wider block">
               TEAM LEADER
             </span>
-          </div>
 
-          {/* Right Header */}
-          <div className="md:col-span-2">
-            <span className="text-xs font-bold text-[#0F172A] uppercase tracking-wider">
-              TEAM MEMBERS ({teamData.members.length})
-            </span>
-          </div>
-        </div>
-
-        {/* Cards Row */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          
-          {/* Leader Card */}
-          <div className="bg-white border-2 border-blue-500/30 rounded-3xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between items-center text-center relative h-[360px]">
-            
-            <span className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-[10px] px-3.5 py-1 rounded-full flex items-center gap-1 absolute top-4 right-4 shadow-sm shadow-blue-500/25">
-              <Star className="w-3 h-3 fill-current text-amber-300" /> Leader
-            </span>
-
-            <div className="mt-2 flex flex-col items-center">
-              {/* Styled Initials Avatar */}
-              <div className="w-24 h-24 rounded-full border-4 border-blue-100 bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center font-black text-2xl shadow-sm mx-auto ring-2 ring-blue-500/20">
-                <span>{getInitials(teamData.leader.name)}</span>
-              </div>
+            {/* Leader Card */}
+            <div className="bg-white border-2 border-blue-500/30 rounded-3xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between items-center text-center relative min-h-[360px]">
               
-              <h3 className="text-lg font-extrabold text-[#0F172A] mt-3 leading-snug">
-                {teamData.leader.name || "Leader"}
-              </h3>
-              <p className="text-xs font-bold text-blue-600 mt-0.5">
-                {teamData.leader.rollNo || "No Roll No"}
-              </p>
-            </div>
+              <span className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-bold text-[10px] px-3.5 py-1 rounded-full flex items-center gap-1 absolute top-4 right-4 shadow-sm shadow-blue-500/25">
+                <Star className="w-3 h-3 fill-current text-amber-300" /> Leader
+              </span>
 
-            <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 w-full text-left space-y-1.5 text-xs text-slate-600">
-              <div className="flex items-center gap-2 truncate">
-                <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span className="truncate font-medium">{teamData.leader.email || "No Email"}</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                <span className="font-medium">{teamData.leader.phone || "No Phone"}</span>
-              </div>
-            </div>
-
-          </div>
-
-          {/* Real Team Members Cards */}
-          {teamData.members.length > 0 ? (
-            teamData.members.map((member, idx) => (
-              <div key={idx} className="bg-white border border-slate-200/90 rounded-3xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between h-[360px]">
-                <div className="flex items-start gap-4">
-                  {/* Member Initials Avatar */}
-                  <div className="w-14 h-14 rounded-full bg-slate-100 text-[#0F172A] font-bold flex items-center justify-center text-sm border border-slate-200 shrink-0 shadow-xs">
-                    <span>{getInitials(member.name)}</span>
-                  </div>
-
-                  <div>
-                    <h3 className="text-base font-extrabold text-[#0F172A]">{member.name || `Member ${idx + 1}`}</h3>
-                    <p className="text-xs text-slate-500 font-medium mt-0.5">{member.role || "Developer"}</p>
-                  </div>
+              <div className="mt-2 flex flex-col items-center">
+                {/* Styled Initials Avatar */}
+                <div className="w-24 h-24 rounded-full border-4 border-blue-100 bg-[#EFF6FF] text-[#2563EB] flex items-center justify-center font-black text-2xl shadow-sm mx-auto ring-2 ring-blue-500/20">
+                  <span>{getInitials(teamData.leader.name)}</span>
                 </div>
-
-                <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 w-full text-left space-y-2 text-xs text-slate-600">
-                  <div className="flex justify-between items-center">
-                    <span className="text-[10px] font-bold text-slate-400 uppercase">Roll No</span>
-                    <span className="font-bold text-[#0F172A]">{member.rollNo || "N/A"}</span>
-                  </div>
-                  <div className="flex items-center gap-2 truncate pt-1 border-t border-slate-200/60">
-                    <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span className="truncate font-medium">{member.email || "N/A"}</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-                    <span className="font-medium">{member.phone || "N/A"}</span>
-                  </div>
-                </div>
-              </div>
-            ))
-          ) : (
-            <div className="md:col-span-2 bg-white border border-dashed border-slate-200 rounded-3xl p-8 text-center flex flex-col items-center justify-center space-y-3 min-h-[360px]">
-              <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
-                <Users className="w-6 h-6 text-blue-600" />
-              </div>
-              <div>
-                <h4 className="text-sm font-extrabold text-[#0F172A]">No Additional Teammates Added</h4>
-                <p className="text-xs text-slate-500 font-medium mt-1 max-w-sm mx-auto">
-                  You are registered as a solo participant or haven't listed teammates yet. Click below to add your team members.
+                
+                <h3 className="text-lg font-extrabold text-[#0F172A] mt-3 leading-snug">
+                  {teamData.leader.name || "Leader"}
+                </h3>
+                <p className="text-xs font-bold text-blue-600 mt-0.5">
+                  {teamData.leader.rollNo || "No Roll No"}
                 </p>
               </div>
-              <button
-                onClick={handleOpenEditModal}
-                className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 mt-2 cursor-pointer border border-blue-200/60"
-              >
-                <Plus className="w-4 h-4" /> Add Team Members
-              </button>
+
+              <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 w-full text-left space-y-1.5 text-xs text-slate-600">
+                <div className="flex items-center gap-2 truncate">
+                  <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="truncate font-medium">{teamData.leader.email || "No Email"}</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                  <span className="font-medium">{teamData.leader.phone || "No Phone"}</span>
+                </div>
+              </div>
+
             </div>
-          )}
+          </div>
+
+          {/* Right Column: Team Members */}
+          <div className="md:col-span-2 space-y-4">
+            <span className="text-xs font-bold text-[#0F172A] uppercase tracking-wider block">
+              TEAM MEMBERS ({teamData.members.length})
+            </span>
+
+            {/* Real Team Members Cards Grid */}
+            {teamData.members.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+                {teamData.members.map((member, idx) => (
+                  <div key={idx} className="bg-white border border-slate-200/90 rounded-3xl p-6 shadow-sm hover:shadow-md transition-all flex flex-col justify-between min-h-[360px]">
+                    <div className="flex items-start gap-4">
+                      {/* Member Initials Avatar */}
+                      <div className="w-14 h-14 rounded-full bg-slate-100 text-[#0F172A] font-bold flex items-center justify-center text-sm border border-slate-200 shrink-0 shadow-xs">
+                        <span>{getInitials(member.name)}</span>
+                      </div>
+
+                      <div>
+                        <h3 className="text-base font-extrabold text-[#0F172A]">{member.name || `Member ${idx + 1}`}</h3>
+                        <p className="text-xs text-slate-500 font-medium mt-0.5">{member.role || "Developer"}</p>
+                      </div>
+                    </div>
+
+                    <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-3.5 w-full text-left space-y-2 text-xs text-slate-600">
+                      <div className="flex justify-between items-center">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">Roll No</span>
+                        <span className="font-bold text-[#0F172A]">{member.rollNo || "N/A"}</span>
+                      </div>
+                      <div className="flex items-center gap-2 truncate pt-1 border-t border-slate-200/60">
+                        <Mail className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="truncate font-medium">{member.email || "N/A"}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Phone className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                        <span className="font-medium">{member.phone || "N/A"}</span>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="bg-white border border-dashed border-slate-200 rounded-3xl p-8 text-center flex flex-col items-center justify-center space-y-3 min-h-[360px]">
+                <div className="w-12 h-12 rounded-2xl bg-blue-50 text-blue-600 flex items-center justify-center font-bold">
+                  <Users className="w-6 h-6 text-blue-600" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-extrabold text-[#0F172A]">No Additional Teammates Added</h4>
+                  <p className="text-xs text-slate-500 font-medium mt-1 max-w-sm mx-auto">
+                    You are registered as a solo participant or haven't listed teammates yet. Click below to add your team members.
+                  </p>
+                </div>
+                <button
+                  onClick={handleOpenEditModal}
+                  className="text-xs font-bold text-blue-600 bg-blue-50 hover:bg-blue-100 px-4 py-2.5 rounded-xl transition-all flex items-center gap-1.5 mt-2 cursor-pointer border border-blue-200/60"
+                >
+                  <Plus className="w-4 h-4" /> Add Team Members
+                </button>
+              </div>
+            )}
+
+          </div>
 
         </div>
       </div>
