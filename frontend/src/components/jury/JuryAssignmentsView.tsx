@@ -44,8 +44,8 @@ const JuryAssignmentsView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState<"All" | "Pending" | "Evaluated">("All");
   const [filterTrack, setFilterTrack] = useState<string>("All");
-  // Reveal saved scores toggle state
-  const [revealScores, setRevealScores] = useState(true);
+  // Reveal saved scores toggle state (defaults to false so saved evaluations are masked)
+  const [revealScores, setRevealScores] = useState(false);
   const [focusedCell, setFocusedCell] = useState<{ id: string; field: string } | null>(null);
 
   // Full Screen distraction-free scoring mode state
@@ -706,17 +706,23 @@ const JuryAssignmentsView: React.FC = () => {
                       {/* 1. Communication */}
                       <td className="py-2.5 px-2 border-r border-slate-200/70 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <input
-                            type="number"
-                            min="0"
-                            max="20"
-                            placeholder="—"
-                            value={p.communication > 0 ? p.communication : (p.communication === 0 && focusedCell?.id === p.id && focusedCell?.field === "communication" ? "0" : "")}
-                            onFocus={() => setFocusedCell({ id: p.id, field: "communication" })}
-                            onBlur={() => setFocusedCell(null)}
-                            onChange={(e) => handleCellChange(p.id, "communication", e.target.value)}
-                            className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
-                          />
+                          {isMasked ? (
+                            <span className="w-14 py-1.5 px-2 text-center font-mono font-extrabold text-xs rounded-lg bg-amber-50/80 border border-amber-200/70 text-amber-700 tracking-widest select-none">
+                              {p.communication > 0 ? "••" : "—"}
+                            </span>
+                          ) : (
+                            <input
+                              type="number"
+                              min="0"
+                              max="20"
+                              placeholder="—"
+                              value={p.communication > 0 ? p.communication : (p.communication === 0 && focusedCell?.id === p.id && focusedCell?.field === "communication" ? "0" : "")}
+                              onFocus={() => setFocusedCell({ id: p.id, field: "communication" })}
+                              onBlur={() => setFocusedCell(null)}
+                              onChange={(e) => handleCellChange(p.id, "communication", e.target.value)}
+                              className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
+                            />
+                          )}
                           <span className="text-[10px] text-slate-400 font-bold font-mono">/20</span>
                         </div>
                       </td>
@@ -724,17 +730,23 @@ const JuryAssignmentsView: React.FC = () => {
                       {/* 2. Innovation and Uniqueness */}
                       <td className="py-2.5 px-2 border-r border-slate-200/70 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <input
-                            type="number"
-                            min="0"
-                            max="20"
-                            placeholder="—"
-                            value={p.innovationUniqueness > 0 ? p.innovationUniqueness : (p.innovationUniqueness === 0 && focusedCell?.id === p.id && focusedCell?.field === "innovationUniqueness" ? "0" : "")}
-                            onFocus={() => setFocusedCell({ id: p.id, field: "innovationUniqueness" })}
-                            onBlur={() => setFocusedCell(null)}
-                            onChange={(e) => handleCellChange(p.id, "innovationUniqueness", e.target.value)}
-                            className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
-                          />
+                          {isMasked ? (
+                            <span className="w-14 py-1.5 px-2 text-center font-mono font-extrabold text-xs rounded-lg bg-amber-50/80 border border-amber-200/70 text-amber-700 tracking-widest select-none">
+                              {p.innovationUniqueness > 0 ? "••" : "—"}
+                            </span>
+                          ) : (
+                            <input
+                              type="number"
+                              min="0"
+                              max="20"
+                              placeholder="—"
+                              value={p.innovationUniqueness > 0 ? p.innovationUniqueness : (p.innovationUniqueness === 0 && focusedCell?.id === p.id && focusedCell?.field === "innovationUniqueness" ? "0" : "")}
+                              onFocus={() => setFocusedCell({ id: p.id, field: "innovationUniqueness" })}
+                              onBlur={() => setFocusedCell(null)}
+                              onChange={(e) => handleCellChange(p.id, "innovationUniqueness", e.target.value)}
+                              className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
+                            />
+                          )}
                           <span className="text-[10px] text-slate-400 font-bold font-mono">/20</span>
                         </div>
                       </td>
@@ -742,17 +754,23 @@ const JuryAssignmentsView: React.FC = () => {
                       {/* 3. Feasibility and Viability */}
                       <td className="py-2.5 px-2 border-r border-slate-200/70 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <input
-                            type="number"
-                            min="0"
-                            max="20"
-                            placeholder="—"
-                            value={p.feasibilityViability > 0 ? p.feasibilityViability : (p.feasibilityViability === 0 && focusedCell?.id === p.id && focusedCell?.field === "feasibilityViability" ? "0" : "")}
-                            onFocus={() => setFocusedCell({ id: p.id, field: "feasibilityViability" })}
-                            onBlur={() => setFocusedCell(null)}
-                            onChange={(e) => handleCellChange(p.id, "feasibilityViability", e.target.value)}
-                            className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
-                          />
+                          {isMasked ? (
+                            <span className="w-14 py-1.5 px-2 text-center font-mono font-extrabold text-xs rounded-lg bg-amber-50/80 border border-amber-200/70 text-amber-700 tracking-widest select-none">
+                              {p.feasibilityViability > 0 ? "••" : "—"}
+                            </span>
+                          ) : (
+                            <input
+                              type="number"
+                              min="0"
+                              max="20"
+                              placeholder="—"
+                              value={p.feasibilityViability > 0 ? p.feasibilityViability : (p.feasibilityViability === 0 && focusedCell?.id === p.id && focusedCell?.field === "feasibilityViability" ? "0" : "")}
+                              onFocus={() => setFocusedCell({ id: p.id, field: "feasibilityViability" })}
+                              onBlur={() => setFocusedCell(null)}
+                              onChange={(e) => handleCellChange(p.id, "feasibilityViability", e.target.value)}
+                              className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
+                            />
+                          )}
                           <span className="text-[10px] text-slate-400 font-bold font-mono">/20</span>
                         </div>
                       </td>
@@ -760,17 +778,23 @@ const JuryAssignmentsView: React.FC = () => {
                       {/* 4. Statistics */}
                       <td className="py-2.5 px-2 border-r border-slate-200/70 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <input
-                            type="number"
-                            min="0"
-                            max="20"
-                            placeholder="—"
-                            value={p.statistics > 0 ? p.statistics : (p.statistics === 0 && focusedCell?.id === p.id && focusedCell?.field === "statistics" ? "0" : "")}
-                            onFocus={() => setFocusedCell({ id: p.id, field: "statistics" })}
-                            onBlur={() => setFocusedCell(null)}
-                            onChange={(e) => handleCellChange(p.id, "statistics", e.target.value)}
-                            className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
-                          />
+                          {isMasked ? (
+                            <span className="w-14 py-1.5 px-2 text-center font-mono font-extrabold text-xs rounded-lg bg-amber-50/80 border border-amber-200/70 text-amber-700 tracking-widest select-none">
+                              {p.statistics > 0 ? "••" : "—"}
+                            </span>
+                          ) : (
+                            <input
+                              type="number"
+                              min="0"
+                              max="20"
+                              placeholder="—"
+                              value={p.statistics > 0 ? p.statistics : (p.statistics === 0 && focusedCell?.id === p.id && focusedCell?.field === "statistics" ? "0" : "")}
+                              onFocus={() => setFocusedCell({ id: p.id, field: "statistics" })}
+                              onBlur={() => setFocusedCell(null)}
+                              onChange={(e) => handleCellChange(p.id, "statistics", e.target.value)}
+                              className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
+                            />
+                          )}
                           <span className="text-[10px] text-slate-400 font-bold font-mono">/20</span>
                         </div>
                       </td>
@@ -778,17 +802,23 @@ const JuryAssignmentsView: React.FC = () => {
                       {/* 5. Revenue */}
                       <td className="py-2.5 px-2 border-r border-slate-200/70 text-center">
                         <div className="flex items-center justify-center gap-1">
-                          <input
-                            type="number"
-                            min="0"
-                            max="20"
-                            placeholder="—"
-                            value={p.revenue > 0 ? p.revenue : (p.revenue === 0 && focusedCell?.id === p.id && focusedCell?.field === "revenue" ? "0" : "")}
-                            onFocus={() => setFocusedCell({ id: p.id, field: "revenue" })}
-                            onBlur={() => setFocusedCell(null)}
-                            onChange={(e) => handleCellChange(p.id, "revenue", e.target.value)}
-                            className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
-                          />
+                          {isMasked ? (
+                            <span className="w-14 py-1.5 px-2 text-center font-mono font-extrabold text-xs rounded-lg bg-amber-50/80 border border-amber-200/70 text-amber-700 tracking-widest select-none">
+                              {p.revenue > 0 ? "••" : "—"}
+                            </span>
+                          ) : (
+                            <input
+                              type="number"
+                              min="0"
+                              max="20"
+                              placeholder="—"
+                              value={p.revenue > 0 ? p.revenue : (p.revenue === 0 && focusedCell?.id === p.id && focusedCell?.field === "revenue" ? "0" : "")}
+                              onFocus={() => setFocusedCell({ id: p.id, field: "revenue" })}
+                              onBlur={() => setFocusedCell(null)}
+                              onChange={(e) => handleCellChange(p.id, "revenue", e.target.value)}
+                              className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
+                            />
+                          )}
                           <span className="text-[10px] text-slate-400 font-bold font-mono">/20</span>
                         </div>
                       </td>
