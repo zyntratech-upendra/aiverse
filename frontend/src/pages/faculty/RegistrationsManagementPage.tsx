@@ -38,6 +38,7 @@ interface RegistrationItem {
   eventId: string;
   eventTitle: string;
   groupName: string;
+  teamName?: string;
   teamEmail?: string;
   teamLeadName: string;
   teamLeadEmail: string;

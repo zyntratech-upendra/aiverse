@@ -672,7 +672,7 @@ const RegistrationPage: React.FC = () => {
           // B. Firestore mirror sync & event registration count increment
           const firestoreSyncPromise = (async () => {
             try {
-              const regDocRef = await addDoc(collection(db, "registrations"), {
+              await addDoc(collection(db, "registrations"), {
                 ...payload,
                 paymentProof: secureCloudinaryUrl || payload.paymentProof,
                 paymentProofPreview: secureCloudinaryUrl || payload.paymentProofPreview,
