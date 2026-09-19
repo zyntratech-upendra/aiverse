@@ -23,6 +23,7 @@ import { fetchEvents, fetchEventById, fetchOrganizers } from "../../services/api
 import { userService } from "../../services/userService";
 import { dataCache } from "../../utils/dataCache";
 import { formatEventDateRange } from "../../utils/dateFormatter";
+import { StructuredEventOverview } from "../../components/events/StructuredEventOverview";
 
 // Import local assets
 import sparkImg from "../../assets/images/spark.png";
@@ -810,12 +811,10 @@ const EventDetailsPage: React.FC = () => {
                 <Bookmark className="h-4.5 w-4.5 text-blue-600" />
                 About the Event
               </h2>
-              <p className="text-slate-550 text-sm leading-relaxed whitespace-pre-wrap font-semibold">
-                {event.description}
-              </p>
-              <p className="text-slate-550 text-sm leading-relaxed font-semibold pt-2">
-                This event is tailored for students, scholars, and builders wanting to deep-dive into cutting-edge applications. During the hands-on lab modules, mentors will assist step-by-step to design and deploy functional pipelines, reinforcing foundational frameworks.
-              </p>
+              <StructuredEventOverview
+                description={event.description}
+                showMetadataPills={false}
+              />
             </div>
 
             {/* Event Agenda */}

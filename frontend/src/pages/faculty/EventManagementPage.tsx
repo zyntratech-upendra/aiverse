@@ -94,6 +94,7 @@ import {
   getGeminiApiKey,
   saveGeminiApiKey
 } from "../../utils/geminiProblemStatementExtractor";
+import { StructuredEventOverview } from "../../components/events/StructuredEventOverview";
 
 // Import local assets
 import sparkImg from "../../assets/images/spark.png";
@@ -7082,47 +7083,92 @@ const EventManagementPage: React.FC = () => {
                   {/* LEFT MAIN CONTENT (2 COLUMNS) */}
                   <div className="lg:col-span-2 space-y-6">
 
-                    {/* 1. Basic Overview & Description */}
+                    {/* 1. Media & Posters (FIRST!) */}
+                    <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-4">
+                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                        <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center shadow-inner">
+                            <Upload className="h-4 w-4" />
+                          </div>
+                          1. Event Posters & Media
+                        </h3>
+                        <span className="text-[10px] font-extrabold text-blue-600 bg-blue-50 px-2.5 py-1 rounded-full uppercase tracking-wider">
+                          Full View Showcase
+                        </span>
+                      </div>
+
+                      {Array.isArray(selectedEventDetails?.posterImages) && selectedEventDetails.posterImages.length > 0 ? (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                          {selectedEventDetails.posterImages.map((img: any, idx: number) => {
+                            const imgSrc = img.preview || img;
+                            return (
+                              <div
+                                key={idx}
+                                onClick={() => setActiveImageLightbox(imgSrc)}
+                                className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-900/5 p-2 shadow-sm group relative flex items-center justify-center cursor-pointer hover:border-blue-300 transition-all"
+                              >
+                                <img
+                                  src={imgSrc}
+                                  alt={`Poster ${idx + 1}`}
+                                  className="w-full max-h-[520px] object-contain rounded-xl transition-transform duration-300 group-hover:scale-[1.01]"
+                                />
+                                <div className="absolute inset-0 bg-slate-950/25 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-2xl backdrop-blur-[2px]">
+                                  <span className="bg-white/95 text-slate-900 px-3.5 py-1.5 rounded-full text-xs font-black shadow-lg flex items-center gap-1.5">
+                                    <Eye className="h-3.5 w-3.5 text-[#2563EB]" /> Click for Full Lightbox
+                                  </span>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ) : (selectedEventDetails?.posterPreview || selectedEventDetails?.image) ? (
+                        <div
+                          onClick={() => setActiveImageLightbox(selectedEventDetails?.posterPreview || selectedEventDetails?.image || sparkImg)}
+                          className="w-full rounded-2xl overflow-hidden border border-slate-200 bg-slate-900/5 p-3 shadow-sm flex flex-col items-center justify-center cursor-pointer group relative hover:border-blue-300 transition-all"
+                        >
+                          <img
+                            src={selectedEventDetails?.posterPreview || selectedEventDetails?.image || sparkImg}
+                            alt="Full Event Poster"
+                            className="w-full max-h-[580px] object-contain rounded-xl transition-transform duration-300 group-hover:scale-[1.01]"
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = sparkImg;
+                            }}
+                          />
+                          <div className="absolute inset-0 bg-slate-950/25 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-2xl backdrop-blur-[2px]">
+                            <span className="bg-white/95 text-slate-900 px-4 py-2 rounded-full text-xs font-black shadow-xl flex items-center gap-2 border border-white/40">
+                              <Eye className="h-4 w-4 text-[#2563EB]" /> Click to Expand Full Poster
+                            </span>
+                          </div>
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400 italic p-4 bg-slate-50 rounded-2xl border border-slate-100 text-center">
+                          No media uploaded for this event.
+                        </p>
+                      )}
+                    </div>
+
+                    {/* 2. Structured Overview & Description */}
                     <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-4 relative overflow-hidden">
                       <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                         <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
                           <div className="w-7 h-7 rounded-xl bg-blue-50 text-[#2563EB] flex items-center justify-center shadow-inner">
                             <Info className="h-4 w-4" />
                           </div>
-                          1. Event Overview
+                          2. Event Overview & Structure
                         </h3>
                         <span className="text-[10px] font-bold text-slate-400 bg-slate-50 px-2.5 py-1 rounded-full uppercase">
                           ID: {selectedEventDetails?.id ? String(selectedEventDetails.id).substring(0, 8) : "N/A"}
                         </span>
                       </div>
 
-                      {selectedEventDetails?.description && (
-                        <div className="bg-slate-50/80 p-4 rounded-2xl border border-slate-150/60">
-                          <p className="text-xs text-slate-700 leading-relaxed font-medium">
-                            {selectedEventDetails.description}
-                          </p>
-                        </div>
-                      )}
-
-                      {(selectedEventDetails?.company || selectedEventDetails?.batch) && (
-                        <div className="grid grid-cols-2 gap-4 pt-1">
-                          {selectedEventDetails?.company && (
-                            <div className="bg-blue-50/40 p-3 rounded-2xl border border-blue-100/50">
-                              <span className="text-[10px] font-extrabold text-blue-600 uppercase block tracking-wider">Company</span>
-                              <span className="text-xs font-bold text-slate-800">{selectedEventDetails.company}</span>
-                            </div>
-                          )}
-                          {selectedEventDetails?.batch && (
-                            <div className="bg-purple-50/40 p-3 rounded-2xl border border-purple-100/50">
-                              <span className="text-[10px] font-extrabold text-purple-600 uppercase block tracking-wider">Batch</span>
-                              <span className="text-xs font-bold text-slate-800">{selectedEventDetails.batch}</span>
-                            </div>
-                          )}
-                        </div>
-                      )}
+                      <StructuredEventOverview
+                        description={selectedEventDetails?.description}
+                        company={selectedEventDetails?.company}
+                        batch={selectedEventDetails?.batch}
+                      />
                     </div>
 
-                    {/* 2 & 3. Date, Time & Location (Grid) */}
+                    {/* 3. Date, Time & Location (Grid) */}
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {/* Date & Time Mini Card */}
                       <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-sm space-y-3">
@@ -7130,7 +7176,7 @@ const EventManagementPage: React.FC = () => {
                           <div className="w-7 h-7 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
                             <Calendar className="h-4 w-4" />
                           </div>
-                          2. Date & Time
+                          3a. Date & Time
                         </h4>
                         <div className="space-y-2 text-xs">
                           <div className="flex justify-between items-center py-1 border-b border-slate-50">
@@ -7156,7 +7202,7 @@ const EventManagementPage: React.FC = () => {
                           <div className="w-7 h-7 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
                             <MapPin className="h-4 w-4" />
                           </div>
-                          3. Venue & Location
+                          3b. Venue & Location
                         </h4>
                         <div className="space-y-2 text-xs">
                           <div className="py-1">
@@ -7313,75 +7359,13 @@ const EventManagementPage: React.FC = () => {
                       )}
                     </div>
 
-                    {/* 8. Media & Posters */}
-                    <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-4">
-                      <div className="flex items-center justify-between border-b border-slate-100 pb-3">
-                        <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2">
-                          <div className="w-7 h-7 rounded-xl bg-blue-50 text-blue-600 flex items-center justify-center">
-                            <Upload className="h-4 w-4" />
-                          </div>
-                          8. Event Posters & Media
-                        </h3>
-                        <span className="text-[10px] font-extrabold text-blue-600 uppercase tracking-wider">
-                          Full View Enabled
-                        </span>
-                      </div>
-
-                      {Array.isArray(selectedEventDetails?.posterImages) && selectedEventDetails.posterImages.length > 0 ? (
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                          {selectedEventDetails.posterImages.map((img: any, idx: number) => {
-                            const imgSrc = img.preview || img;
-                            return (
-                              <div
-                                key={idx}
-                                onClick={() => setActiveImageLightbox(imgSrc)}
-                                className="rounded-2xl overflow-hidden border border-slate-200 bg-slate-900/5 p-2 shadow-sm group relative flex items-center justify-center cursor-pointer hover:border-blue-300 transition-all"
-                              >
-                                <img
-                                  src={imgSrc}
-                                  alt={`Poster ${idx + 1}`}
-                                  className="w-full max-h-[500px] object-contain rounded-xl transition-transform duration-300 group-hover:scale-[1.01]"
-                                />
-                                <div className="absolute inset-0 bg-slate-950/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-2xl backdrop-blur-[2px]">
-                                  <span className="bg-white/95 text-slate-900 px-3.5 py-1.5 rounded-full text-xs font-black shadow-lg flex items-center gap-1.5">
-                                    <Eye className="h-3.5 w-3.5 text-[#2563EB]" /> Click for Full Lightbox
-                                  </span>
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      ) : (selectedEventDetails?.posterPreview || selectedEventDetails?.image) ? (
-                        <div
-                          onClick={() => setActiveImageLightbox(selectedEventDetails?.posterPreview || selectedEventDetails?.image || sparkImg)}
-                          className="w-full rounded-2xl overflow-hidden border border-slate-200 bg-slate-900/5 p-3 shadow-sm flex flex-col items-center justify-center cursor-pointer group relative hover:border-blue-300 transition-all"
-                        >
-                          <img
-                            src={selectedEventDetails?.posterPreview || selectedEventDetails?.image || sparkImg}
-                            alt="Full Event Poster"
-                            className="w-full max-h-[550px] object-contain rounded-xl transition-transform duration-300 group-hover:scale-[1.01]"
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).src = sparkImg;
-                            }}
-                          />
-                          <div className="absolute inset-0 bg-slate-950/20 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center rounded-2xl backdrop-blur-[2px]">
-                            <span className="bg-white/95 text-slate-900 px-4 py-2 rounded-full text-xs font-black shadow-xl flex items-center gap-2 border border-white/40">
-                              <Eye className="h-4 w-4 text-[#2563EB]" /> Click to Expand Full Poster
-                            </span>
-                          </div>
-                        </div>
-                      ) : (
-                        <p className="text-xs text-slate-400 italic p-3 bg-slate-50 rounded-xl border border-slate-100">No media uploaded.</p>
-                      )}
-                    </div>
-
-                    {/* 9. Speaker Information */}
+                    {/* 6. Speaker Information */}
                     <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-4">
                       <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2 border-b border-slate-100 pb-3">
                         <div className="w-7 h-7 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center">
                           <Sparkles className="h-4 w-4" />
                         </div>
-                        9. Speaker & Guest Information
+                        6. Speaker & Guest Information
                       </h3>
                       {selectedEventDetails?.speakerName ? (
                         <div className="flex items-start gap-4 p-4 rounded-2xl bg-gradient-to-r from-slate-50 to-blue-50/30 border border-slate-200/70">
@@ -7412,13 +7396,13 @@ const EventManagementPage: React.FC = () => {
                       )}
                     </div>
 
-                    {/* 10. Event Agenda */}
+                    {/* 7. Event Agenda */}
                     <div className="bg-white p-6 rounded-3xl border border-slate-200/80 shadow-sm space-y-4">
                       <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider flex items-center gap-2 border-b border-slate-100 pb-3">
                         <div className="w-7 h-7 rounded-xl bg-amber-50 text-amber-600 flex items-center justify-center">
                           <Clock className="h-4 w-4" />
                         </div>
-                        10. Event Agenda & Timeline
+                        7. Event Agenda & Timeline
                       </h3>
                       {selectedEventDetails?.hasAgenda !== false && Array.isArray(selectedEventDetails?.agendaItems) && selectedEventDetails.agendaItems.length > 0 ? (
                         <div className="space-y-3 relative before:absolute before:inset-0 before:left-4 before:w-0.5 before:bg-slate-150 pl-2">
