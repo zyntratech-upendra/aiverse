@@ -7,7 +7,7 @@ import {
   ChevronRight, 
   Users
 } from "lucide-react";
-import { fetchEvents, fetchJuryEvaluations } from "../../services/apiClient";
+import { fetchEvents, fetchJuryEvaluations, fetchRegistrations } from "../../services/apiClient";
 
 interface LeaderboardItem {
   id: string;
@@ -19,6 +19,7 @@ interface LeaderboardItem {
   evaluator: string;
   badge?: string;
   status: string;
+  eventId?: string;
 }
 
 export interface EventResultCard {
@@ -64,44 +65,76 @@ const JuryResultsView: React.FC = () => {
     };
     loadEvents();
 
-    // 2. Fetch real jury evaluations from backend API
+    // 2. Fetch real jury evaluations and registrations from backend API
     const loadEvals = async () => {
       try {
-        const evalsData = await fetchJuryEvaluations().catch(() => []);
-        const list = Array.isArray(evalsData) ? evalsData : [];
-        const parsedProjects = list.map((data: any) => ({
-          id: data.id || data._id || "",
-          teamName: data.teamName || data.team_name || "Unnamed Team",
-          projectTitle: data.projectTitle || data.project_title || "Untitled Project",
-          track: data.track || data.eventTitle || "General Hackathon Track",
-          status: data.status || "Pending",
-          totalScore: Number(data.totalScore || data.score || data.total_score) || 0,
-          evaluator: data.status === "Evaluated" ? "Jury Evaluated" : "Juror Panel"
-        }));
+        const [evalsData, regsData] = await Promise.all([
+          fetchJuryEvaluations().catch(() => []),
+          fetchRegistrations().catch(() => [])
+        ]);
+        const evalsList = Array.isArray(evalsData) ? evalsData : [];
+        const regsList = Array.isArray(regsData) ? regsData : [];
 
-        // Sort teams by totalScore descending
-        const sorted = [...parsedProjects].sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0));
+        const consolidatedMap = new Map<string, any>();
 
-        const mapped: LeaderboardItem[] = sorted.map((p, idx) => {
-          let badge = undefined;
-          if (idx === 0) badge = "1ST PLACE";
-          else if (idx === 1) badge = "2ND PLACE";
-          else if (idx === 2) badge = "3RD PLACE";
+        // 1. Process registrations
+        regsList.forEach((reg: any) => {
+          const id = reg.id || reg._id;
+          if (!id) return;
+          const comm = Number(reg.communication) || 0;
+          const innov = Number(reg.innovationUniqueness) || 0;
+          const feas = Number(reg.feasibilityViability) || 0;
+          const stats = Number(reg.statistics) || 0;
+          const rev = Number(reg.revenue) || 0;
+          const critSum = comm + innov + feas + stats + rev;
+          const totalScore = critSum > 0 ? critSum : (Number(reg.totalScore || reg.juryScore || reg.score) || 0);
+          const isSaved = Boolean(reg.isSaved || reg.juryEvaluated || reg.evaluationStatus === "Evaluated" || totalScore > 0);
 
-          return {
-            id: p.id,
-            rank: idx + 1,
-            teamName: p.teamName,
-            projectTitle: p.projectTitle,
-            track: p.track,
-            totalScore: p.totalScore,
-            evaluator: p.evaluator,
-            badge,
-            status: p.status
-          };
+          consolidatedMap.set(id, {
+            id,
+            eventId: reg.eventId || "",
+            teamName: reg.groupName || reg.teamName || reg.teamLeadName || `Team ${id.substring(0, 5)}`,
+            projectTitle: reg.projectTitle || `${reg.groupName || reg.teamName || "Project"} Submission`,
+            track: reg.eventTitle || reg.eventName || reg.track || "General Track",
+            status: isSaved || totalScore > 0 ? "Evaluated" : "Pending",
+            totalScore,
+            evaluator: isSaved || totalScore > 0 ? "Jury Evaluated" : "Pending Evaluation"
+          });
         });
 
-        setAllEvaluations(mapped);
+        // 2. Overlay with jury evaluations (highest fidelity)
+        evalsList.forEach((ev: any) => {
+          const id = ev.registrationId || ev.id || ev._id;
+          if (!id) return;
+
+          const comm = Number(ev.communication) || 0;
+          const innov = Number(ev.innovationUniqueness) || 0;
+          const feas = Number(ev.feasibilityViability) || 0;
+          const stats = Number(ev.statistics) || 0;
+          const rev = Number(ev.revenue) || 0;
+          const critSum = comm + innov + feas + stats + rev;
+          const totalScore = critSum > 0 ? critSum : (Number(ev.totalScore || ev.score) || 0);
+
+          const existing = consolidatedMap.get(id) || consolidatedMap.get((ev.teamName || "").trim().toLowerCase());
+          const teamName = ev.teamName || existing?.teamName || `Team ${id.substring(0, 5)}`;
+          const track = ev.track || ev.eventTitle || existing?.track || "General Track";
+          const projectTitle = ev.projectTitle || existing?.projectTitle || "Hackathon Submission";
+          const isSaved = Boolean(ev.isSaved || ev.status === "Evaluated" || totalScore > 0);
+
+          consolidatedMap.set(id, {
+            id,
+            eventId: ev.eventId || existing?.eventId || "",
+            teamName,
+            projectTitle,
+            track,
+            status: isSaved || totalScore > 0 ? "Evaluated" : (ev.status || "Pending"),
+            totalScore,
+            evaluator: ev.juryName ? `Juror: ${ev.juryName}` : (totalScore > 0 ? "Jury Evaluated" : "Pending Evaluation")
+          });
+        });
+
+        const list = Array.from(consolidatedMap.values());
+        setAllEvaluations(list);
       } catch (err) {
         console.error("Error loading jury evaluations:", err);
       }
@@ -119,13 +152,38 @@ const JuryResultsView: React.FC = () => {
   // Filter evaluations for the selected hackathon event
   const currentResults = selectedEvent
     ? allEvaluations
-        .filter(item => item.track.toLowerCase() === selectedEvent.title.toLowerCase())
-        .map((item, idx) => ({ ...item, rank: idx + 1 }))
+        .filter(item => {
+          const selTitle = (selectedEvent.title || "").trim().toLowerCase();
+          const itemTrack = (item.track || "").trim().toLowerCase();
+          const itemEventId = item.eventId || "";
+          const selEventId = selectedEvent.id || "";
+
+          const matchesId = Boolean(itemEventId && selEventId && itemEventId === selEventId);
+          const matchesTitle = itemTrack === selTitle || 
+                               (itemTrack.length > 2 && selTitle.includes(itemTrack)) || 
+                               (selTitle.length > 2 && itemTrack.includes(selTitle));
+
+          return matchesId || matchesTitle;
+        })
+        .sort((a, b) => (b.totalScore || 0) - (a.totalScore || 0))
+        .map((item, idx) => {
+          let badge = undefined;
+          if (idx === 0 && item.totalScore > 0) badge = "1ST PLACE";
+          else if (idx === 1 && item.totalScore > 0) badge = "2ND PLACE";
+          else if (idx === 2 && item.totalScore > 0) badge = "3RD PLACE";
+
+          return {
+            ...item,
+            rank: idx + 1,
+            badge
+          };
+        })
     : [];
 
-  const firstPlace = currentResults[0];
-  const secondPlace = currentResults[1];
-  const thirdPlace = currentResults[2];
+  const evaluatedResults = currentResults.filter(r => r.totalScore > 0 || r.status === "Evaluated");
+  const firstPlace = evaluatedResults[0] || (currentResults[0]?.totalScore > 0 ? currentResults[0] : null);
+  const secondPlace = evaluatedResults[1] || (currentResults[1]?.totalScore > 0 ? currentResults[1] : null);
+  const thirdPlace = evaluatedResults[2] || (currentResults[2]?.totalScore > 0 ? currentResults[2] : null);
 
   const exportLeaderboardCSV = () => {
     const headers = ["Rank", "Team Name", "Project Title", "Track", "Evaluator", "Score", "Status"];

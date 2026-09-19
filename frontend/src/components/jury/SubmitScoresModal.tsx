@@ -1,19 +1,62 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { X, CheckCircle2, ShieldCheck, AlertCircle, Send } from "lucide-react";
+import { fetchSettings, fetchJuryEvaluations, fetchRegistrations } from "../../services/apiClient";
 
 interface SubmitScoresModalProps {
   isOpen: boolean;
   onClose: () => void;
+  activeTrack?: string;
+  completedCount?: number;
+  totalCount?: number;
 }
 
 const SubmitScoresModal: React.FC<SubmitScoresModalProps> = ({
   isOpen,
-  onClose
+  onClose,
+  activeTrack: propTrack,
+  completedCount: propCompleted,
+  totalCount: propTotal
 }) => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isSuccess, setIsSuccess] = useState(false);
+  const [activeTitle, setActiveTitle] = useState(
+    propTrack || localStorage.getItem("activeJuryEventTitle") || "Active Hackathon Track"
+  );
+  const [completed, setCompleted] = useState(propCompleted ?? 0);
+  const [total, setTotal] = useState(propTotal ?? 0);
+
+  useEffect(() => {
+    if (!isOpen) return;
+
+    const loadStats = async () => {
+      try {
+        const title = localStorage.getItem("activeJuryEventTitle") || "Active Hackathon Track";
+        setActiveTitle(title);
+
+        const [evalsRes, regsRes] = await Promise.all([
+          fetchJuryEvaluations().catch(() => []),
+          fetchRegistrations().catch(() => [])
+        ]);
+
+        const evals = Array.isArray(evalsRes) ? evalsRes : [];
+        const regs = Array.isArray(regsRes) ? regsRes : [];
+
+        const totalItems = Math.max(regs.length, evals.length, 1);
+        const evaluatedItems = evals.filter((e: any) => e.status === "Evaluated" || e.isSaved || Number(e.totalScore || e.score) > 0).length;
+
+        setCompleted(propCompleted ?? evaluatedItems);
+        setTotal(propTotal ?? totalItems);
+      } catch (e) {
+        // ignore
+      }
+    };
+
+    loadStats();
+  }, [isOpen, propCompleted, propTotal]);
 
   if (!isOpen) return null;
+
+  const pending = Math.max(0, total - completed);
 
   const handleSubmitFinal = () => {
     setIsSubmitting(true);
@@ -55,7 +98,7 @@ const SubmitScoresModal: React.FC<SubmitScoresModalProps> = ({
               </div>
               <h4 className="text-lg font-bold text-slate-900">Scores Locked & Submitted!</h4>
               <p className="text-xs text-slate-500 font-medium">
-                Your final evaluation sheet for Neural Hackathon 2024 has been submitted to the head organizing panel.
+                Your final evaluation sheet for {activeTitle} has been submitted to the head organizing panel.
               </p>
             </div>
           ) : (
@@ -66,22 +109,22 @@ const SubmitScoresModal: React.FC<SubmitScoresModalProps> = ({
                   Irreversible Final Sign-Off
                 </div>
                 <p className="text-[11px] text-amber-700 font-medium leading-relaxed">
-                  Submitting will officially lock your 20 completed evaluations. You will not be able to modify score criteria after final lock.
+                  Submitting will officially lock your {completed} completed evaluations. You will not be able to modify score criteria after final lock.
                 </p>
               </div>
 
               <div className="space-y-2 text-xs font-medium text-slate-600">
                 <div className="flex justify-between py-1.5 border-b border-slate-100">
                   <span>Track:</span>
-                  <span className="font-bold text-slate-800">Neural Hackathon 2024</span>
+                  <span className="font-bold text-slate-800">{activeTitle}</span>
                 </div>
                 <div className="flex justify-between py-1.5 border-b border-slate-100">
                   <span>Completed Projects:</span>
-                  <span className="font-bold text-emerald-600">20 / 24</span>
+                  <span className="font-bold text-emerald-600">{completed} / {total}</span>
                 </div>
                 <div className="flex justify-between py-1.5">
                   <span>Pending Projects:</span>
-                  <span className="font-bold text-amber-600">04</span>
+                  <span className="font-bold text-amber-600">{String(pending).padStart(2, "0")}</span>
                 </div>
               </div>
 

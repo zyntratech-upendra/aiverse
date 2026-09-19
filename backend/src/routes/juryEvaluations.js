@@ -60,9 +60,66 @@ router.post(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const rawPayload = req.body || {};
-    const allowedFields = ['eventId', 'registrationId', 'teamName', 'juryId', 'juryName', 'round', 'scores', 'totalScore', 'feedback', 'notes'];
+    const allowedFields = [
+      'eventId',
+      'eventTitle',
+      'registrationId',
+      'teamName',
+      'projectTitle',
+      'track',
+      'juryId',
+      'juryName',
+      'juryEmail',
+      'round',
+      'score',
+      'totalScore',
+      'maxScore',
+      'communication',
+      'innovationUniqueness',
+      'feasibilityViability',
+      'statistics',
+      'revenue',
+      'scores',
+      'criteriaScores',
+      'status',
+      'isSaved',
+      'feedback',
+      'notes',
+      'membersCount',
+      'abstract',
+      'githubUrl',
+      'demoUrl',
+      'evaluatedAt',
+    ];
     const payload = pick(rawPayload, allowedFields);
+    if (payload.totalScore !== undefined && payload.score === undefined) {
+      payload.score = payload.totalScore;
+    } else if (payload.score !== undefined && payload.totalScore === undefined) {
+      payload.totalScore = payload.score;
+    }
     const created = await JuryEvaluation.create(payload);
+
+    try {
+      const regId = payload.registrationId || created._id.toString();
+      const Registration = require('../models/Registration');
+      await Registration.findByIdAndUpdate(regId, {
+        $set: {
+          totalScore: payload.totalScore || payload.score || 0,
+          score: payload.totalScore || payload.score || 0,
+          juryScore: payload.totalScore || payload.score || 0,
+          juryEvaluated: true,
+          evaluationStatus: payload.status || 'Evaluated',
+          communication: payload.communication || 0,
+          innovationUniqueness: payload.innovationUniqueness || 0,
+          feasibilityViability: payload.feasibilityViability || 0,
+          statistics: payload.statistics || 0,
+          revenue: payload.revenue || 0,
+          isSaved: payload.isSaved !== undefined ? payload.isSaved : true,
+          updatedAt: Date.now(),
+        },
+      });
+    } catch (err) {}
+
     res.status(201).json({
       success: true,
       ...created.toObject(),
@@ -78,8 +135,43 @@ router.put(
   asyncHandler(async (req, res) => {
     const { id } = req.params;
     const rawPayload = req.body || {};
-    const allowedFields = ['eventId', 'registrationId', 'teamName', 'juryId', 'juryName', 'round', 'scores', 'totalScore', 'feedback', 'notes'];
+    const allowedFields = [
+      'eventId',
+      'eventTitle',
+      'registrationId',
+      'teamName',
+      'projectTitle',
+      'track',
+      'juryId',
+      'juryName',
+      'juryEmail',
+      'round',
+      'score',
+      'totalScore',
+      'maxScore',
+      'communication',
+      'innovationUniqueness',
+      'feasibilityViability',
+      'statistics',
+      'revenue',
+      'scores',
+      'criteriaScores',
+      'status',
+      'isSaved',
+      'feedback',
+      'notes',
+      'membersCount',
+      'abstract',
+      'githubUrl',
+      'demoUrl',
+      'evaluatedAt',
+    ];
     const payload = pick(rawPayload, allowedFields);
+    if (payload.totalScore !== undefined && payload.score === undefined) {
+      payload.score = payload.totalScore;
+    } else if (payload.score !== undefined && payload.totalScore === undefined) {
+      payload.totalScore = payload.score;
+    }
 
     let filter = { _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null };
     if (!filter._id) {
@@ -91,6 +183,27 @@ router.put(
       { $set: payload },
       { upsert: true, new: true, setDefaultsOnInsert: true }
     );
+
+    try {
+      const regId = payload.registrationId || id;
+      const Registration = require('../models/Registration');
+      await Registration.findByIdAndUpdate(regId, {
+        $set: {
+          totalScore: payload.totalScore || payload.score || 0,
+          score: payload.totalScore || payload.score || 0,
+          juryScore: payload.totalScore || payload.score || 0,
+          juryEvaluated: true,
+          evaluationStatus: payload.status || 'Evaluated',
+          communication: payload.communication || 0,
+          innovationUniqueness: payload.innovationUniqueness || 0,
+          feasibilityViability: payload.feasibilityViability || 0,
+          statistics: payload.statistics || 0,
+          revenue: payload.revenue || 0,
+          isSaved: payload.isSaved !== undefined ? payload.isSaved : true,
+          updatedAt: Date.now(),
+        },
+      });
+    } catch (err) {}
 
     res.json({
       success: true,

@@ -14,10 +14,11 @@ import {
   Maximize2,
   Minimize2
 } from "lucide-react";
-import { fetchSettings, fetchRegistrations, fetchJuryEvaluations, updateJuryEvaluation } from "../../services/apiClient";
+import { fetchSettings, fetchRegistrations, fetchJuryEvaluations, updateJuryEvaluation, updateRegistration } from "../../services/apiClient";
 
 export interface HackathonProject {
   id: string;
+  eventId?: string;
   teamName: string;
   projectTitle: string;
   track: string;
@@ -35,80 +36,10 @@ export interface HackathonProject {
   isSaved?: boolean;
 }
 
-const mockProjects: HackathonProject[] = [
-  {
-    id: "proj-1",
-    teamName: "Aether Dynamics",
-    projectTitle: "NeuralRAG: Enterprise Vector Search Optimizer",
-    track: "Neural Hackathon 2024",
-    status: "Pending",
-    communication: 0,
-    innovationUniqueness: 0,
-    feasibilityViability: 0,
-    statistics: 0,
-    revenue: 0,
-    membersCount: 4,
-    githubUrl: "https://github.com/ai-verse/neural-rag",
-    demoUrl: "https://neural-rag-demo.aiverse.in",
-    abstract: "A high-performance hybrid indexing pipeline reducing LLM retrieval latency by 45% using customized embedding quantization.",
-    isSaved: false
-  },
-  {
-    id: "proj-2",
-    teamName: "DeepShield Labs",
-    projectTitle: "DeepGuard: Real-Time Deepfake Detection Web Extension",
-    track: "AI Vision Challenge",
-    status: "Pending",
-    communication: 0,
-    innovationUniqueness: 0,
-    feasibilityViability: 0,
-    statistics: 0,
-    revenue: 0,
-    membersCount: 3,
-    githubUrl: "https://github.com/ai-verse/deepguard",
-    demoUrl: "https://deepguard.aiverse.in",
-    abstract: "Convolutional neural network for frame-by-frame artifact recognition in video streams.",
-    isSaved: false
-  },
-  {
-    id: "proj-3",
-    teamName: "Cognitive AI Team",
-    projectTitle: "Synthetic Code Auditor & Security Guard",
-    track: "Neural Hackathon 2024",
-    status: "Evaluated",
-    communication: 19,
-    innovationUniqueness: 20,
-    feasibilityViability: 18,
-    statistics: 19,
-    revenue: 18,
-    totalScore: 94,
-    membersCount: 5,
-    githubUrl: "https://github.com/ai-verse/code-auditor",
-    demoUrl: "https://code-auditor.aiverse.in",
-    abstract: "Automated static code security auditor with automated patch suggestions.",
-    isSaved: true
-  },
-  {
-    id: "proj-4",
-    teamName: "Quantum Byte",
-    projectTitle: "BioSynthetix: Protein Structure Prediction Engine",
-    track: "AI Vision Challenge",
-    status: "Pending",
-    communication: 0,
-    innovationUniqueness: 0,
-    feasibilityViability: 0,
-    statistics: 0,
-    revenue: 0,
-    membersCount: 4,
-    githubUrl: "https://github.com/ai-verse/biosynthetix",
-    demoUrl: "https://biosynthetix.aiverse.in",
-    abstract: "3D molecular geometry rendering driven by transformer embeddings.",
-    isSaved: false
-  }
-];
+const mockProjects: HackathonProject[] = [];
 
 const JuryAssignmentsView: React.FC = () => {
-  const [projects, setProjects] = useState<HackathonProject[]>(mockProjects);
+  const [projects, setProjects] = useState<HackathonProject[]>([]);
   const userModifiedIdsRef = useRef<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState<"All" | "Pending" | "Evaluated">("All");
@@ -213,8 +144,8 @@ const JuryAssignmentsView: React.FC = () => {
         const evaluationsMap = new Map<string, any>();
         evaluationsList.forEach((ev: any) => {
           const key = ev.registrationId || ev.id || ev._id;
-          evaluationsMap.set(key, ev);
-          if (ev.teamName) evaluationsMap.set(ev.teamName, ev);
+          if (key) evaluationsMap.set(key, ev);
+          if (ev.teamName) evaluationsMap.set(ev.teamName.trim().toLowerCase(), ev);
         });
 
         if (registrationsList.length === 0 && evaluationsList.length === 0) {
@@ -238,58 +169,83 @@ const JuryAssignmentsView: React.FC = () => {
               return;
             }
 
-            const evalData = evaluationsMap.get(id) || evaluationsMap.get(reg.groupName) || evaluationsMap.get(reg.teamLeadName) || {};
-            const teamName = reg.groupName || reg.teamLeadName || `Team ${id.substring(0, 5)}`;
-            const track = reg.eventTitle || reg.eventName || "General Event";
-            const projectTitle = reg.projectTitle || `${teamName} Submission`;
+            const evalData = evaluationsMap.get(id) || 
+                             evaluationsMap.get((reg.groupName || "").trim().toLowerCase()) || 
+                             evaluationsMap.get((reg.teamLeadName || "").trim().toLowerCase()) || 
+                             evaluationsMap.get((reg.teamName || "").trim().toLowerCase()) || {};
+            const teamName = reg.groupName || reg.teamName || reg.teamLeadName || `Team ${id.substring(0, 5)}`;
+            const track = reg.eventTitle || reg.eventName || evalData.track || evalData.eventTitle || "General Event";
+            const projectTitle = reg.projectTitle || evalData.projectTitle || `${teamName} Submission`;
             const membersCount = reg.teamSize || (reg.members && Array.isArray(reg.members) ? reg.members.length + 1 : 1);
+
+            const comm = Number(evalData.communication ?? reg.communication ?? evalData.criteriaScores?.communication ?? 0);
+            const innov = Number(evalData.innovationUniqueness ?? reg.innovationUniqueness ?? evalData.criteriaScores?.innovationUniqueness ?? 0);
+            const feas = Number(evalData.feasibilityViability ?? reg.feasibilityViability ?? evalData.criteriaScores?.feasibilityViability ?? 0);
+            const stats = Number(evalData.statistics ?? reg.statistics ?? evalData.criteriaScores?.statistics ?? 0);
+            const rev = Number(evalData.revenue ?? reg.revenue ?? evalData.criteriaScores?.revenue ?? 0);
+            const criteriaSum = comm + innov + feas + stats + rev;
+            const totalScore = criteriaSum > 0 ? criteriaSum : (Number(evalData.totalScore || evalData.score || reg.totalScore || reg.juryScore || reg.score) || 0);
+
+            const isSaved = Boolean(evalData.isSaved || reg.isSaved || evalData.status === "Evaluated" || reg.evaluationStatus === "Evaluated" || totalScore > 0);
 
             merged.push({
               id,
+              eventId: reg.eventId || evalData.eventId || "",
               teamName,
               projectTitle,
               track,
-              status: (evalData.status as "Pending" | "Evaluated") || (evalData.isSaved || evalData.totalScore > 0 ? "Evaluated" : "Pending"),
-              communication: Number(evalData.communication) || 0,
-              innovationUniqueness: Number(evalData.innovationUniqueness) || 0,
-              feasibilityViability: Number(evalData.feasibilityViability) || 0,
-              statistics: Number(evalData.statistics) || 0,
-              revenue: Number(evalData.revenue) || 0,
-              totalScore: Number(evalData.totalScore) || 0,
+              status: (evalData.status as "Pending" | "Evaluated") || (isSaved ? "Evaluated" : "Pending"),
+              communication: comm,
+              innovationUniqueness: innov,
+              feasibilityViability: feas,
+              statistics: stats,
+              revenue: rev,
+              totalScore,
               membersCount,
               githubUrl: evalData.githubUrl || reg.githubUrl || "https://github.com/ai-verse",
               demoUrl: evalData.demoUrl || reg.demoUrl || "https://demo.aiverse.in",
               abstract: evalData.abstract || reg.abstract || `Registered team lead: ${reg.teamLeadName || teamName} (${reg.teamLeadEmail || ""}).`,
-              isSaved: Boolean(evalData.isSaved)
+              isSaved
             });
           });
 
           // 2. Process standalone jury evaluations without matching registration doc
           evaluationsList.forEach((evalData: any) => {
             const id = evalData.id || evalData._id || evalData.registrationId;
-            if (!processedIds.has(id)) {
+            if (id && !processedIds.has(id)) {
               const existing = prevMap.get(id);
               if (existing && userModifiedIdsRef.current.has(id)) {
                 merged.push(existing);
                 return;
               }
+
+              const comm = Number(evalData.communication ?? evalData.criteriaScores?.communication ?? 0);
+              const innov = Number(evalData.innovationUniqueness ?? evalData.criteriaScores?.innovationUniqueness ?? 0);
+              const feas = Number(evalData.feasibilityViability ?? evalData.criteriaScores?.feasibilityViability ?? 0);
+              const stats = Number(evalData.statistics ?? evalData.criteriaScores?.statistics ?? 0);
+              const rev = Number(evalData.revenue ?? evalData.criteriaScores?.revenue ?? 0);
+              const criteriaSum = comm + innov + feas + stats + rev;
+              const totalScore = criteriaSum > 0 ? criteriaSum : (Number(evalData.totalScore || evalData.score) || 0);
+              const isSaved = Boolean(evalData.isSaved || evalData.status === "Evaluated" || totalScore > 0);
+
               merged.push({
                 id,
+                eventId: evalData.eventId || "",
                 teamName: evalData.teamName || `Team ${id.substring(0, 5)}`,
                 projectTitle: evalData.projectTitle || "Hackathon Submission",
-                track: evalData.track || "General Event",
-                status: (evalData.status as "Pending" | "Evaluated") || (evalData.isSaved || evalData.totalScore > 0 ? "Evaluated" : "Pending"),
-                communication: Number(evalData.communication) || 0,
-                innovationUniqueness: Number(evalData.innovationUniqueness) || 0,
-                feasibilityViability: Number(evalData.feasibilityViability) || 0,
-                statistics: Number(evalData.statistics) || 0,
-                revenue: Number(evalData.revenue) || 0,
-                totalScore: Number(evalData.totalScore) || 0,
+                track: evalData.track || evalData.eventTitle || "General Event",
+                status: (evalData.status as "Pending" | "Evaluated") || (isSaved ? "Evaluated" : "Pending"),
+                communication: comm,
+                innovationUniqueness: innov,
+                feasibilityViability: feas,
+                statistics: stats,
+                revenue: rev,
+                totalScore,
                 membersCount: Number(evalData.membersCount) || 1,
                 githubUrl: evalData.githubUrl || "https://github.com/ai-verse",
                 demoUrl: evalData.demoUrl || "https://demo.aiverse.in",
                 abstract: evalData.abstract || "Submission for jury evaluation.",
-                isSaved: Boolean(evalData.isSaved)
+                isSaved
               });
             }
           });
@@ -309,7 +265,7 @@ const JuryAssignmentsView: React.FC = () => {
     };
   }, []);
 
-  const tracks = Array.from(new Set(projects.map(p => p.track)));
+  const tracks = Array.from(new Set(projects.map(p => p.track).filter(Boolean)));
 
   const filteredProjects = projects.filter(p => {
     const matchesSearch = p.projectTitle.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -347,7 +303,7 @@ const JuryAssignmentsView: React.FC = () => {
       if (p.id !== projectId) return p;
       const updated = {
         ...p,
-        [field]: rawVal === "" ? 0 : numVal,
+        [field]: numVal,
         isSaved: false // Marked as unsaved while editing
       };
       const total = Number(updated.communication) + Number(updated.innovationUniqueness) + Number(updated.feasibilityViability) + Number(updated.statistics) + Number(updated.revenue);
@@ -362,13 +318,12 @@ const JuryAssignmentsView: React.FC = () => {
 
   // Save or update scores in database for a team row
   const handleSaveRowScores = async (project: HackathonProject) => {
-    const total = Number(project.totalScore) || (
-      Number(project.communication) + 
-      Number(project.innovationUniqueness) + 
-      Number(project.feasibilityViability) + 
-      Number(project.statistics) + 
-      Number(project.revenue)
-    );
+    const comm = Number(project.communication) || 0;
+    const innov = Number(project.innovationUniqueness) || 0;
+    const feas = Number(project.feasibilityViability) || 0;
+    const stats = Number(project.statistics) || 0;
+    const rev = Number(project.revenue) || 0;
+    const total = comm + innov + feas + stats + rev;
 
     if (total === 0) {
       showToast(`Please enter marks for "${project.teamName}" before saving.`);
@@ -376,14 +331,17 @@ const JuryAssignmentsView: React.FC = () => {
     }
 
     const payload = {
+      eventId: project.eventId || activeEventConfig.id,
+      eventTitle: project.track || activeEventConfig.title,
       teamName: project.teamName,
       projectTitle: project.projectTitle,
-      track: project.track,
-      communication: Number(project.communication) || 0,
-      innovationUniqueness: Number(project.innovationUniqueness) || 0,
-      feasibilityViability: Number(project.feasibilityViability) || 0,
-      statistics: Number(project.statistics) || 0,
-      revenue: Number(project.revenue) || 0,
+      track: project.track || activeEventConfig.title,
+      communication: comm,
+      innovationUniqueness: innov,
+      feasibilityViability: feas,
+      statistics: stats,
+      revenue: rev,
+      score: total,
       totalScore: total,
       status: "Evaluated",
       isSaved: true,
@@ -393,9 +351,24 @@ const JuryAssignmentsView: React.FC = () => {
     };
 
     try {
-      await updateJuryEvaluation(project.id, payload);
+      await Promise.all([
+        updateJuryEvaluation(project.id, payload),
+        updateRegistration(project.id, {
+          totalScore: total,
+          score: total,
+          juryScore: total,
+          juryEvaluated: true,
+          evaluationStatus: "Evaluated",
+          communication: comm,
+          innovationUniqueness: innov,
+          feasibilityViability: feas,
+          statistics: stats,
+          revenue: rev,
+          isSaved: true,
+        }).catch(() => {})
+      ]);
       userModifiedIdsRef.current.delete(project.id);
-      setProjects(prev => prev.map(p => p.id === project.id ? { ...p, ...payload, isSaved: true, status: "Evaluated" } : p));
+      setProjects(prev => prev.map(p => p.id === project.id ? { ...p, ...payload, totalScore: total, isSaved: true, status: "Evaluated" } : p));
       showToast(`Scores for "${project.teamName}" saved successfully (${total}/100)!`);
     } catch (err) {
       console.error("Save Error:", err);
@@ -441,9 +414,11 @@ const JuryAssignmentsView: React.FC = () => {
     document.body.removeChild(link);
   };
 
-  const evaluatedCount = projects.filter(p => p.status === "Evaluated").length;
-  const avgScore = evaluatedCount > 0 
-    ? (projects.filter(p => p.totalScore).reduce((acc, p) => acc + (p.totalScore || 0), 0) / evaluatedCount).toFixed(1)
+  const evaluatedCount = filteredProjects.filter(p => p.status === "Evaluated" || (p.totalScore !== undefined && p.totalScore > 0)).length;
+  const pendingCount = Math.max(0, filteredProjects.length - evaluatedCount);
+  const evaluatedProjects = filteredProjects.filter(p => p.totalScore !== undefined && p.totalScore > 0);
+  const avgScore = evaluatedProjects.length > 0 
+    ? (evaluatedProjects.reduce((acc, p) => acc + (p.totalScore || 0), 0) / evaluatedProjects.length).toFixed(1)
     : "N/A";
 
   return (
@@ -875,7 +850,7 @@ const JuryAssignmentsView: React.FC = () => {
           <div className="flex items-center gap-6 font-mono text-[11px]">
             <span>COUNT: <strong className="text-slate-800">{filteredProjects.length}</strong></span>
             <span>EVALUATED: <strong className="text-emerald-600">{evaluatedCount}</strong></span>
-            <span>PENDING: <strong className="text-amber-600">{projects.length - evaluatedCount}</strong></span>
+            <span>PENDING: <strong className="text-amber-600">{pendingCount}</strong></span>
             <span>AVG SCORE: <strong className="text-blue-600">{avgScore}</strong></span>
           </div>
 
