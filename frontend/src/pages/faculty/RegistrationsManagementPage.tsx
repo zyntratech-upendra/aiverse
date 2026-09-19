@@ -113,9 +113,9 @@ const RegistrationsManagementPage: React.FC = () => {
     }
 
     const headers = [
+      "Team Name",
       "Event Title",
       "Registration Type",
-      "Team / Group Name",
       "Participant Role",
       "Participant Name",
       "Roll Number / Student ID",
@@ -140,9 +140,26 @@ const RegistrationsManagementPage: React.FC = () => {
     const rows: string[] = [];
 
     targetRegs.forEach((reg) => {
-      const isGroup = Boolean(reg.groupName && reg.groupName !== "Individual RSVP" && (reg.teamSize > 1 || (reg.members && reg.members.length > 0)));
-      const groupName = isGroup ? reg.groupName : "Individual RSVP";
-      const regType = isGroup ? "Group" : "Individual";
+      const rawTeamName = (
+        reg.groupName ||
+        (reg as any).teamName ||
+        (reg as any).team_name ||
+        ""
+      ).trim();
+
+      const isGroup = Boolean(
+        (rawTeamName && rawTeamName !== "Individual RSVP" && rawTeamName !== "Individual Registration" && rawTeamName !== "Individual") ||
+        reg.teamSize > 1 ||
+        (Array.isArray(reg.members) && reg.members.length > 0)
+      );
+
+      // 1. Team Lead / Solo Registrant
+      const leadName = reg.teamLeadName || "Student Registrant";
+      const teamName = isGroup
+        ? (rawTeamName && rawTeamName !== "Individual RSVP" ? rawTeamName : `${leadName}'s Team`)
+        : (rawTeamName || "Individual RSVP");
+
+      const regType = isGroup ? "Group / Team" : "Individual";
       const regDate = reg.createdAt ? new Date(reg.createdAt).toLocaleString("en-US") : "N/A";
       const status = reg.status || "Confirmed";
       const paymentStatus = reg.paymentStatus || "Confirmed";
@@ -156,8 +173,6 @@ const RegistrationsManagementPage: React.FC = () => {
       const year = reg.year || "";
       const teamSize = reg.teamSize || (reg.members ? reg.members.length + 1 : 1);
 
-      // 1. Team Lead / Solo Registrant
-      const leadName = reg.teamLeadName || "Student Registrant";
       const leadStudentId = reg.teamLeadStudentId || "";
       const leadEmail = reg.teamLeadEmail || reg.teamLeadPersonalEmail || reg.teamLeadCollegeEmail || "";
       const leadPersonalEmail = reg.teamLeadPersonalEmail || "";
@@ -166,9 +181,9 @@ const RegistrationsManagementPage: React.FC = () => {
       const leadRole = isGroup ? "Team Lead" : "Solo Participant";
 
       rows.push([
+        `"${teamName.replace(/"/g, '""')}"`,
         `"${(reg.eventTitle || "").replace(/"/g, '""')}"`,
         `"${regType}"`,
-        `"${groupName.replace(/"/g, '""')}"`,
         `"${leadRole}"`,
         `"${leadName.replace(/"/g, '""')}"`,
         `"${leadStudentId.replace(/"/g, '""')}"`,
@@ -211,9 +226,9 @@ const RegistrationsManagementPage: React.FC = () => {
           const mCollege = (m as any).college || college;
 
           rows.push([
+            `"${teamName.replace(/"/g, '""')}"`,
             `"${(reg.eventTitle || "").replace(/"/g, '""')}"`,
             `"${regType}"`,
-            `"${groupName.replace(/"/g, '""')}"`,
             `"${mRole}"`,
             `"${mName.replace(/"/g, '""')}"`,
             `"${(m.studentId || "").replace(/"/g, '""')}"`,
@@ -243,9 +258,10 @@ const RegistrationsManagementPage: React.FC = () => {
     const blob = new Blob([csvContent], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    const filenamePrefix = exportSelectedEvent === "All"
-      ? "all_event_registered_members"
-      : `${exportSelectedEvent.toLowerCase().replace(/[^a-z0-9]/g, "_")}_registered_members`;
+    const sanitizedEventName = exportSelectedEvent === "All"
+      ? "all_events"
+      : exportSelectedEvent.toLowerCase().replace(/[^a-z0-9]+/g, "_");
+    const filenamePrefix = `${sanitizedEventName}_team_registrations`;
     const extension = format === "excel" ? "xls" : "csv";
 
     link.setAttribute("href", url);
@@ -383,8 +399,17 @@ const RegistrationsManagementPage: React.FC = () => {
           resolvedStatus = "Confirmed";
         }
 
-        const teamName = data.groupName || data.teamName || "";
         const leadName = data.teamLeadName || data.fullName || data.name || data.userName || (data.members && data.members[0]?.name) || "Student Registrant";
+        const rawTeamName = (data.groupName || data.teamName || data.team_name || "").trim();
+        const isGroup = Boolean(
+          (rawTeamName && rawTeamName !== "Individual RSVP" && rawTeamName !== "Individual Registration" && rawTeamName !== "Individual") ||
+          Number(data.teamSize) > 1 ||
+          (Array.isArray(data.members) && data.members.length > 0)
+        );
+        const resolvedTeamName = isGroup 
+          ? (rawTeamName && rawTeamName !== "Individual RSVP" ? rawTeamName : `${leadName}'s Team`)
+          : (rawTeamName || "Individual RSVP");
+
         const studentId = data.teamLeadStudentId || data.studentId || data.rollNo || data.registrationNumber || (data.members && data.members[0]?.registrationNumber) || "";
 
         const matchedEvent = Array.isArray(evs) ? evs.find((e: any) => 
@@ -408,7 +433,8 @@ const RegistrationsManagementPage: React.FC = () => {
           id: docSnap.id || docSnap._id || (docSnap._doc && docSnap._doc._id) || "",
           eventId: data.eventId || "",
           eventTitle: data.eventTitle || "Event",
-          groupName: teamName || (data.teamSize > 1 ? "Team Registration" : "Individual RSVP"),
+          groupName: resolvedTeamName,
+          teamName: resolvedTeamName,
           teamEmail: data.teamEmail || data.generatedTeamEmail || "",
           teamLeadName: leadName,
           teamLeadEmail: primaryEmail || data.userEmail || data.leadEmail || "",
@@ -1846,7 +1872,7 @@ const RegistrationsManagementPage: React.FC = () => {
                   Exporting records for <span className="font-bold text-slate-800">{exportSelectedEvent}</span> ({exportSelectedEvent === "All" ? registrations.length : registrations.filter(r => (r.eventTitle && r.eventTitle.trim().toLowerCase() === exportSelectedEvent.trim().toLowerCase()) || (r.eventId && eventsList.some(e => (e.id === r.eventId || e._id === r.eventId) && e.title?.trim().toLowerCase() === exportSelectedEvent.trim().toLowerCase()))).length} registration entries).
                 </p>
                 <p className="text-[11px] text-slate-500">
-                  ✓ Includes complete roster breakdown (Team Leads & all registered team members) with contact info, roll numbers, departments, payment verification status, and timestamps.
+                  ✓ Includes complete roster breakdown (Team Names, Team Leads & all registered team members) with contact info, roll numbers, departments, payment verification status, and timestamps.
                 </p>
               </div>
             </div>
