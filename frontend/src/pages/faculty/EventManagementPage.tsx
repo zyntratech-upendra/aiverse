@@ -2244,21 +2244,25 @@ const EventManagementPage: React.FC = () => {
 
   const handleOpenEventRoundsModal = () => {
     const existingRounds = eventAccessEvent?.rounds || [];
-    const currRound = Number(eventAccessEvent?.currentRound) || 1;
+    const activeRoundFromList = Array.isArray(existingRounds) ? existingRounds.find((r: any) => r.status === "Active") : null;
+    const currRound = activeRoundFromList ? (Number(activeRoundFromList.roundNumber) || 1) : (Number(eventAccessEvent?.currentRound) || 1);
     const totRounds = Number(eventAccessEvent?.totalRounds) || (Array.isArray(existingRounds) && existingRounds.length > 0 ? existingRounds.length : 3);
 
     if (Array.isArray(existingRounds) && existingRounds.length > 0) {
-      const mappedRounds = existingRounds.map((r: any, idx: number) => ({
-        roundNumber: Number(r.roundNumber) || idx + 1,
-        name: r.name ? getCleanRoundTitle(r.name, idx + 1) : `Stage ${idx + 1}`,
-        type: r.type || "Screening",
-        description: r.description || "",
-        startDate: r.startDate || "",
-        endDate: r.endDate || "",
-        startTime: r.startTime || "",
-        endTime: r.endTime || "",
-        status: r.status || (idx + 1 === currRound ? "Active" : idx + 1 < currRound ? "Completed" : "Upcoming")
-      }));
+      const mappedRounds = existingRounds.map((r: any, idx: number) => {
+        const rNum = Number(r.roundNumber) || idx + 1;
+        return {
+          roundNumber: rNum,
+          name: r.name ? getCleanRoundTitle(r.name, rNum) : `Stage ${rNum}`,
+          type: r.type || "Screening",
+          description: r.description || "",
+          startDate: r.startDate || "",
+          endDate: r.endDate || "",
+          startTime: r.startTime || "",
+          endTime: r.endTime || "",
+          status: rNum === currRound ? "Active" : (rNum < currRound ? "Completed" : "Upcoming")
+        };
+      });
       setLiveRoundsList(mappedRounds);
       setLiveTotalRounds(totRounds);
       setLiveCurrentRound(currRound);
@@ -2793,17 +2797,24 @@ const EventManagementPage: React.FC = () => {
     if (!eventAccessEvent?.id) return;
     setSavingLiveRounds(true);
     try {
+      const sanitizedRounds = liveRoundsList.map((r) => ({
+        ...r,
+        status: r.roundNumber === liveCurrentRound ? "Active" : (r.roundNumber < liveCurrentRound ? "Completed" : "Upcoming")
+      }));
+
       await updateEvent(eventAccessEvent.id, {
-        rounds: liveRoundsList,
+        rounds: sanitizedRounds,
         currentRound: liveCurrentRound,
         totalRounds: liveTotalRounds,
         allowRoundManagement: true,
         updatedAt: Date.now()
       });
 
+      setLiveRoundsList(sanitizedRounds);
+
       setEventAccessEvent((prev: any) => ({
         ...prev,
-        rounds: liveRoundsList,
+        rounds: sanitizedRounds,
         currentRound: liveCurrentRound,
         totalRounds: liveTotalRounds,
         allowRoundManagement: true
@@ -2811,7 +2822,7 @@ const EventManagementPage: React.FC = () => {
 
       setEvents(prev => prev.map(ev => ev.id === eventAccessEvent.id ? {
         ...ev,
-        rounds: liveRoundsList,
+        rounds: sanitizedRounds,
         currentRound: liveCurrentRound,
         totalRounds: liveTotalRounds,
         allowRoundManagement: true
@@ -10538,14 +10549,14 @@ const EventManagementPage: React.FC = () => {
                               </span>
                               <span
                                 className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
-                                  round.status === "Active"
+                                  isActive || round.status === "Active"
                                     ? "bg-emerald-100 text-emerald-800 border border-emerald-200"
                                     : round.status === "Completed"
                                     ? "bg-slate-100 text-slate-600 border border-slate-200"
                                     : "bg-amber-100 text-amber-800 border border-amber-200"
                                 }`}
                               >
-                                {round.status}
+                                {isActive ? "Active" : round.status}
                               </span>
                             </div>
 
@@ -10553,11 +10564,12 @@ const EventManagementPage: React.FC = () => {
                               <button
                                 type="button"
                                 onClick={() => {
-                                  setLiveCurrentRound(round.roundNumber);
+                                  const targetRound = round.roundNumber;
+                                  setLiveCurrentRound(targetRound);
                                   setLiveRoundsList((prev) =>
                                     prev.map((r) => ({
                                       ...r,
-                                      status: r.roundNumber === round.roundNumber ? "Active" : r.roundNumber < round.roundNumber ? "Completed" : "Upcoming"
+                                      status: r.roundNumber === targetRound ? "Active" : r.roundNumber < targetRound ? "Completed" : "Upcoming"
                                     }))
                                   );
                                 }}
@@ -10638,12 +10650,23 @@ const EventManagementPage: React.FC = () => {
                                 Status
                               </label>
                               <select
-                                value={round.status}
+                                value={isActive ? "Active" : round.status}
                                 onChange={(e) => {
                                   const val = e.target.value as "Active" | "Upcoming" | "Completed";
-                                  setLiveRoundsList((prev) =>
-                                    prev.map((r, rIdx) => (rIdx === idx ? { ...r, status: val } : r))
-                                  );
+                                  if (val === "Active") {
+                                    const targetRound = round.roundNumber;
+                                    setLiveCurrentRound(targetRound);
+                                    setLiveRoundsList((prev) =>
+                                      prev.map((r) => ({
+                                        ...r,
+                                        status: r.roundNumber === targetRound ? "Active" : r.roundNumber < targetRound ? "Completed" : "Upcoming"
+                                      }))
+                                    );
+                                  } else {
+                                    setLiveRoundsList((prev) =>
+                                      prev.map((r, rIdx) => (rIdx === idx ? { ...r, status: val } : r))
+                                    );
+                                  }
                                 }}
                                 className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                               >
