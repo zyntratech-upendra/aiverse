@@ -542,7 +542,7 @@ const UserManagementPage: React.FC = () => {
             role: cleanedRole,
             collegeEmail: email,
             personalEmail: personalEmail,
-            portalUrl: `${window.location.origin}/login`
+            portalUrl: "https://aiversevitb.in/login"
           });
           const mailRes = await sendResendEmail({
             to: targetWelcomeMail,
@@ -953,7 +953,7 @@ const UserManagementPage: React.FC = () => {
           role: formRoleType,
           collegeEmail: formEmail,
           personalEmail: formPersonalEmail,
-          portalUrl: `${window.location.origin}/login`
+          portalUrl: "https://aiversevitb.in/login"
         });
         const mailRes = await sendResendEmail({
           to: targetWelcomeMail,
@@ -1042,7 +1042,7 @@ const UserManagementPage: React.FC = () => {
           role: inviteRole,
           collegeEmail: inviteEmail,
           personalEmail: invitePersonalEmail,
-          portalUrl: `${window.location.origin}/login`
+          portalUrl: "https://aiversevitb.in/login"
         });
         const mailRes = await sendResendEmail({
           to: targetWelcomeMail,

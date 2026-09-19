@@ -1132,8 +1132,7 @@ const EventManagementPage: React.FC = () => {
       failCount: 0,
     });
 
-    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-    const siteBaseUrl = isLocal ? "https://aiversevitb.in" : window.location.origin;
+    const siteBaseUrl = "https://aiversevitb.in";
     let successCount = 0;
     let failCount = 0;
 
@@ -1277,8 +1276,7 @@ const EventManagementPage: React.FC = () => {
     setIsSendingTestEmail(true);
     setTestEmailFeedback(null);
 
-    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-    const siteBaseUrl = isLocal ? "https://aiversevitb.in" : window.location.origin;
+    const siteBaseUrl = "https://aiversevitb.in";
     const testCertId = `AIV-TEST-${Date.now().toString(36).toUpperCase()}`;
     const certUrl = `${siteBaseUrl}/certificate/${testCertId}?name=${encodeURIComponent("Faculty Test Recipient")}&event=${encodeURIComponent(eventAccessEvent?.title || "AI Verse Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=23PA1A0501&team=CodeCrafters&mode=${encodeURIComponent(certTemplateMode)}&nameX=${encodeURIComponent(certNamePosX)}&nameY=${encodeURIComponent(certNamePosY)}&nameSize=${encodeURIComponent(certNameFontSize)}&nameColor=${encodeURIComponent(certNameColor)}&teamX=${encodeURIComponent(certTeamPosX)}&teamY=${encodeURIComponent(certTeamPosY)}&teamSize=${encodeURIComponent(certTeamFontSize)}&teamColor=${encodeURIComponent(certTeamColor)}&showTeam=${certShowTeamName}&rollX=${encodeURIComponent(certRollPosX)}&rollY=${encodeURIComponent(certRollPosY)}&rollSize=${encodeURIComponent(certRollFontSize)}&rollColor=${encodeURIComponent(certRollColor)}&showRoll=${certShowRollNo}&showQr=${certShowQrCode}`;
 
@@ -1321,8 +1319,7 @@ const EventManagementPage: React.FC = () => {
       return;
     }
 
-    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-    const siteBaseUrl = isLocal ? "https://aiversevitb.in" : window.location.origin;
+    const siteBaseUrl = "https://aiversevitb.in";
 
     const exportData = flattenedCertRecipients.map((r, idx) => ({
       "S.No": idx + 1,
@@ -1597,8 +1594,7 @@ const EventManagementPage: React.FC = () => {
       failCount: 0,
     });
 
-    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-    const siteBaseUrl = isLocal ? "https://aiverse-vishnu.vercel.app" : window.location.origin;
+    const siteBaseUrl = "https://aiversevitb.in";
     let successCount = 0;
     let failCount = 0;
 
@@ -1719,8 +1715,7 @@ const EventManagementPage: React.FC = () => {
   };
 
   const handleSendSingleTicketEmail = async (recipient: any) => {
-    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-    const siteBaseUrl = isLocal ? "https://aiverse-vishnu.vercel.app" : window.location.origin;
+    const siteBaseUrl = "https://aiversevitb.in";
     const ticketUrl = `${siteBaseUrl}/ticket/${recipient.regId}`;
 
     try {
@@ -1799,8 +1794,7 @@ const EventManagementPage: React.FC = () => {
     setIsSendingTestTicketEmail(true);
     setTestTicketEmailFeedback(null);
 
-    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-    const siteBaseUrl = isLocal ? "https://aiverse-vishnu.vercel.app" : window.location.origin;
+    const siteBaseUrl = "https://aiversevitb.in";
     const sampleRegId = eventAccessRegistrations[0]?.id || "sample_ticket_pass";
     const ticketUrl = `${siteBaseUrl}/ticket/${sampleRegId}`;
 
@@ -1852,8 +1846,7 @@ const EventManagementPage: React.FC = () => {
       return;
     }
 
-    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-    const siteBaseUrl = isLocal ? "https://aiverse-vishnu.vercel.app" : window.location.origin;
+    const siteBaseUrl = "https://aiversevitb.in";
 
     const exportData = flattenedTicketRecipients.map((r, idx) => ({
       "S.No": idx + 1,
@@ -2642,8 +2635,7 @@ const EventManagementPage: React.FC = () => {
 
       // Dispatch Congratulation & Promotion Emails via Resend to Team Leads
       const targetRoundDef = liveRoundsList.find(r => r.roundNumber === promoteToRound);
-      const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-      const siteBaseUrl = isLocal ? "https://aiversevitb.in" : window.location.origin;
+      const siteBaseUrl = "https://aiversevitb.in";
       const dashboardUrl = `${siteBaseUrl}/participant`;
 
       let emailsSentCount = 0;

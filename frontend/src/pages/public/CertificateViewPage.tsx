@@ -412,10 +412,7 @@ const CertificateViewPage: React.FC = () => {
   };
 
   const handleCopyLink = () => {
-    const isLocal = window.location.hostname === "localhost" || window.location.hostname === "127.0.0.1";
-    const linkToCopy = isLocal
-      ? `https://aiversevitb.in/certificate/${certData?.id || certificateId || ""}${window.location.search}`
-      : window.location.href;
+    const linkToCopy = `https://aiversevitb.in/certificate/${certData?.id || certificateId || ""}${window.location.search}`;
     navigator.clipboard.writeText(linkToCopy);
     setCopied(true);
     setTimeout(() => setCopied(false), 2500);
