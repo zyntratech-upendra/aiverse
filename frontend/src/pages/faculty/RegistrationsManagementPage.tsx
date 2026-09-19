@@ -23,6 +23,7 @@ import {
   MapPin
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
+import { db, collection, getDocs } from "../../config/firebase";
 import { 
   fetchRegistrations as apiFetchRegistrations, 
   fetchEvents as apiFetchEvents,
@@ -94,95 +95,165 @@ const RegistrationsManagementPage: React.FC = () => {
   const [isExportModalOpen, setIsExportModalOpen] = useState(false);
   const [exportSelectedEvent, setExportSelectedEvent] = useState("All");
 
-  const handleExportCsv = () => {
+  const handleExport = (format: "csv" | "excel" = "csv") => {
     const targetRegs = exportSelectedEvent === "All"
       ? registrations
-      : registrations.filter(r => r.eventTitle === exportSelectedEvent);
+      : registrations.filter(r => {
+          const matchesTitle = (r.eventTitle || "").trim().toLowerCase() === exportSelectedEvent.trim().toLowerCase();
+          const matchesId = eventsList.some(e => 
+            (e.id === r.eventId || e._id === r.eventId) && 
+            (e.title || "").trim().toLowerCase() === exportSelectedEvent.trim().toLowerCase()
+          );
+          return matchesTitle || matchesId;
+        });
 
     if (targetRegs.length === 0) {
-      alert("No registrations available for the selected event.");
+      alert(`No registrations available for ${exportSelectedEvent === "All" ? "any event" : exportSelectedEvent}.`);
       return;
     }
 
     const headers = [
       "Event Title",
       "Registration Type",
-      "Student / Lead Name",
+      "Team / Group Name",
+      "Participant Role",
+      "Participant Name",
       "Roll Number / Student ID",
       "Email Address",
+      "Personal Email",
+      "College Email",
       "Phone Number",
-      "Branch",
+      "College Name",
+      "College City/Place",
+      "Branch / Department",
       "Section",
       "Year",
-      "Food Preference",
-      "Total Fee Paid",
       "Team Size",
-      "Status",
-      "Registration Date"
+      "Payment Status",
+      "Total Fee Paid",
+      "UTR / Transaction ID",
+      "Food Preference",
+      "Registration Status",
+      "Registration Date & Time"
     ];
 
     const rows: string[] = [];
 
     targetRegs.forEach((reg) => {
-      const regType = reg.groupName && reg.groupName !== "Individual RSVP" ? "Group" : "Individual";
-      const regDate = new Date(reg.createdAt).toLocaleDateString("en-US");
+      const isGroup = Boolean(reg.groupName && reg.groupName !== "Individual RSVP" && (reg.teamSize > 1 || (reg.members && reg.members.length > 0)));
+      const groupName = isGroup ? reg.groupName : "Individual RSVP";
+      const regType = isGroup ? "Group" : "Individual";
+      const regDate = reg.createdAt ? new Date(reg.createdAt).toLocaleString("en-US") : "N/A";
       const status = reg.status || "Confirmed";
-      const foodPref = reg.foodPreference || (reg.needsFood === false ? "No Food (Free)" : "Standard Entry");
+      const paymentStatus = reg.paymentStatus || "Confirmed";
       const totalFee = reg.totalFeePaid || 0;
+      const utr = reg.utrNumber || reg.transactionId || "N/A";
+      const foodPref = reg.foodPreference || (reg.needsFood === false ? "No Food (Free)" : "Standard Entry");
+      const college = reg.collegeName || reg.college || "";
+      const collegePlace = reg.collegePlace || "";
+      const branch = reg.branch || "";
+      const section = reg.section || "";
+      const year = reg.year || "";
+      const teamSize = reg.teamSize || (reg.members ? reg.members.length + 1 : 1);
 
-      if (reg.members && reg.members.length > 0) {
-        reg.members.forEach((m) => {
-          const row = [
+      // 1. Team Lead / Solo Registrant
+      const leadName = reg.teamLeadName || "Student Registrant";
+      const leadStudentId = reg.teamLeadStudentId || "";
+      const leadEmail = reg.teamLeadEmail || reg.teamLeadPersonalEmail || reg.teamLeadCollegeEmail || "";
+      const leadPersonalEmail = reg.teamLeadPersonalEmail || "";
+      const leadCollegeEmail = reg.teamLeadCollegeEmail || "";
+      const leadPhone = reg.phoneNumber || reg.teamLeadPhone || "";
+      const leadRole = isGroup ? "Team Lead" : "Solo Participant";
+
+      rows.push([
+        `"${(reg.eventTitle || "").replace(/"/g, '""')}"`,
+        `"${regType}"`,
+        `"${groupName.replace(/"/g, '""')}"`,
+        `"${leadRole}"`,
+        `"${leadName.replace(/"/g, '""')}"`,
+        `"${leadStudentId.replace(/"/g, '""')}"`,
+        `"${leadEmail.replace(/"/g, '""')}"`,
+        `"${leadPersonalEmail.replace(/"/g, '""')}"`,
+        `"${leadCollegeEmail.replace(/"/g, '""')}"`,
+        `"${leadPhone.replace(/"/g, '""')}"`,
+        `"${college.replace(/"/g, '""')}"`,
+        `"${collegePlace.replace(/"/g, '""')}"`,
+        `"${branch.replace(/"/g, '""')}"`,
+        `"${section.replace(/"/g, '""')}"`,
+        `"${year.replace(/"/g, '""')}"`,
+        teamSize,
+        `"${paymentStatus}"`,
+        `"₹${totalFee}"`,
+        `"${utr.replace(/"/g, '""')}"`,
+        `"${foodPref.replace(/"/g, '""')}"`,
+        `"${status}"`,
+        `"${regDate}"`
+      ].join(","));
+
+      // 2. Team Members
+      if (Array.isArray(reg.members) && reg.members.length > 0) {
+        reg.members.forEach((m, mIdx) => {
+          const mEmail = (m.email || "").trim().toLowerCase();
+          const mStudentId = (m.studentId || "").trim().toLowerCase();
+          if (
+            (mEmail && mEmail === leadEmail.trim().toLowerCase()) ||
+            (mStudentId && mStudentId === leadStudentId.trim().toLowerCase())
+          ) {
+            return;
+          }
+
+          const mName = m.name || `Member #${mIdx + 2}`;
+          const mRole = m.role || `Member #${mIdx + 2}`;
+          const mPhone = m.phone || m.phoneNumber || leadPhone;
+          const mBranch = (m as any).branch || branch;
+          const mSection = (m as any).section || section;
+          const mYear = (m as any).year || year;
+          const mCollege = (m as any).college || college;
+
+          rows.push([
             `"${(reg.eventTitle || "").replace(/"/g, '""')}"`,
             `"${regType}"`,
-            `"${(m.name || reg.teamLeadName || "").replace(/"/g, '""')}"`,
-            `"${(m.studentId || reg.teamLeadStudentId || "").replace(/"/g, '""')}"`,
-            `"${(m.email || reg.teamLeadEmail || "").replace(/"/g, '""')}"`,
-            `"${((m as any).phoneNumber || reg.phoneNumber || "").replace(/"/g, '""')}"`,
-            `"${((m as any).branch || reg.branch || "").replace(/"/g, '""')}"`,
-            `"${((m as any).section || reg.section || "").replace(/"/g, '""')}"`,
-            `"${((m as any).year || reg.year || "").replace(/"/g, '""')}"`,
-            `"${foodPref.replace(/"/g, '""')}"`,
+            `"${groupName.replace(/"/g, '""')}"`,
+            `"${mRole}"`,
+            `"${mName.replace(/"/g, '""')}"`,
+            `"${(m.studentId || "").replace(/"/g, '""')}"`,
+            `"${(m.email || "").replace(/"/g, '""')}"`,
+            `"${(m.email || "").replace(/"/g, '""')}"`,
+            `""`,
+            `"${mPhone.replace(/"/g, '""')}"`,
+            `"${mCollege.replace(/"/g, '""')}"`,
+            `"${collegePlace.replace(/"/g, '""')}"`,
+            `"${mBranch.replace(/"/g, '""')}"`,
+            `"${mSection.replace(/"/g, '""')}"`,
+            `"${mYear.replace(/"/g, '""')}"`,
+            teamSize,
+            `"${paymentStatus}"`,
             `"₹${totalFee}"`,
-            reg.teamSize || 1,
+            `"${utr.replace(/"/g, '""')}"`,
+            `"${foodPref.replace(/"/g, '""')}"`,
             `"${status}"`,
             `"${regDate}"`
-          ];
-          rows.push(row.join(","));
+          ].join(","));
         });
-      } else {
-        const row = [
-          `"${(reg.eventTitle || "").replace(/"/g, '""')}"`,
-          `"${regType}"`,
-          `"${(reg.teamLeadName || "").replace(/"/g, '""')}"`,
-          `"${(reg.teamLeadStudentId || "").replace(/"/g, '""')}"`,
-          `"${(reg.teamLeadEmail || "").replace(/"/g, '""')}"`,
-          `"${(reg.phoneNumber || "").replace(/"/g, '""')}"`,
-          `"${(reg.branch || "").replace(/"/g, '""')}"`,
-          `"${(reg.section || "").replace(/"/g, '""')}"`,
-          `"${(reg.year || "").replace(/"/g, '""')}"`,
-          `"${foodPref.replace(/"/g, '""')}"`,
-          `"₹${totalFee}"`,
-          reg.teamSize || 1,
-          `"${status}"`,
-          `"${regDate}"`
-        ];
-        rows.push(row.join(","));
       }
     });
 
-    const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows].join("\n");
-    const encodedUri = encodeURI(csvContent);
+    const csvContent = "\uFEFF" + [headers.join(","), ...rows].join("\r\n");
+    const mimeType = format === "excel" ? "application/vnd.ms-excel;charset=utf-8;" : "text/csv;charset=utf-8;";
+    const blob = new Blob([csvContent], { type: mimeType });
+    const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
-    const filename = exportSelectedEvent === "All"
-      ? "all_event_registrations.csv"
-      : `${exportSelectedEvent.toLowerCase().replace(/[^a-z0-9]/g, "_")}_registrations.csv`;
+    const filenamePrefix = exportSelectedEvent === "All"
+      ? "all_event_registered_members"
+      : `${exportSelectedEvent.toLowerCase().replace(/[^a-z0-9]/g, "_")}_registered_members`;
+    const extension = format === "excel" ? "xls" : "csv";
 
-    link.setAttribute("href", encodedUri);
-    link.setAttribute("download", filename);
+    link.setAttribute("href", url);
+    link.setAttribute("download", `${filenamePrefix}_${new Date().toISOString().split("T")[0]}.${extension}`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+    URL.revokeObjectURL(url);
 
     setIsExportModalOpen(false);
   };
@@ -267,10 +338,29 @@ const RegistrationsManagementPage: React.FC = () => {
   const loadRegistrations = async () => {
     try {
       setLoading(true);
-      const [docs, evs] = await Promise.all([
+      let [docs, evs] = await Promise.all([
         apiFetchRegistrations().catch(() => []),
         apiFetchEvents().catch(() => []),
       ]);
+
+      if (!Array.isArray(evs) || evs.length === 0) {
+        try {
+          const eventsSnap = await getDocs(collection(db, "events"));
+          evs = eventsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        } catch (fErr) {
+          console.warn("[RegistrationsManagement] Firestore events fallback:", fErr);
+        }
+      }
+
+      if (!Array.isArray(docs) || docs.length === 0) {
+        try {
+          const regsSnap = await getDocs(collection(db, "registrations"));
+          docs = regsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
+        } catch (fErr) {
+          console.warn("[RegistrationsManagement] Firestore registrations fallback:", fErr);
+        }
+      }
+
       if (Array.isArray(evs)) {
         setEventsList(evs);
       }
@@ -494,11 +584,19 @@ const RegistrationsManagementPage: React.FC = () => {
     }
   };
 
-  // Get unique events list for filter dropdown
+  // Get unique events list for filter dropdown and export modal
   const uniqueEvents = useMemo(() => {
-    const eventsSet = new Set(registrations.map(r => r.eventTitle));
-    return ["All", ...Array.from(eventsSet)];
-  }, [registrations]);
+    const eventsSet = new Set<string>();
+    (eventsList || []).forEach(e => {
+      const title = (e.title || "").trim();
+      if (title) eventsSet.add(title);
+    });
+    (registrations || []).forEach(r => {
+      const title = (r.eventTitle || "").trim();
+      if (title) eventsSet.add(title);
+    });
+    return ["All", ...Array.from(eventsSet).filter(Boolean).sort((a, b) => a.localeCompare(b))];
+  }, [registrations, eventsList]);
 
   // Filtered registrations list
   const filteredRegistrations = useMemo(() => {
@@ -509,7 +607,9 @@ const RegistrationsManagementPage: React.FC = () => {
         (r.teamLeadStudentId || "").toLowerCase().includes(searchQuery.toLowerCase()) ||
         (r.eventTitle || "").toLowerCase().includes(searchQuery.toLowerCase());
       
-      const matchesEvent = selectedEvent === "All" || r.eventTitle === selectedEvent;
+      const matchesEvent = selectedEvent === "All" || 
+        (r.eventTitle && r.eventTitle.trim().toLowerCase() === selectedEvent.trim().toLowerCase()) ||
+        (r.eventId && eventsList.some(e => (e.id === r.eventId || e._id === r.eventId) && (e.title || "").trim().toLowerCase() === selectedEvent.trim().toLowerCase()));
       
       const isGroup = r.groupName && r.groupName !== "Individual RSVP";
       const matchesType = selectedType === "All" || 
@@ -523,7 +623,7 @@ const RegistrationsManagementPage: React.FC = () => {
 
       return matchesSearch && matchesEvent && matchesType && matchesStatus;
     });
-  }, [registrations, searchQuery, selectedEvent, selectedType, selectedStatus]);
+  }, [registrations, eventsList, searchQuery, selectedEvent, selectedType, selectedStatus]);
 
   // Metrics
   const metrics = useMemo(() => {
@@ -695,8 +795,11 @@ const RegistrationsManagementPage: React.FC = () => {
               </button>
 
               <button
-                onClick={() => setIsExportModalOpen(true)}
-                className="flex items-center gap-1.5 justify-center px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold rounded-xl text-xs shadow-sm hover:shadow transition-all whitespace-nowrap"
+                onClick={() => {
+                  setExportSelectedEvent(selectedEvent);
+                  setIsExportModalOpen(true);
+                }}
+                className="flex items-center gap-1.5 justify-center px-4 py-2 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold rounded-xl text-xs shadow-sm hover:shadow transition-all whitespace-nowrap cursor-pointer"
               >
                 <FileSpreadsheet className="h-3.5 w-3.5" />
                 Export Data
@@ -1695,7 +1798,7 @@ const RegistrationsManagementPage: React.FC = () => {
       {/* ================= EXPORT DATA MODAL ================= */}
       {isExportModalOpen && (
         <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-md rounded-3xl border border-slate-100 shadow-2xl overflow-hidden p-6 space-y-6 text-left">
+          <div className="bg-white w-full max-w-lg rounded-3xl border border-slate-100 shadow-2xl overflow-hidden p-6 space-y-6 text-left">
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-2xl bg-blue-50 text-[#2563EB] flex items-center justify-center font-bold shadow-inner">
@@ -1703,12 +1806,12 @@ const RegistrationsManagementPage: React.FC = () => {
                 </div>
                 <div>
                   <h3 className="text-base font-extrabold text-slate-850">Export Registration Records</h3>
-                  <p className="text-xs text-slate-500 font-medium mt-0.5">Select an event to generate and download CSV data report.</p>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">Select an event to download member records in CSV or Excel format.</p>
                 </div>
               </div>
               <button
                 onClick={() => setIsExportModalOpen(false)}
-                className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors"
+                className="p-1.5 rounded-xl hover:bg-slate-100 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
               >
                 <X className="h-5 w-5" />
               </button>
@@ -1723,34 +1826,51 @@ const RegistrationsManagementPage: React.FC = () => {
                   className="w-full px-4 py-2.5 border border-slate-200 rounded-2xl focus:outline-none focus:border-blue-500 font-semibold text-xs text-slate-800 bg-slate-50/30 focus:bg-white transition-all cursor-pointer"
                 >
                   <option value="All">All Events (All Registrations)</option>
-                  {uniqueEvents.filter(ev => ev !== "All").map((ev, idx) => (
-                    <option key={idx} value={ev}>{ev}</option>
-                  ))}
+                  {uniqueEvents.filter(ev => ev !== "All").map((ev, idx) => {
+                    const count = registrations.filter(r => 
+                      (r.eventTitle && r.eventTitle.trim().toLowerCase() === ev.trim().toLowerCase()) ||
+                      (r.eventId && eventsList.some(e => (e.id === r.eventId || e._id === r.eventId) && e.title?.trim().toLowerCase() === ev.trim().toLowerCase()))
+                    ).length;
+                    return (
+                      <option key={idx} value={ev}>
+                        {ev} ({count} {count === 1 ? "registration" : "registrations"})
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
 
-              <div className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100/60 text-xs text-slate-600 space-y-1">
+              <div className="p-4 bg-blue-50/50 rounded-2xl border border-blue-100/60 text-xs text-slate-600 space-y-1.5">
                 <span className="font-bold text-blue-700 block">Report Summary:</span>
-                <p>
-                  Will export {exportSelectedEvent === "All" ? registrations.length : registrations.filter(r => r.eventTitle === exportSelectedEvent).length} registration record(s) 
-                  for <span className="font-bold text-slate-800">{exportSelectedEvent}</span> into CSV spreadsheet format.
+                <p className="leading-relaxed">
+                  Exporting records for <span className="font-bold text-slate-800">{exportSelectedEvent}</span> ({exportSelectedEvent === "All" ? registrations.length : registrations.filter(r => (r.eventTitle && r.eventTitle.trim().toLowerCase() === exportSelectedEvent.trim().toLowerCase()) || (r.eventId && eventsList.some(e => (e.id === r.eventId || e._id === r.eventId) && e.title?.trim().toLowerCase() === exportSelectedEvent.trim().toLowerCase()))).length} registration entries).
+                </p>
+                <p className="text-[11px] text-slate-500">
+                  ✓ Includes complete roster breakdown (Team Leads & all registered team members) with contact info, roll numbers, departments, payment verification status, and timestamps.
                 </p>
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
+            <div className="flex flex-wrap items-center justify-end gap-2.5 pt-2 border-t border-slate-100">
               <button
                 onClick={() => setIsExportModalOpen(false)}
-                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors"
+                className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer"
               >
                 Cancel
               </button>
               <button
-                onClick={handleExportCsv}
-                className="flex items-center gap-2 px-5 py-2.5 bg-[#2563EB] hover:bg-[#1D4ED8] text-white font-bold rounded-xl text-xs shadow-md transition-all cursor-pointer"
+                onClick={() => handleExport("csv")}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-slate-800 hover:bg-slate-900 text-white font-bold rounded-xl text-xs shadow-md transition-all cursor-pointer"
               >
                 <Download className="h-4 w-4" />
-                Export CSV Report
+                Download CSV
+              </button>
+              <button
+                onClick={() => handleExport("excel")}
+                className="flex items-center gap-1.5 px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white font-bold rounded-xl text-xs shadow-md transition-all cursor-pointer"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                Download Excel (.xls)
               </button>
             </div>
           </div>

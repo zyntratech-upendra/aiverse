@@ -662,11 +662,8 @@ const EventDetailsPage: React.FC = () => {
             {/* Registration Float Box */}
             <div className="lg:col-span-4 self-stretch flex items-center">
               <div className="bg-white border border-slate-100 rounded-3xl p-6 shadow-xl w-full flex flex-col space-y-4 text-left">
-                <div className="flex justify-between items-center border-b border-slate-50 pb-3">
+                <div className="border-b border-slate-50 pb-3">
                   <span className="text-[10px] font-black text-slate-400 tracking-wider uppercase">REGISTRATION</span>
-                  <span className="text-[9px] font-black text-blue-600 bg-blue-50 px-2 py-0.5 rounded-md border border-blue-100">
-                    {event.currentReg} Registered
-                  </span>
                 </div>
 
                 <div className="space-y-1">
@@ -682,13 +679,13 @@ const EventDetailsPage: React.FC = () => {
                       </span>
                     )}
                   </div>
-                  <p className="text-[10px] text-slate-400 font-semibold">
-                    {event.isPaidEvent && event.registrationFee && event.registrationFee > 0
-                      ? event.pricingType === "per_team"
+                  {event.isPaidEvent && event.registrationFee && event.registrationFee > 0 && (
+                    <p className="text-[10px] text-slate-400 font-semibold">
+                      {event.pricingType === "per_team"
                         ? "Paid Hackathon Entry (Flat Team Rate)"
-                        : "Paid Hackathon Entry (Per Person)"
-                      : "Early Bird RSVP active"}
-                  </p>
+                        : "Paid Hackathon Entry (Per Person)"}
+                    </p>
+                  )}
                 </div>
 
                 {/* Paid Hackathon Payment Status Badge */}
