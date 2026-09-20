@@ -35,11 +35,14 @@ const smtpTransporter = createSmtpTransporter();
  */
 const sendMail = async ({ to, subject, html, text, from, replyTo, reply_to, attachments, headers }) => {
   const RESEND_API_KEY = process.env.RESEND_API_KEY;
-  const defaultFrom = process.env.RESEND_FROM_EMAIL || process.env.EMAIL_FROM || 'AI Verse <events@aiversevitb.in>';
+  const rawFrom = process.env.RESEND_FROM_EMAIL || process.env.EMAIL_FROM || 'AI Verse <events@aiversevitb.in>';
   const defaultReplyTo = process.env.RESEND_REPLY_TO || process.env.EMAIL_REPLY_TO || 'aiverse@vishnu.edu.in';
 
   const recipients = Array.isArray(to) ? to : [to];
-  const sender = from || defaultFrom;
+  let sender = (from || rawFrom || 'AI Verse <events@aiversevitb.in>').trim();
+  if (sender.includes('dpdns.org')) {
+    sender = sender.replace(/aiversevitb\.dpdns\.org/gi, 'aiversevitb.in').replace(/dpdns\.org/gi, 'aiversevitb.in');
+  }
   const reply = replyTo || reply_to || defaultReplyTo;
 
   // 1. Primary: Send via Resend API

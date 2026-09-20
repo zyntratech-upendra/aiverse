@@ -35,7 +35,10 @@ export const sendResendEmail = async ({
   const defaultFrom = (import.meta.env.VITE_RESEND_FROM_EMAIL as string) || "AI Verse <events@aiversevitb.in>";
   const defaultReplyTo = (import.meta.env.VITE_RESEND_REPLY_TO as string) || "aiverse@vishnu.edu.in";
 
-  const senderEmail = sanitizeEmailField(from, defaultFrom);
+  let senderEmail = sanitizeEmailField(from, defaultFrom);
+  if (senderEmail.includes('dpdns.org')) {
+    senderEmail = senderEmail.replace(/aiversevitb\.dpdns\.org/gi, 'aiversevitb.in').replace(/dpdns\.org/gi, 'aiversevitb.in');
+  }
   const replyToEmail = sanitizeEmailField(reply_to, defaultReplyTo);
 
   const emailHeaders: Record<string, string> = {
