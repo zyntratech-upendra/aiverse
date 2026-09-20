@@ -3,7 +3,6 @@ import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
 import { useAuth } from "../../context/AuthContext";
 import { fetchEvents, fetchSettings, updateSettings, updatePassword as apiUpdatePassword, uploadImage } from "../../services/apiClient";
-import { userService } from "../../services/userService";
 import { dataCache } from "../../utils/dataCache";
 import { 
   Globe, 

@@ -589,12 +589,11 @@ const RegistrationPage: React.FC = () => {
       (async () => {
         try {
           // A. Asynchronous background upload of payment proof to Cloudinary if needed
-          let secureCloudinaryUrl = "";
           if (requiresPaymentProof && paymentProofPreview && paymentProofPreview.startsWith("data:image")) {
             try {
               const uploadRes = await uploadImage(paymentProofPreview, "ai_verse_payment_proofs");
-              if (uploadRes?.secure_url) {
-                secureCloudinaryUrl = uploadRes.secure_url;
+              if (uploadRes?.secure_url && finalRegId) {
+                await updateRegistration(finalRegId, { paymentProof: uploadRes.secure_url }).catch(() => {});
               }
             } catch (upErr) {
               console.warn("[RegistrationPage] Cloudinary background upload notice:", upErr);

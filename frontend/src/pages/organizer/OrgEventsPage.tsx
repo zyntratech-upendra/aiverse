@@ -63,6 +63,7 @@ const OrgEventsPage: React.FC = () => {
   // Form States
   const [formTitle, setFormTitle] = useState("");
   const [formCategory, setFormCategory] = useState("Workshop");
+  const [formRole, setFormRole] = useState("Lead Coordinator");
   const [formDate, setFormDate] = useState("");
   const [formStartTime, setFormStartTime] = useState("");
   const [formEndTime, setFormEndTime] = useState("");
