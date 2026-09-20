@@ -1,8 +1,6 @@
 import React, { useState } from "react";
 import SEO from "../../components/layout/SEO";
 import { Mail, Phone, MapPin, Send, Loader2, CheckCircle2, MessageSquare, AlertCircle } from "lucide-react";
-import { db, collection, addDoc } from "../../config/firebase";
-
 import { createContact } from "../../services/apiClient";
 
 const ContactPage: React.FC = () => {
@@ -34,24 +32,9 @@ const ContactPage: React.FC = () => {
       setEmail("");
       setSubject("");
       setMessage("");
-    } catch (err) {
-      try {
-        await addDoc(collection(db, "contact_queries"), {
-          name: name.trim(),
-          email: email.trim(),
-          subject: subject.trim(),
-          message: message.trim(),
-          createdAt: Date.now(),
-        });
-        setSuccess(true);
-        setName("");
-        setEmail("");
-        setSubject("");
-        setMessage("");
-      } catch (err2) {
-        console.error("Error saving contact query:", err2);
-        setError("Failed to send your message. Please try again.");
-      }
+    } catch (err: any) {
+      console.error("Error saving contact query:", err);
+      setError("Failed to send your message. Please try again.");
     } finally {
       setSubmitting(false);
     }

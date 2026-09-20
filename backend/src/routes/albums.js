@@ -5,6 +5,26 @@ const Album = require('../models/Album');
 const { optionalAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { pick } = require('../utils/sanitize');
+const { uploadToCloudinaryIfBase64 } = require('../utils/cloudinaryHelper');
+
+async function sanitizeAlbumImages(item) {
+  if (item.coverImage) item.coverImage = await uploadToCloudinaryIfBase64(item.coverImage, 'ai_verse/albums');
+  if (item.imageUrl) item.imageUrl = await uploadToCloudinaryIfBase64(item.imageUrl, 'ai_verse/albums');
+  if (item.bannerImage) item.bannerImage = await uploadToCloudinaryIfBase64(item.bannerImage, 'ai_verse/albums');
+  if (Array.isArray(item.images)) {
+    item.images = await Promise.all(item.images.map(async (img) => {
+      if (typeof img === 'string') {
+        const u = await uploadToCloudinaryIfBase64(img, 'ai_verse/albums');
+        return { url: u };
+      }
+      if (img && img.url) {
+        img.url = await uploadToCloudinaryIfBase64(img.url, 'ai_verse/albums');
+      }
+      return img;
+    }));
+  }
+  return item;
+}
 
 // In-memory caching & stampede prevention for high-speed album delivery
 const cachedAlbumsMap = new Map();
@@ -133,20 +153,23 @@ router.post(
     }
 
     const now = Date.now();
-    const docsToInsert = items.map((rawItem, idx) => {
-      const item = pick(rawItem, ALBUM_ALLOWED_FIELDS);
-      const id = rawItem._id || rawItem.id || new mongoose.Types.ObjectId().toString();
-      return {
-        ...item,
-        _id: id,
-        category: item.category || 'Workshops',
-        status: item.status || 'Published',
-        photosCount: item.photosCount || 1,
-        order: item.order !== undefined ? item.order : idx,
-        createdAt: item.createdAt || now,
-        updatedAt: now,
-      };
-    });
+    const docsToInsert = await Promise.all(
+      items.map(async (rawItem, idx) => {
+        let item = pick(rawItem, ALBUM_ALLOWED_FIELDS);
+        item = await sanitizeAlbumImages(item);
+        const id = rawItem._id || rawItem.id || new mongoose.Types.ObjectId().toString();
+        return {
+          ...item,
+          _id: id,
+          category: item.category || 'Workshops',
+          status: item.status || 'Published',
+          photosCount: item.photosCount || 1,
+          order: item.order !== undefined ? item.order : idx,
+          createdAt: item.createdAt || now,
+          updatedAt: now,
+        };
+      })
+    );
 
     const saved = await Album.insertMany(docsToInsert);
     invalidateAlbumsCache();
@@ -164,7 +187,8 @@ router.post(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const rawPayload = req.body || {};
-    const payload = pick(rawPayload, ALBUM_ALLOWED_FIELDS);
+    let payload = pick(rawPayload, ALBUM_ALLOWED_FIELDS);
+    payload = await sanitizeAlbumImages(payload);
     const id = rawPayload._id || rawPayload.id || new mongoose.Types.ObjectId().toString();
     const now = Date.now();
 
@@ -192,7 +216,8 @@ router.put(
   asyncHandler(async (req, res) => {
     const id = req.params.id;
     const rawPayload = req.body || {};
-    const payload = pick(rawPayload, ALBUM_ALLOWED_FIELDS);
+    let payload = pick(rawPayload, ALBUM_ALLOWED_FIELDS);
+    payload = await sanitizeAlbumImages(payload);
     payload.updatedAt = Date.now();
 
     let updated = await Album.findByIdAndUpdate(id, { $set: payload }, { new: true, runValidators: true }).lean();

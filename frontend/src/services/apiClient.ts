@@ -739,24 +739,21 @@ export async function fetchAlbums(query?: { eventId?: string; category?: string;
   if (cached && Array.isArray(cached)) return cached;
 
   const params = query ? `?${new URLSearchParams(query as any).toString()}` : '';
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), 6000);
 
   try {
-    const res = await fetch(`${API_BASE}/albums${params}`, {
+    const res = await fetchWithRetry(`${API_BASE}/albums${params}`, {
       headers: authHeaders(),
-      signal: controller.signal,
-    });
-    clearTimeout(timeoutId);
+    }, 2, 800);
     if (!res.ok) throw new Error(`Failed to fetch albums (${res.status})`);
     const data = await res.json();
     if (Array.isArray(data)) {
       setCachedApiData(cacheKey, data, 30000);
+      return data;
     }
-    return data;
+    return [];
   } catch (err) {
-    clearTimeout(timeoutId);
-    throw err;
+    console.error('[apiClient] fetchAlbums error:', err);
+    return cached || [];
   }
 }
 

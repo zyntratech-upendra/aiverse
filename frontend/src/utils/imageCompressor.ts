@@ -1,7 +1,7 @@
 /**
  * Client-side Image Compressor for Avatars & Media
  * Automatically resizes & compresses high-res Base64 images to under ~60KB.
- * Prevents Firestore 1MB document limit errors (FirebaseError: The value of property 'image' is longer than 1048487 bytes).
+ * Ensures quick network payloads and optimized database storage.
  */
 
 export const compressImageBase64 = async (

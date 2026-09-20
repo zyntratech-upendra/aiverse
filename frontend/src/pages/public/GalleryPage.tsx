@@ -4,7 +4,6 @@ import { motion, AnimatePresence } from "framer-motion";
 import Button from "../../components/ui/Button";
 
 import SEO from "../../components/layout/SEO";
-import { db, collection, getDocs } from "../../config/firebase";
 import { fetchAlbums } from "../../services/apiClient";
 import { dataCache } from "../../utils/dataCache";
 import { 
@@ -96,23 +95,8 @@ const GalleryPage: React.FC = () => {
           return "";
         };
 
-        // 1. Try Backend API
-        let backendItems: any[] = [];
-        try {
-          backendItems = await fetchAlbums();
-        } catch (apiErr) {
-          console.warn("Backend fetch error, trying Firestore fallback:", apiErr);
-        }
-
-        // 2. Try Firestore fallback if empty
-        if (!backendItems || backendItems.length === 0) {
-          try {
-            const querySnapshot = await getDocs(collection(db, "albums"));
-            backendItems = querySnapshot.docs.map((d) => ({ ...d.data(), id: d.id }));
-          } catch (e) {
-            console.warn("Firestore fallback notice:", e);
-          }
-        }
+        // Fetch albums from backend API (Cloudinary images stored in MongoDB Atlas)
+        const backendItems = await fetchAlbums();
 
         const list: EventPhoto[] = [];
 

@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { useAuth } from "../../context/AuthContext";
-import { db, doc, updateDoc } from "../../config/firebase";
+import { updateUser } from "../../services/apiClient";
 import { useNavigate } from "react-router-dom";
 import { Shield, CheckCircle, AlertTriangle } from "lucide-react";
 import SEO from "../../components/layout/SEO";
@@ -47,8 +47,7 @@ const AdminSetupPage: React.FC = () => {
       const option = ROLE_OPTIONS.find(r => r.value === selectedRole);
       const normalizedRole = option?.normalized || "faculty";
 
-      const userDocRef = doc(db, "users", user.uid);
-      await updateDoc(userDocRef, { 
+      await updateUser(user.uid, { 
         role: normalizedRole,
         displayRole: selectedRole 
       });

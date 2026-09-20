@@ -8,7 +8,6 @@ import { resetParticipantQuizSession, resetAllQuizSubmissions, deleteQuizCascadi
 import { userService } from "../../services/userService";
 import { extractTextFromPdf, parseQuestionsFromText } from "../../utils/pdfExtractor";
 import { extractQuizQuestionsWithGemini } from "../../utils/geminiQuizExtractor";
-import { db, doc, updateDoc } from "../../config/firebase";
 import SEO from "../../components/layout/SEO";
 import DatePicker from "../../components/ui/DatePicker";
 import TimePicker from "../../components/ui/TimePicker";
@@ -2863,7 +2862,7 @@ Answer: A`;
               Quiz & Assessment Infrastructure
             </h1>
             <p className="text-xs sm:text-sm text-slate-500 font-medium mt-1">
-              High-concurrency quiz engine supporting 200–500 simultaneous participants on Vercel + Firebase.
+              High-concurrency quiz engine supporting 1,000+ simultaneous participants on MongoDB Atlas & Node.js.
             </p>
           </div>
 

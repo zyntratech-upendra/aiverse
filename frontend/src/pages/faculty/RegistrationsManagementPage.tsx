@@ -19,11 +19,9 @@ import {
   Mail,
   Building2,
   GraduationCap,
-  Calendar,
   MapPin
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
-import { db, collection, getDocs } from "../../config/firebase";
 import { 
   fetchRegistrations as apiFetchRegistrations, 
   fetchEvents as apiFetchEvents,
@@ -292,7 +290,7 @@ const RegistrationsManagementPage: React.FC = () => {
 
   const handleBulkDeleteRegistrations = async () => {
     if (selectedRegIds.length === 0) return;
-    if (!window.confirm(`Are you sure you want to permanently delete ${selectedRegIds.length} selected registration(s)?\n\nThis will remove all participant accounts, quiz submissions, and data from BOTH Firebase and Supabase.`)) return;
+    if (!window.confirm(`Are you sure you want to permanently delete ${selectedRegIds.length} selected registration(s)?\n\nThis will remove all participant accounts, quiz submissions, and records from the database.`)) return;
 
     try {
       setLoading(true);
@@ -305,7 +303,7 @@ const RegistrationsManagementPage: React.FC = () => {
       setRegistrations(prev => prev.filter(r => !selectedRegIds.includes(r.id)));
       setSelectedRegIds([]);
       setIsDeleteSelectionMode(false);
-      alert(`Successfully deleted ${selectedRegs.length} registration(s) and all participant records from Firebase and Supabase.`);
+      alert(`Successfully deleted ${selectedRegs.length} registration(s) and all participant records.`);
     } catch (err) {
       console.error("Error bulk deleting registrations:", err);
       alert("Failed to delete selected registrations.");
@@ -316,7 +314,7 @@ const RegistrationsManagementPage: React.FC = () => {
 
   const handleDeleteGroupRegistrations = async (groupName: string) => {
     if (!groupName || groupName === "Individual RSVP") return;
-    if (!window.confirm(`Are you sure you want to delete team "${groupName}"?\n\nThis will purge all participant accounts and submissions from Firebase and Supabase.`)) return;
+    if (!window.confirm(`Are you sure you want to delete team "${groupName}"?\n\nThis will purge all participant accounts and submissions.`)) return;
     try {
       setLoading(true);
       const targets = registrations.filter(r => r.groupName === groupName);
@@ -335,7 +333,7 @@ const RegistrationsManagementPage: React.FC = () => {
 
   const handleDeleteEventRegistrations = async (eventId: string) => {
     if (!eventId) return;
-    if (!window.confirm("Are you sure you want to delete all registrations for this event?\n\nAll participant records and Supabase logins will be deleted.")) return;
+    if (!window.confirm("Are you sure you want to delete all registrations for this event?\n\nAll participant records and logins will be deleted.")) return;
     try {
       setLoading(true);
       const targets = registrations.filter(r => r.eventId === eventId);
@@ -355,28 +353,10 @@ const RegistrationsManagementPage: React.FC = () => {
   const loadRegistrations = async () => {
     try {
       setLoading(true);
-      let [docs, evs] = await Promise.all([
+      const [docs, evs] = await Promise.all([
         apiFetchRegistrations().catch(() => []),
         apiFetchEvents().catch(() => []),
       ]);
-
-      if (!Array.isArray(evs) || evs.length === 0) {
-        try {
-          const eventsSnap = await getDocs(collection(db, "events"));
-          evs = eventsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        } catch (fErr) {
-          console.warn("[RegistrationsManagement] Firestore events fallback:", fErr);
-        }
-      }
-
-      if (!Array.isArray(docs) || docs.length === 0) {
-        try {
-          const regsSnap = await getDocs(collection(db, "registrations"));
-          docs = regsSnap.docs.map(d => ({ id: d.id, ...d.data() }));
-        } catch (fErr) {
-          console.warn("[RegistrationsManagement] Firestore registrations fallback:", fErr);
-        }
-      }
 
       if (Array.isArray(evs)) {
         setEventsList(evs);
@@ -482,13 +462,13 @@ const RegistrationsManagementPage: React.FC = () => {
   }, []);
 
   const handleDeleteRegistration = async (regId: string, eventId: string, teamSize: number) => {
-    if (confirm("Are you sure you want to cancel and delete this registration?\n\nThis will permanently delete the participant/team account, quiz submissions, and all data from BOTH Firebase and Supabase.")) {
+    if (confirm("Are you sure you want to cancel and delete this registration?\n\nThis will permanently delete the participant/team account, quiz submissions, and records.")) {
       try {
         const targetReg = registrations.find(r => r.id === regId);
         await deleteParticipantCascade(targetReg?.id || regId, (targetReg?.members || []).map((m: any) => m.email).filter(Boolean), teamSize, eventId);
 
         setRegistrations(prev => prev.filter(r => r.id !== regId));
-        alert("Registration and participant account successfully deleted from Firebase and Supabase.");
+        alert("Registration and participant account successfully deleted.");
       } catch (err) {
         console.error("Error deleting registration:", err);
         alert("Failed to delete registration.");

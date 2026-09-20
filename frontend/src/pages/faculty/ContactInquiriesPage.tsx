@@ -1,15 +1,4 @@
 import React, { useState, useEffect } from "react";
-import {
-  db,
-  collection,
-  query,
-  orderBy,
-  getDocs,
-  doc,
-  updateDoc,
-  deleteDoc,
-  writeBatch
-} from "../../config/firebase";
 import { sendResendEmail } from "../../utils/resendEmailService";
 import { fetchContacts, updateContact, deleteContact as apiDeleteContact } from "../../services/apiClient";
 import {
@@ -49,7 +38,7 @@ const ContactInquiriesPage: React.FC = () => {
   const [inquiries, setInquiries] = useState<ContactQuery[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<string>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "new" | "read" | "replied" | "archived">("all");
   const [selectedInquiry, setSelectedInquiry] = useState<ContactQuery | null>(null);
   
   // Selection for bulk actions
@@ -63,22 +52,20 @@ const ContactInquiriesPage: React.FC = () => {
   const [replyError, setReplyError] = useState("");
   const [copiedEmail, setCopiedEmail] = useState(false);
 
-  // Polling-based fetch for contact queries
+  // Load inquiries
   useEffect(() => {
-    setLoading(true);
-
     let poll: any = null;
     const load = async () => {
       try {
-        const backendContacts = await fetchContacts();
-        if (Array.isArray(backendContacts) && backendContacts.length > 0) {
-          const list: ContactQuery[] = backendContacts.map((c: any) => ({
+        const contacts = await fetchContacts();
+        if (Array.isArray(contacts)) {
+          const list: ContactQuery[] = contacts.map((c: any) => ({
             id: c.id || c._id,
             name: c.name || "Anonymous",
             email: c.email || "",
             subject: c.subject || "(No Subject)",
             message: c.message || "",
-            createdAt: typeof c.createdAt === "number" ? c.createdAt : Date.now(),
+            createdAt: typeof c.createdAt === "number" ? c.createdAt : (c.created_at ? new Date(c.created_at).getTime() : Date.now()),
             status: (c.status || "new").toLowerCase(),
             repliedAt: c.respondedAt || c.repliedAt,
             replyMessage: c.notes || c.replyMessage,
@@ -88,30 +75,7 @@ const ContactInquiriesPage: React.FC = () => {
           return;
         }
       } catch (err) {
-        // Fallback to Firestore
-      }
-
-      try {
-        const q = query(collection(db, "contact_queries"), orderBy("createdAt", "desc"));
-        const snapshot = await getDocs(q);
-        const list: ContactQuery[] = [];
-        snapshot.forEach((docSnap) => {
-          const data = docSnap.data();
-          list.push({
-            id: docSnap.id,
-            name: data.name || "Anonymous",
-            email: data.email || "",
-            subject: data.subject || "(No Subject)",
-            message: data.message || "",
-            createdAt: typeof data.createdAt === "number" ? data.createdAt : Date.now(),
-            status: data.status || "new",
-            repliedAt: data.repliedAt,
-            replyMessage: data.replyMessage
-          });
-        });
-        setInquiries(list);
-      } catch (error) {
-        console.error("Error loading contact queries:", error);
+        console.error("Error loading contact queries:", err);
       } finally {
         setLoading(false);
       }
@@ -122,12 +86,10 @@ const ContactInquiriesPage: React.FC = () => {
     return () => { if (poll) clearInterval(poll); };
   }, []);
 
-  // Update status in Backend API & Firestore
+  // Update status in Backend API
   const handleUpdateStatus = async (id: string, newStatus: ContactQuery["status"]) => {
     try {
       await updateContact(id, { status: newStatus }).catch(() => {});
-      const docRef = doc(db, "contact_queries", id);
-      await updateDoc(docRef, { status: newStatus }).catch(() => {});
       
       setInquiries((prev) =>
         prev.map((item) => (item.id === id ? { ...item, status: newStatus } : item))
@@ -145,7 +107,6 @@ const ContactInquiriesPage: React.FC = () => {
     if (!window.confirm("Are you sure you want to delete this contact message?")) return;
     try {
       await apiDeleteContact(id).catch(() => {});
-      await deleteDoc(doc(db, "contact_queries", id)).catch(() => {});
       setInquiries((prev) => prev.filter((i) => i.id !== id));
       if (selectedInquiry?.id === id) setSelectedInquiry(null);
       setSelectedIds((prev) => {
@@ -165,11 +126,9 @@ const ContactInquiriesPage: React.FC = () => {
     if (!window.confirm(`Delete ${selectedIds.size} selected message(s)? This cannot be undone.`)) return;
 
     try {
-      const batch = writeBatch(db);
-      selectedIds.forEach((id) => {
-        batch.delete(doc(db, "contact_queries", id));
-      });
-      await batch.commit();
+      for (const id of Array.from(selectedIds)) {
+        await apiDeleteContact(id).catch(() => {});
+      }
 
       setInquiries((prev) => prev.filter((i) => !selectedIds.has(i.id)));
       if (selectedInquiry && selectedIds.has(selectedInquiry.id)) {
@@ -186,11 +145,9 @@ const ContactInquiriesPage: React.FC = () => {
   const handleBulkMarkStatus = async (status: ContactQuery["status"]) => {
     if (selectedIds.size === 0) return;
     try {
-      const batch = writeBatch(db);
-      selectedIds.forEach((id) => {
-        batch.update(doc(db, "contact_queries", id), { status });
-      });
-      await batch.commit();
+      for (const id of Array.from(selectedIds)) {
+        await updateContact(id, { status }).catch(() => {});
+      }
 
       setInquiries((prev) =>
         prev.map((i) => (selectedIds.has(i.id) ? { ...i, status } : i))
@@ -254,13 +211,11 @@ const ContactInquiriesPage: React.FC = () => {
 
       if (res.success) {
         setReplySuccess(true);
-        // Update status in Firestore
-        const docRef = doc(db, "contact_queries", selectedInquiry.id);
-        await updateDoc(docRef, {
+        await updateContact(selectedInquiry.id, {
           status: "replied",
-          repliedAt: Date.now(),
-          replyMessage: replyBody
-        });
+          respondedAt: Date.now(),
+          notes: replyBody
+        }).catch(() => {});
 
         setInquiries((prev) =>
           prev.map((item) =>

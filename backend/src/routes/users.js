@@ -5,6 +5,7 @@ const User = require('../models/User');
 const { optionalAuth, requireAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { pick } = require('../utils/sanitize');
+const { uploadToCloudinaryIfBase64 } = require('../utils/cloudinaryHelper');
 
 // Helper: build a safe user lookup query
 // _id is String type (not ObjectId) so we can safely match on email/_id/uid without CastErrors
@@ -193,6 +194,8 @@ router.put(
     }
 
     const payload = pick(rawPayload, allowedFields);
+    if (payload.avatar) payload.avatar = await uploadToCloudinaryIfBase64(payload.avatar, 'ai_verse/users');
+    if (payload.image) payload.image = await uploadToCloudinaryIfBase64(payload.image, 'ai_verse/users');
     if (payload.order !== undefined) {
       payload.order = Number(payload.order);
     }

@@ -25,7 +25,6 @@ import {
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
 import { formatEventDateRange } from "../../utils/dateFormatter";
-import { db, doc, getDoc, getDocs, collection, addDoc, updateDoc, increment } from "../../config/firebase";
 import { userService } from "../../services/userService";
 import { fetchEvents, fetchEventById, createRegistration, uploadImage, sendEmail } from "../../services/apiClient";
 
@@ -301,73 +300,6 @@ const RegistrationPage: React.FC = () => {
         } catch (backendErr) {
           console.warn("[RegistrationPage] Backend event fetch notice:", backendErr);
         }
-
-        // 2. Fallback to Firestore
-        let docSnap = await getDoc(doc(db, "events", id));
-        if (!docSnap.exists()) {
-          const cleanId = id.replace(/[Il]/g, "i").toLowerCase();
-          const allEventsSnap = await getDocs(collection(db, "events"));
-          const matchedDoc = allEventsSnap.docs.find(d =>
-            d.id.toLowerCase() === id.toLowerCase() ||
-            d.id.replace(/[Il]/g, "i").toLowerCase() === cleanId
-          );
-          if (matchedDoc) {
-            docSnap = matchedDoc;
-          }
-        }
-
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          const minT = data.minTeamSize || 1;
-          const maxT = data.maxTeamSize || 1;
-
-          let timeText = data.time || "10:00 AM";
-          if (data.startTime) {
-            timeText = data.startTime;
-            if (data.endTime) timeText += ` - ${data.endTime}`;
-          }
-
-          setEvent({
-            id: docSnap.id,
-            title: data.title || "",
-            date: data.date || "Oct 24",
-            startDate: data.startDate || "",
-            endDate: data.endDate || "",
-            startTime: data.startTime || "",
-            endTime: data.endTime || "",
-            time: timeText,
-            location: data.location || "Virtual Hub",
-            minTeamSize: minT,
-            maxTeamSize: maxT,
-            currentReg: Math.max(0, Number(data.currentReg) || 0),
-            maxReg: data.maxReg || 100,
-            posterPreview: data.posterPreview || "",
-            registrationFee: data.registrationFee !== undefined ? data.registrationFee : 0,
-            pricingType: data.pricingType === "per_team" || data.pricingModel === "per_team" ? "per_team" : "per_person",
-            pricingModel: data.pricingModel || data.pricingType || "per_person",
-            category: data.category || "Workshop",
-            isPaidEvent: data.isPaidEvent !== undefined ? Boolean(data.isPaidEvent) : (Number(data.registrationFee) > 0),
-            paymentQrImagePreview: data.paymentQrImagePreview || data.paymentQr || "",
-            upiId: data.upiId || "",
-            allowRegistrations: data.allowRegistrations !== undefined ? data.allowRegistrations : true,
-            status: data.status,
-            isPastEvent: data.isPastEvent,
-            regDeadline: data.regDeadline || data.registrationDeadline,
-            regDeadlineTime: data.regDeadlineTime || data.registrationDeadlineTime,
-            registrationDeadline: data.registrationDeadline || data.regDeadline,
-            registrationDeadlineTime: data.registrationDeadlineTime || data.regDeadlineTime,
-            whatsGroupLink: data.whatsGroupLink || data.whatsappGroupLink || data.whatsappGroupUrl || data.whatsappLink || data.whatsappGroup || "",
-          });
-
-          // Initialize members array to satisfy minTeamSize (excluding lead)
-          const initialTeammatesCount = Math.max(0, minT - 1);
-          const initialMembers = Array.from({ length: initialTeammatesCount }, () => ({
-            name: "",
-            email: "",
-            studentId: ""
-          }));
-          setMembers(initialMembers);
-        }
       } catch (err) {
         console.error("Error loading event for registration:", err);
       } finally {
@@ -540,7 +472,7 @@ const RegistrationPage: React.FC = () => {
     reader.onload = async () => {
       if (typeof reader.result === "string") {
         try {
-          // Compress the payment proof image to fit comfortably within Firestore's 1MB limit (~50-100KB)
+          // Compress payment proof image for faster upload and optimal bandwidth
           const compressed = await compressPaymentProof(reader.result, 1000, 0.72);
           setPaymentProofPreview(compressed);
         } catch (err) {
@@ -669,26 +601,7 @@ const RegistrationPage: React.FC = () => {
             }
           }
 
-          // B. Firestore mirror sync & event registration count increment
-          const firestoreSyncPromise = (async () => {
-            try {
-              await addDoc(collection(db, "registrations"), {
-                ...payload,
-                paymentProof: secureCloudinaryUrl || payload.paymentProof,
-                paymentProofPreview: secureCloudinaryUrl || payload.paymentProofPreview,
-                backendId: finalRegId,
-                qrCodeData: finalRegId
-              });
-              const docRef = doc(db, "events", event.id);
-              await updateDoc(docRef, {
-                currentReg: increment(isQuiz ? 1 : actualTeamSize)
-              }).catch(() => {});
-            } catch (fErr) {
-              console.warn("[RegistrationPage] Firestore background sync notice:", fErr);
-            }
-          })();
-
-          // C. User account & auth credentials auto-provisioning
+          // B. User account & auth credentials auto-provisioning
           const personalEmail = (leadPersonalEmail.trim() || leadCollegeEmail.trim() || "").toLowerCase();
           const displayName = leadName.trim() || "Participant";
           const userPhone = leadPhone.trim();
@@ -715,7 +628,7 @@ const RegistrationPage: React.FC = () => {
             console.warn("[RegistrationPage] Background user provisioning notice:", err);
           });
 
-          // D. Optional confirmation email dispatch for auto-confirmed events
+          // C. Optional confirmation email dispatch for auto-confirmed events
           const emailPromise = (async () => {
             if (payload.status === "Confirmed" && !isQuiz && (payload as any).sendConfirmationEmail !== false) {
               try {
@@ -749,7 +662,7 @@ const RegistrationPage: React.FC = () => {
             }
           })();
 
-          await Promise.allSettled([firestoreSyncPromise, userProvisioningPromise, emailPromise]);
+          await Promise.allSettled([userProvisioningPromise, emailPromise]);
         } catch (bgErr) {
           console.warn("[RegistrationPage] Background operations completed with notice:", bgErr);
         }

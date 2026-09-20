@@ -1,35 +1,36 @@
-Express + MongoDB migration starter for AI Verse
+# AI Verse Backend API
 
-Quick start:
+Express + MongoDB Atlas + Cloudinary backend architecture for AI Verse.
 
-1. Copy `.env.example` to `.env` and set `MONGO_URI`.
-2. Install dependencies and run:
+## Quick Start:
 
+1. Copy `.env.example` to `.env` and configure `MONGO_URI`, `JWT_SECRET`, and Cloudinary keys:
+   ```env
+   MONGO_URI=mongodb+srv://...
+   JWT_SECRET=your_jwt_secret
+   CLOUDINARY_CLOUD_NAME=...
+   CLOUDINARY_API_KEY=...
+   CLOUDINARY_API_SECRET=...
+   ```
+
+2. Install dependencies and start server:
+   ```bash
+   cd backend
+   npm install
+   npm run dev
+   ```
+
+## Production Cluster:
+Run with Node.js cluster mode for maximum CPU utilization and concurrent traffic handling:
 ```bash
-cd migrate/backend
-npm install
-npm run dev
+npm run start:cluster
 ```
 
-API endpoints (examples):
-- `GET /api/quizzes/:id`
-- `POST /api/quizzes/:quizId/sessions` (body: `{ user, team? }`)
-- `GET /api/sessions/:sessionId/draft`
-- `POST /api/sessions/:sessionId/draft` (body: `{ answers, clientTimestamp }`)
-- `POST /api/sessions/:sessionId/submit` (body: `{ answers, isAutoSubmitted }`)
-
- Auth / JWT:
- - `POST /auth/token` (body: `{ user: { uid, email, displayName } }`) returns `{ token }` for dev usage.
- - `POST /auth/exchange` (body: `{ idToken }`) exchanges Firebase ID token for local JWT (recommended)
- 
- Migration:
-- Set `GOOGLE_APPLICATION_CREDENTIALS` to your Firebase service account JSON.
-- Run migration to copy Firestore collections into MongoDB:
-
-```bash
-npm run migrate
-```
-
-Notes:
-- The `/sessions/:sessionId/submit` endpoint is protected by JWT. Use `/auth/token` to get a demo token (replace with a real auth flow for production).
-- For production, verify Firebase ID tokens or implement a proper auth provider instead of the demo `/auth/token`.
+## Key API Endpoints:
+- `GET /api/albums` - Public gallery photo albums (cached)
+- `POST /api/upload` - Secure Cloudinary media upload (images/videos)
+- `GET /api/events` - Events catalog
+- `GET /api/registrations` - Participant registrations
+- `GET /api/users` - User directory and team members
+- `GET /api/quizzes` - Quizzes & challenges
+- `POST /api/contacts` - Contact & inquiries

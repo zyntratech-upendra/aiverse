@@ -7,12 +7,6 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
-      'firebase/firestore': path.resolve(__dirname, './src/config/firebase.ts'),
-      'firebase/app': path.resolve(__dirname, './src/config/firebase.ts'),
-      'firebase/auth': path.resolve(__dirname, './src/config/firebase.ts'),
-      'firebase/storage': path.resolve(__dirname, './src/config/firebase.ts'),
-      'firebase/functions': path.resolve(__dirname, './src/config/firebase.ts'),
-      'firebase/analytics': path.resolve(__dirname, './src/config/firebase.ts'),
       '@supabase/supabase-js': path.resolve(__dirname, './src/config/supabase.ts'),
     },
   },

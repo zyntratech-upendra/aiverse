@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { db, collection, getDocs, addDoc, updateDoc, doc, query, orderBy } from "../../config/firebase";
 import SEO from "../../components/layout/SEO";
 import { useAuth } from "../../context/AuthContext";
+import { fetchEvents as apiFetchEvents, createEvent, updateEvent, fetchOrganizers } from "../../services/apiClient";
 import { 
   Calendar, 
   MapPin, 
@@ -60,38 +60,35 @@ const OrgEventsPage: React.FC = () => {
   const [reportingEvent, setReportingEvent] = useState<EventItem | null>(null);
   const [archivingEvent, setArchivingEvent] = useState<EventItem | null>(null);
 
-  // Form States (Create/Edit)
+  // Form States
   const [formTitle, setFormTitle] = useState("");
-  const [formCategory, setFormCategory] = useState<"Workshop" | "Hackathon" | "Seminar" | "Quiz">("Workshop");
-  const [formRole, setFormRole] = useState("Lead Coordinator");
+  const [formCategory, setFormCategory] = useState("Workshop");
   const [formDate, setFormDate] = useState("");
-  const [formStartTime, setFormStartTime] = useState("10:00 AM");
-  const [formEndTime, setFormEndTime] = useState("04:00 PM");
+  const [formStartTime, setFormStartTime] = useState("");
+  const [formEndTime, setFormEndTime] = useState("");
   const [formLocation, setFormLocation] = useState("");
   const [formMaxReg, setFormMaxReg] = useState("150");
   const [formDescription, setFormDescription] = useState("");
   const [formPosterPreview, setFormPosterPreview] = useState("");
   const [formStatus, setFormStatus] = useState<"Draft" | "Active" | "Opened">("Active");
 
-  // Fetch Events from Firestore
+  // Fetch Events from API
   const fetchEvents = async () => {
     try {
       setLoading(true);
 
       // Fetch organizers to filter events assigned to logged-in user
-      const organizersSnapshot = await getDocs(collection(db, "organizers"));
-      const organizerDoc = organizersSnapshot.docs.find(docSnap => 
-        docSnap.data().email?.toLowerCase() === user?.email?.toLowerCase()
-      )?.data();
+      const organizers = await fetchOrganizers().catch(() => []);
+      const organizerDoc = (organizers || []).find((org: any) => 
+        org.email?.toLowerCase() === user?.email?.toLowerCase()
+      );
 
-      const q = query(collection(db, "events"), orderBy("createdAt", "desc"));
-      const snapshot = await getDocs(q);
+      const allEvents = await apiFetchEvents().catch(() => []);
       let list: EventItem[] = [];
 
-      snapshot.forEach((docSnap) => {
-        const data = docSnap.data();
+      (allEvents || []).forEach((data: any) => {
         list.push({
-          id: docSnap.id,
+          id: data.id || data._id || "event",
           title: data.title || "Untitled Event",
           category: data.category || "WORKSHOPS",
           status: data.status || "Active",
@@ -231,9 +228,8 @@ const OrgEventsPage: React.FC = () => {
 
     try {
       if (editingEvent) {
-        // Update Firestore
-        const docRef = doc(db, "events", editingEvent.id);
-        await updateDoc(docRef, payload);
+        // Update Event via API
+        await updateEvent(editingEvent.id, payload);
         
         // Update local state
         setEvents(prev => prev.map(evt => evt.id === editingEvent.id ? {
@@ -242,16 +238,16 @@ const OrgEventsPage: React.FC = () => {
           time: formStartTime
         } : evt));
       } else {
-        // Create Firestore
+        // Create Event via API
         payload.currentReg = 0;
         payload.createdAt = Date.now();
         payload.imageName = formCategory === "Hackathon" ? "hackathon.png" : "gallery_collab.png";
         
-        const docRef = await addDoc(collection(db, "events"), payload);
+        const created = await createEvent(payload);
         
         // Update local state
         setEvents(prev => [{
-          id: docRef.id,
+          id: created?.id || created?._id || `event-${Date.now()}`,
           ...payload,
           currentReg: 0,
           time: formStartTime
@@ -270,8 +266,7 @@ const OrgEventsPage: React.FC = () => {
   const handleArchiveEvent = async () => {
     if (!archivingEvent) return;
     try {
-      const docRef = doc(db, "events", archivingEvent.id);
-      await updateDoc(docRef, { status: "Archived" });
+      await updateEvent(archivingEvent.id, { status: "Archived" });
       
       // Update local state
       setEvents(prev => prev.map(evt => evt.id === archivingEvent.id ? {

@@ -59,7 +59,7 @@ class QuizLoadBalancer {
   /**
    * Computes an individualized, sharded autosave interval.
    * At 1,000 participants, evenly distributes writes across time so
-   * Firebase receives steady ~10-15 writes/sec rather than 1,000 at once.
+   * the backend receives steady ~10-15 writes/sec rather than 1,000 at once.
    */
   public getShardedAutosaveDelay(userId: string, baseIntervalMs = 60_000, spreadMs = 30_000): number {
     const offset = fnv1a(userId || "anonymous") % spreadMs;

@@ -3,16 +3,6 @@ import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import SEO from "../../components/layout/SEO";
 import Papa from "papaparse";
-import { 
-  db, 
-  collection, 
-  doc, 
-  getDocs, 
-  deleteDoc, 
-  getDoc, 
-  setDoc, 
-  writeBatch 
-} from "../../config/firebase";
 import { userService } from "../../services/userService";
 import { deleteQuizzesByEventId, evaluateQuizAnswers } from "../../services/quizService";
 import { 
@@ -1187,7 +1177,7 @@ const EventManagementPage: React.FC = () => {
           successCount++;
           const now = Date.now();
 
-          // Persist status to Firebase
+          // Persist status to Database
           try {
             if (recipient.isLead) {
               await updateRegistration(recipient.regId, {
@@ -1656,7 +1646,7 @@ const EventManagementPage: React.FC = () => {
           successCount++;
           const now = Date.now();
 
-          // Persist status to Firebase
+          // Persist status to Database
           try {
             if (recipient.isLead) {
               await updateRegistration(recipient.regId, {
@@ -2149,18 +2139,7 @@ const EventManagementPage: React.FC = () => {
         const qListRaw = await fetchAllQuizzes({ eventId: eventAccessEvent?.id });
         qList = Array.isArray(qListRaw) ? qListRaw : (qListRaw?.data || []);
       } catch (apiErr) {
-        console.warn("Failed to fetch quizzes via API, falling back to Firebase", apiErr);
-        const quizSnap = await getDocs(collection(db, "quizzes"));
-        quizSnap.forEach((d) => {
-          const qData = d.data();
-          if (
-            !qData.eventId ||
-            (eventAccessEvent?.id && qData.eventId === eventAccessEvent.id) ||
-            (eventAccessEvent?.title && qData.eventTitle?.toLowerCase().trim() === eventAccessEvent.title.toLowerCase().trim())
-          ) {
-            qList.push({ id: d.id, ...qData });
-          }
-        });
+        console.warn("Failed to fetch quizzes via API:", apiErr);
       }
       setEventQuizzesList(qList);
       if (qList.length > 0) {
@@ -2197,30 +2176,6 @@ const EventManagementPage: React.FC = () => {
           console.error(`Error fetching submissions for quiz ${qDef.id}:`, err);
         }
       }
-      
-      if (subs.length === 0) {
-        const subSnap = await getDocs(collection(db, "quizSubmissions"));
-        subSnap.forEach((d) => {
-          const sData = { id: d.id, ...d.data() } as any;
-          
-          // Apply overridden logic here too just in case
-          const qDef = qList.find((q) => q.id === sData.quizId) || qList[0];
-          if (qDef) {
-             const overridden = qDef.overriddenScores || {};
-             if (overridden[sData.id]) {
-                Object.assign(sData, overridden[sData.id]);
-             }
-             if ((sData.score === undefined || sData.score === null) && sData.answers) {
-               const evaluated = evaluateQuizAnswers(qDef, sData.answers);
-               sData.score = evaluated.score;
-               sData.maxScore = evaluated.maxScore;
-               sData.percentage = evaluated.percentage;
-               sData.passed = evaluated.passed;
-             }
-          }
-          subs.push(sData);
-        });
-      }
       setAllQuizSubmissions(subs);
 
       // 3. Fetch Jury Evaluations
@@ -2229,11 +2184,7 @@ const EventManagementPage: React.FC = () => {
         const juryRaw = await fetchJuryEvaluations({ eventId: eventAccessEvent?.id });
         jList = Array.isArray(juryRaw) ? juryRaw : (juryRaw?.data || []);
       } catch (apiErr) {
-        console.warn("Failed to fetch jury evaluations via API, falling back to Firebase", apiErr);
-      }
-      if (jList.length === 0) {
-        const jurySnap = await getDocs(collection(db, "jury_evaluations"));
-        jurySnap.forEach((d) => jList.push({ id: d.id, ...d.data() }));
+        console.warn("Failed to fetch jury evaluations via API:", apiErr);
       }
       setAllJuryEvaluations(jList);
     } catch (err) {

@@ -27,7 +27,6 @@ import {
 import SEO from "../../components/layout/SEO";
 import TeamReviewPage from "./TeamReviewPage";
 import ProjectSubmissionPage from "./ProjectSubmissionPage";
-import { db, collection, getDocs, doc, getDoc, query, where } from "../../config/firebase";
 import { fetchRegistrations, fetchEvents, fetchSubmission } from "../../services/apiClient";
 import { getAllQuizzes, getQuizById } from "../../services/quizService";
 import { dataCache } from "../../utils/dataCache";

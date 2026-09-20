@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { db, collection, getDocs } from "../../config/firebase";
 import SEO from "../../components/layout/SEO";
 import { useAuth } from "../../context/AuthContext";
+import { fetchEvents, fetchRegistrations } from "../../services/apiClient";
 import { 
   Users, 
   Clock, 
@@ -51,43 +51,34 @@ const OrgDashboardPage: React.FC = () => {
   useEffect(() => {
     const fetchData = async () => {
       try {
-        // Parallelize events and registrations queries
-        const [eventSnapshotRes, regSnapshotRes] = await Promise.allSettled([
-          getDocs(collection(db, "events")),
-          getDocs(collection(db, "registrations"))
+        const [eventRes, regRes] = await Promise.allSettled([
+          fetchEvents(),
+          fetchRegistrations()
         ]);
 
-        if (eventSnapshotRes.status === "fulfilled") {
-          const eventList: EventItem[] = [];
-          eventSnapshotRes.value.forEach((docSnap) => {
-            const data = docSnap.data();
-            eventList.push({
-              id: docSnap.id,
-              title: data.title || "Untitled Event",
-              description: data.description || "No description provided.",
-              currentReg: Math.max(0, Number(data.currentReg) || 0),
-              maxReg: Number(data.maxReg) || 100,
-              status: data.status || "Draft",
-              date: data.date || "TBD",
-              location: data.location || "TBD",
-              time: data.time || "TBD",
-              category: data.category || "General"
-            });
-          });
+        if (eventRes.status === "fulfilled" && Array.isArray(eventRes.value)) {
+          const eventList: EventItem[] = eventRes.value.map((data: any) => ({
+            id: data.id || data._id || "event",
+            title: data.title || "Untitled Event",
+            description: data.description || "No description provided.",
+            currentReg: Math.max(0, Number(data.currentReg) || 0),
+            maxReg: Number(data.maxReg) || 100,
+            status: data.status || "Draft",
+            date: data.date || "TBD",
+            location: data.location || "TBD",
+            time: data.time || "TBD",
+            category: data.category || "General"
+          }));
           setEvents(eventList);
           dataCache.set("org_dashboard_events", eventList, 60_000);
         }
 
-        if (regSnapshotRes.status === "fulfilled") {
-          const regList: RegistrationItem[] = [];
-          regSnapshotRes.value.forEach((docSnap) => {
-            const data = docSnap.data();
-            regList.push({
-              id: docSnap.id,
-              status: data.status || "Confirmed",
-              teamSize: data.teamSize || 1
-            });
-          });
+        if (regRes.status === "fulfilled" && Array.isArray(regRes.value)) {
+          const regList: RegistrationItem[] = regRes.value.map((data: any) => ({
+            id: data.id || data._id || "reg",
+            status: data.status || "Confirmed",
+            teamSize: data.teamSize || 1
+          }));
           setRegistrations(regList);
           dataCache.set("org_dashboard_regs", regList, 60_000);
         }

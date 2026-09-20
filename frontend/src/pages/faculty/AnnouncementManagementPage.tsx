@@ -1,7 +1,6 @@
 import React, { useState, useMemo, useEffect } from "react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
-import { db, collection, doc, getDocs, addDoc, updateDoc, deleteDoc } from "../../config/firebase";
 import { 
   Megaphone, 
   Radio, 

@@ -25,8 +25,7 @@ import {
   Loader2
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
-import { db, doc, getDoc, setDoc, updateDoc } from "../../config/firebase";
-import { fetchRegistrations, updateRegistration } from "../../services/apiClient";
+import { fetchRegistrations, updateRegistration, updateUser } from "../../services/apiClient";
 
 interface TeamMember {
   name: string;
@@ -102,16 +101,9 @@ export const TeamReviewPage: React.FC<TeamReviewPageProps> = ({ embedded = false
       const cleanEmail = user?.email?.toLowerCase().trim() || "";
 
       try {
-        // 1. Check User Document in Firestore
         let userDocData: any = null;
-        if (user?.uid && !user.uid.startsWith("mock-uid")) {
-          const uSnap = await getDoc(doc(db, "users", user.uid));
-          if (uSnap.exists()) {
-            userDocData = uSnap.data();
-          }
-        }
 
-        // 2. Query Registrations Collection via backend
+        // 1. Query Registrations Collection via backend
         let allRegs: any[] = [];
         try {
           const regs = await fetchRegistrations();
@@ -328,14 +320,8 @@ export const TeamReviewPage: React.FC<TeamReviewPageProps> = ({ embedded = false
     setSaving(true);
 
     try {
-      if (user?.email) {
-        const cleanEmail = user.email.toLowerCase().trim();
-        const docId = user.uid && !user.uid.startsWith("mock-uid") 
-          ? user.uid 
-          : cleanEmail.replace(/[^a-z0-9]/g, '_');
-
-        const userDocRef = doc(db, "users", docId);
-        await setDoc(userDocRef, {
+      if (user?.uid && !user.uid.startsWith("mock-uid")) {
+        await updateUser(user.uid, {
           teamName: editForm.teamName,
           institution: editForm.institution,
           eventTitle: editForm.projectTrack,
@@ -344,67 +330,32 @@ export const TeamReviewPage: React.FC<TeamReviewPageProps> = ({ embedded = false
           studentId: editForm.leader.rollNo,
           phoneNumber: editForm.leader.phone,
           members: editForm.members,
-          updatedAt: Date.now()
-        }, { merge: true });
+        }).catch((uErr) => console.warn("User profile update notice:", uErr));
       }
 
       if (editForm.docId) {
-        const regRef = doc(db, "registrations", editForm.docId);
-        const updatedMembersPayload = [
-          {
-            name: editForm.leader.name,
-            studentId: editForm.leader.rollNo,
-            email: editForm.leader.email,
-            role: "LEADER"
-          },
-          ...editForm.members.map(m => ({
+        await updateRegistration(editForm.docId, {
+          groupName: editForm.teamName,
+          eventTitle: editForm.projectTrack,
+          teamLeadName: editForm.leader.name,
+          teamLeadEmail: editForm.leader.email,
+          teamLeadStudentId: editForm.leader.rollNo,
+          phoneNumber: editForm.leader.phone,
+          members: editForm.members.map(m => ({
             name: m.name,
             studentId: m.rollNo,
             email: m.email,
-            role: m.role || "DEVELOPER"
+            role: m.role || "Member"
           }))
-        ];
-
-        try {
-          await updateDoc(regRef, {
-            groupName: editForm.teamName,
-            eventTitle: editForm.projectTrack,
-            teamLeadName: editForm.leader.name,
-            teamLeadEmail: editForm.leader.email,
-            teamLeadStudentId: editForm.leader.rollNo,
-            phoneNumber: editForm.leader.phone,
-            members: updatedMembersPayload,
-            updatedAt: Date.now()
-          });
-        } catch (e) { console.warn("Firebase sync missed:", e); }
-
-        // Also update MongoDB backend (Primary DB)
-        try {
-          await updateRegistration(editForm.docId, {
-            groupName: editForm.teamName,
-            eventTitle: editForm.projectTrack,
-            teamLeadName: editForm.leader.name,
-            teamLeadEmail: editForm.leader.email,
-            teamLeadStudentId: editForm.leader.rollNo,
-            phoneNumber: editForm.leader.phone,
-            members: editForm.members.map(m => ({
-              name: m.name,
-              studentId: m.rollNo,
-              email: m.email,
-              role: m.role || "Member"
-            }))
-          });
-        } catch (e) {
-          console.error("Failed to update registration in MongoDB:", e);
-        }
+        });
       }
 
       setTeamData(editForm);
       setShowEditModal(false);
       setSaveSuccessNotice(true);
       setTimeout(() => setSaveSuccessNotice(false), 4000);
-    } catch (err) {
-      console.error("Failed to save team details to Firestore:", err);
+    } catch (err: any) {
+      console.error("Failed to save team details:", err);
       alert("Failed to save team changes. Please try again.");
     } finally {
       setSaving(false);

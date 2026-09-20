@@ -15,9 +15,7 @@ import {
   ShieldCheck,
   Download
 } from "lucide-react";
-import { db } from "../../config/firebase";
-import { doc, updateDoc, getDoc, collection, getDocs } from "../../config/firebase";
-import { uploadImage } from "../../services/apiClient";
+import { uploadImage, updateRegistration, fetchRegistrations, fetchEvents, fetchEventById } from "../../services/apiClient";
 import SEO from "../../components/layout/SEO";
 
 interface ProjectSubmissionPageProps {
@@ -160,12 +158,11 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     return null;
   };
 
-  // Debounced Firestore Auto-Save in background
+  // Debounced Auto-Save in background
   const performAutoSave = async () => {
     if (!targetRegId || !isDirtyRef.current) return;
     try {
       setSaveStatus("saving");
-      const regRef = doc(db, "registrations", targetRegId);
       const cRound = currentTeamRoundRef.current || 1;
       const rP = `r${cRound}_`;
       const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsIdRefVal.current || p.code === selectedPsIdRefVal.current) || null;
@@ -217,13 +214,13 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         updatePayload[`${rP}presentationUrl`] = currentPptUrl;
       }
 
-      await updateDoc(regRef, updatePayload);
+      await updateRegistration(targetRegId, updatePayload);
 
       isDirtyRef.current = false;
       setSaveStatus("saved");
       setTimeout(() => setSaveStatus("idle"), 3000);
     } catch (err) {
-      console.warn("Auto-save to Firestore failed:", err);
+      console.warn("Auto-save failed:", err);
       setSaveStatus("idle");
     }
   };
@@ -240,14 +237,11 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     return !!eventLockedSteps[stepId];
   };
 
-  const saveStepDataToFirestore = async (additionalFields: Record<string, any> = {}) => {
+  const saveStepData = async (additionalFields: Record<string, any> = {}) => {
     if (!targetRegId) return;
     try {
-      const regRef = doc(db, "registrations", targetRegId);
       const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsIdRefVal.current || p.code === selectedPsIdRefVal.current) || null;
-      // Read currentRound to tag saved data with correct round
-      const currentDocSnap = await getDoc(regRef);
-      const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRoundRef.current || 1) : (currentTeamRoundRef.current || 1);
+      const currentRoundVal = currentTeamRoundRef.current || 1;
       const rP = `r${currentRoundVal}_`;
 
       const curPs = problemStatementRefVal.current;
@@ -297,12 +291,14 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         }
       });
 
-      await updateDoc(regRef, payload);
+      await updateRegistration(targetRegId, payload);
       isDirtyRef.current = false;
     } catch (err) {
-      console.error("Error saving step data to Firestore:", err);
+      console.error("Error saving step data:", err);
     }
   };
+
+  const saveStepDataToFirestore = saveStepData;
 
   // Helper to apply registration data safely without wiping user edits
   const applyRegistrationDocData = (data: any, isInitialHydration: boolean = false) => {
@@ -473,22 +469,20 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     let pollReg: any = null;
     const loadReg = async (isInitial: boolean) => {
       try {
-        const docSnap = await getDoc(doc(db, "registrations", targetRegId));
-        if (docSnap.exists()) {
-          const data = docSnap.data();
-          applyRegistrationDocData(data, isInitial);
+        const allRegs = await fetchRegistrations().catch(() => []);
+        const reg = (allRegs || []).find((r: any) => (r.id || r._id) === targetRegId);
+        if (reg) {
+          applyRegistrationDocData(reg, isInitial);
 
           // Fetch event details if available
-          let eventId = data.eventId;
+          let eventId = reg.eventId;
           let eventData: any = null;
           if (eventId) {
-            const evSnap = await getDoc(doc(db, "events", eventId));
-            if (evSnap.exists()) eventData = evSnap.data();
+            eventData = await fetchEventById(eventId).catch(() => null);
           }
-          if (!eventData && data.eventTitle) {
-            const evsSnap = await getDocs(collection(db, "events"));
-            const matched = evsSnap.docs.find(d => (d.data().title || "").toLowerCase().trim() === (data.eventTitle || "").toLowerCase().trim());
-            if (matched) eventData = matched.data();
+          if (!eventData && reg.eventTitle) {
+            const allEvs = await fetchEvents().catch(() => []);
+            eventData = (allEvs || []).find((d: any) => (d.title || "").toLowerCase().trim() === (reg.eventTitle || "").toLowerCase().trim());
           }
           if (eventData) {
             if (eventData.problemStatements && eventData.problemStatements.length > 0) {
@@ -521,9 +515,8 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     let pollEv: any = null;
     const loadEv = async () => {
       try {
-        const evSnap = await getDoc(doc(db, "events", currentEventId));
-        if (evSnap.exists()) {
-          const evData = evSnap.data();
+        const evData = await fetchEventById(currentEventId).catch(() => null);
+        if (evData) {
           if (evData.lockedSteps) setEventLockedSteps(evData.lockedSteps);
           else setEventLockedSteps({});
           if (evData.problemStatements && evData.problemStatements.length > 0) setAvailableProblemStatements(evData.problemStatements);
@@ -542,16 +535,15 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
     let pollAll: any = null;
     const loadAll = async () => {
       try {
-        const snapshot = await getDocs(collection(db, "registrations"));
+        const allRegs = await fetchRegistrations().catch(() => []);
         const takenMap: Record<string, string> = {};
-        snapshot.docs.forEach((docSnap) => {
-          const reg = docSnap.data();
-          const regId = docSnap.id;
+        (allRegs || []).forEach((reg: any) => {
+          const regId = reg.id || reg._id;
           if (targetRegId && regId === targetRegId) return;
           const regRound = Number(reg.currentRound || reg.promotedToRound || 1);
           const rP = `r${currentTeamRound}_`;
           const psId = (regRound === currentTeamRound ? reg.selectedProblemStatementId : "") || reg[`${rP}selectedProblemStatementId`];
-          const isSaved = reg[`${rP}isPsSaved`] === true || (regRound === currentTeamRound && reg.isPsSaved !== false && !!psId);
+          const isSaved = reg[`${rP}isPsSaved`] === true || (regRound === currentTeamRound && reg.isPsSaved !== false && !psId);
           if (psId && isSaved) {
             const teamName = reg.groupName || reg.teamName || reg.participantName || reg.name || "Another Team";
             takenMap[psId] = teamName;
@@ -745,11 +737,9 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
 
     try {
       if (targetRegId) {
-        const regRef = doc(db, "registrations", targetRegId);
-        const currentDocSnap = await getDoc(regRef);
-        const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRound || 1) : (currentTeamRound || 1);
+        const currentRoundVal = currentTeamRound || 1;
         const rP = `r${currentRoundVal}_`;
-        await updateDoc(regRef, {
+        await updateRegistration(targetRegId, {
           selectedProblemStatementId: selectedPsId,
           selectedProblemStatement: selectedPsObj,
           problemStatement,
@@ -802,11 +792,9 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
 
     if (targetRegId) {
       try {
-        const regRef = doc(db, "registrations", targetRegId);
-        const currentDocSnap = await getDoc(regRef);
-        const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRound || 1) : (currentTeamRound || 1);
+        const currentRoundVal = currentTeamRound || 1;
         const rP = `r${currentRoundVal}_`;
-        await updateDoc(regRef, {
+        await updateRegistration(targetRegId, {
           selectedProblemStatementId: "",
           selectedProblemStatement: null,
           problemStatement: "",
@@ -821,7 +809,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
           [`${rP}isPsLocked`]: false,
         });
       } catch (err) {
-        console.error("Error clearing problem statement hold in Firestore:", err);
+        console.error("Error clearing problem statement hold:", err);
       }
     }
   };
@@ -844,12 +832,10 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
 
     if (targetRegId) {
       try {
-        const regRef = doc(db, "registrations", targetRegId);
         const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsId || p.code === selectedPsId) || null;
-        const currentDocSnap = await getDoc(regRef);
-        const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRound || 1) : (currentTeamRound || 1);
+        const currentRoundVal = currentTeamRound || 1;
         const rP = `r${currentRoundVal}_`;
-        await updateDoc(regRef, {
+        await updateRegistration(targetRegId, {
           problemStatement,
           selectedProblemStatementId: selectedPsId,
           selectedProblemStatement: selectedPsObj,
@@ -865,7 +851,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
           [`${rP}isPsLocked`]: true,
         });
       } catch (err) {
-        console.error("Error locking problem statement selection in Firestore:", err);
+        console.error("Error locking problem statement selection:", err);
       }
     }
 
@@ -880,10 +866,8 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
 
     try {
       if (targetRegId) {
-        const regRef = doc(db, "registrations", targetRegId);
         const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsIdRefVal.current || p.code === selectedPsIdRefVal.current) || null;
-        const currentDocSnap = await getDoc(regRef);
-        const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRoundRef.current || 1) : (currentTeamRoundRef.current || 1);
+        const currentRoundVal = currentTeamRoundRef.current || 1;
         const rP = `r${currentRoundVal}_`;
 
         const curPs = problemStatementRefVal.current;
@@ -897,7 +881,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         const curPptUrl = presentationUrlRefVal.current;
         const curPsId = selectedPsIdRefVal.current;
 
-        await updateDoc(regRef, {
+        await updateRegistration(targetRegId, {
           problemStatement: curPs,
           keyFeatures: curKf,
           githubUrl: curGh,
@@ -948,10 +932,8 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
 
     try {
       if (targetRegId) {
-        const regRef = doc(db, "registrations", targetRegId);
         const selectedPsObj = availableProblemStatements.find(p => p.id === selectedPsIdRefVal.current || p.code === selectedPsIdRefVal.current) || null;
-        const currentDocSnap = await getDoc(regRef);
-        const currentRoundVal = currentDocSnap.exists() ? (Number(currentDocSnap.data().currentRound) || currentTeamRoundRef.current || 1) : (currentTeamRoundRef.current || 1);
+        const currentRoundVal = currentTeamRoundRef.current || 1;
         const rP = `r${currentRoundVal}_`;
         const now = Date.now();
 
@@ -966,7 +948,7 @@ export const ProjectSubmissionPage: React.FC<ProjectSubmissionPageProps> = ({
         const curPptUrl = presentationUrlRefVal.current;
         const curPsId = selectedPsIdRefVal.current;
 
-        await updateDoc(regRef, {
+        await updateRegistration(targetRegId, {
           problemStatement: curPs,
           keyFeatures: curKf,
           githubUrl: curGh,

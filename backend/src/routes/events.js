@@ -6,6 +6,15 @@ const Registration = require('../models/Registration');
 const { optionalAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { pick } = require('../utils/sanitize');
+const { uploadToCloudinaryIfBase64 } = require('../utils/cloudinaryHelper');
+
+async function sanitizeEventImages(eventData) {
+  if (eventData.posterUrl) eventData.posterUrl = await uploadToCloudinaryIfBase64(eventData.posterUrl, 'ai_verse/events');
+  if (eventData.image) eventData.image = await uploadToCloudinaryIfBase64(eventData.image, 'ai_verse/events');
+  if (eventData.bannerImage) eventData.bannerImage = await uploadToCloudinaryIfBase64(eventData.bannerImage, 'ai_verse/events');
+  if (eventData.coverImage) eventData.coverImage = await uploadToCloudinaryIfBase64(eventData.coverImage, 'ai_verse/events');
+  return eventData;
+}
 
 // Helper to compute registration counts for events (counting active teams/registrations)
 let cachedCounts = null;
@@ -131,7 +140,8 @@ router.post(
   requireAdmin,
   asyncHandler(async (req, res) => {
     const rawPayload = req.body || {};
-    const { _id, id: bodyId, ...eventData } = rawPayload;
+    let { _id, id: bodyId, ...eventData } = rawPayload;
+    eventData = await sanitizeEventImages(eventData);
     const id = _id || bodyId || new mongoose.Types.ObjectId().toString();
     const now = Date.now();
 
@@ -154,7 +164,8 @@ router.put(
   asyncHandler(async (req, res) => {
     const id = req.params.id;
     const rawPayload = req.body || {};
-    const { _id, id: bodyId, ...updateData } = rawPayload;
+    let { _id, id: bodyId, ...updateData } = rawPayload;
+    updateData = await sanitizeEventImages(updateData);
     updateData.updatedAt = Date.now();
 
     const updated = await Event.findOneAndUpdate(
