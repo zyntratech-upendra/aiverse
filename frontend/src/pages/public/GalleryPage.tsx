@@ -18,9 +18,7 @@ import {
   Image as ImageIcon,
   Download,
   Play,
-  Pause,
-  Maximize2,
-  Film
+  Pause
 } from "lucide-react";
 
 export interface EventPhoto {
@@ -76,10 +74,6 @@ const GalleryPage: React.FC = () => {
     return (cached && Array.isArray(cached)) ? cached : [];
   });
   const [loading, setLoading] = useState<boolean>(true);
-  
-  // Featured Showcase Reel State
-  const [reelIndex, setReelIndex] = useState(0);
-  const [isReelPlaying, setIsReelPlaying] = useState(true);
 
   // Lightbox State (Active Event Section, Photo Index, and Autoplay State)
   const [activeLightbox, setActiveLightbox] = useState<{
@@ -213,30 +207,6 @@ const GalleryPage: React.FC = () => {
     return Array.from(groupMap.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   }, [photos]);
 
-  // Featured Photos List for the Auto-Playing Top Showcase Reel
-  const featuredReelPhotos = useMemo<EventPhoto[]>(() => {
-    if (photos.length === 0) return [];
-    const seen = new Set<string>();
-    const result: EventPhoto[] = [];
-    for (const p of photos) {
-      if (!seen.has(p.imageUrl)) {
-        seen.add(p.imageUrl);
-        result.push(p);
-      }
-      if (result.length >= 8) break;
-    }
-    return result.length > 0 ? result : photos.slice(0, 8);
-  }, [photos]);
-
-  // Continuous Auto-play for the Featured Top Reel (4s interval)
-  useEffect(() => {
-    if (!isReelPlaying || featuredReelPhotos.length <= 1) return;
-    const timer = setInterval(() => {
-      setReelIndex((prev) => (prev + 1) % featuredReelPhotos.length);
-    }, 4000);
-    return () => clearInterval(timer);
-  }, [isReelPlaying, featuredReelPhotos.length]);
-
   // Continuous Auto-play for the Active Lightbox Modal (3.5s interval)
   useEffect(() => {
     if (!activeLightbox || !activeLightbox.isAutoplaying) return;
@@ -322,7 +292,7 @@ const GalleryPage: React.FC = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
-  const currentReelPhoto = featuredReelPhotos[reelIndex] || featuredReelPhotos[0];
+
 
   return (
     <div className="overflow-hidden bg-[#FAFBFC] pb-24 min-h-screen font-sans">
@@ -365,161 +335,7 @@ const GalleryPage: React.FC = () => {
         </div>
       </section>
 
-      {/* ================= FEATURED AUTO-PLAYING SHOWCASE REEL ================= */}
-      {featuredReelPhotos.length > 0 && currentReelPhoto && (
-        <section className="max-w-7xl mx-auto px-6 lg:px-8 mb-12">
-          <div className="relative rounded-3xl overflow-hidden shadow-xl border border-slate-200/90 bg-slate-950">
-            {/* Background & Main Active Photo with Smooth Transition */}
-            <div className="relative aspect-[16/9] sm:aspect-[21/9] md:h-[480px] w-full flex items-center justify-center overflow-hidden">
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={currentReelPhoto.imageUrl}
-                  initial={{ opacity: 0, scale: 1.05 }}
-                  animate={{ opacity: 1, scale: 1 }}
-                  exit={{ opacity: 0, scale: 0.97 }}
-                  transition={{ duration: 0.65, ease: "easeInOut" }}
-                  className="absolute inset-0 w-full h-full"
-                >
-                  <img
-                    src={currentReelPhoto.imageUrl}
-                    alt={currentReelPhoto.title}
-                    className="w-full h-full object-cover object-center"
-                  />
-                  {/* Subtle Gradient Overlays for Readability */}
-                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/95 via-slate-950/40 to-transparent" />
-                  <div className="absolute inset-0 bg-gradient-to-r from-slate-950/80 via-transparent to-transparent" />
-                </motion.div>
-              </AnimatePresence>
 
-              {/* Top Controls Overlay */}
-              <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-20 pointer-events-auto">
-                <div className="flex items-center gap-2">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/80 backdrop-blur-md border border-white/15 text-white text-[11px] font-black tracking-wide">
-                    <Film className="w-3.5 h-3.5 text-blue-400" />
-                    <span>Featured Reel</span>
-                  </span>
-                  <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-600/90 text-white text-[10px] font-extrabold uppercase tracking-wider">
-                    {currentReelPhoto.category}
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2 bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/15">
-                  <button
-                    onClick={() => setIsReelPlaying(!isReelPlaying)}
-                    className="flex items-center gap-1.5 text-white hover:text-blue-400 transition-colors text-xs font-bold cursor-pointer"
-                    title={isReelPlaying ? "Pause Auto-play" : "Play Slideshow"}
-                  >
-                    {isReelPlaying ? (
-                      <>
-                        <Pause className="w-3.5 h-3.5 fill-current" />
-                        <span className="hidden sm:inline">Playing</span>
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-3.5 h-3.5 fill-current text-green-400" />
-                        <span className="hidden sm:inline text-green-400">Play Reel</span>
-                      </>
-                    )}
-                  </button>
-
-                  <div className="w-px h-3.5 bg-white/20" />
-
-                  <span className="text-[11px] font-mono text-slate-300">
-                    {reelIndex + 1} / {featuredReelPhotos.length}
-                  </span>
-                </div>
-              </div>
-
-              {/* Left / Right Arrow Buttons */}
-              <button
-                onClick={() => {
-                  setReelIndex((prev) => (prev > 0 ? prev - 1 : featuredReelPhotos.length - 1));
-                }}
-                className="absolute left-4 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-slate-900/80 hover:bg-blue-600 text-white backdrop-blur-md border border-white/15 flex items-center justify-center transition-all shadow-lg hover:scale-105 cursor-pointer"
-                title="Previous Slide"
-              >
-                <ChevronLeft className="w-6 h-6" />
-              </button>
-
-              <button
-                onClick={() => {
-                  setReelIndex((prev) => (prev + 1) % featuredReelPhotos.length);
-                }}
-                className="absolute right-4 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-slate-900/80 hover:bg-blue-600 text-white backdrop-blur-md border border-white/15 flex items-center justify-center transition-all shadow-lg hover:scale-105 cursor-pointer"
-                title="Next Slide"
-              >
-                <ChevronRight className="w-6 h-6" />
-              </button>
-
-              {/* Bottom Caption & Interactive Info */}
-              <div className="absolute bottom-6 left-6 right-6 z-20 flex flex-col md:flex-row md:items-end justify-between gap-4 text-white">
-                <div className="space-y-1.5 max-w-2xl">
-                  <div className="flex items-center gap-2 text-xs font-bold text-blue-400">
-                    <Calendar className="w-3.5 h-3.5" />
-                    <span>{currentReelPhoto.date}</span>
-                  </div>
-                  <h3 className="text-2xl sm:text-3xl font-black text-white tracking-tight drop-shadow-md">
-                    {currentReelPhoto.title}
-                  </h3>
-                  {currentReelPhoto.caption && (
-                    <p className="text-xs sm:text-sm text-slate-300 font-medium line-clamp-2 drop-shadow-sm">
-                      {currentReelPhoto.caption}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex items-center gap-3 shrink-0">
-                  <button
-                    onClick={() => {
-                      const matchedSection = groupedEvents.find(g => g.photos.some(p => p.imageUrl === currentReelPhoto.imageUrl)) || {
-                        eventKey: "featured-reel",
-                        eventTitle: "Featured Spotlight",
-                        category: currentReelPhoto.category,
-                        date: currentReelPhoto.date,
-                        createdAt: Date.now(),
-                        photos: featuredReelPhotos
-                      };
-                      const foundIdx = matchedSection.photos.findIndex(p => p.imageUrl === currentReelPhoto.imageUrl);
-                      setActiveLightbox({
-                        section: matchedSection,
-                        index: foundIdx >= 0 ? foundIdx : 0,
-                        isAutoplaying: true
-                      });
-                    }}
-                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-lg flex items-center gap-2 hover:scale-102 cursor-pointer"
-                  >
-                    <Maximize2 className="w-3.5 h-3.5" />
-                    <span>Full Screen Slideshow</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Bottom Dots & Progress Bar Indicator */}
-            <div className="bg-slate-950 px-6 py-3 border-t border-white/10 flex items-center justify-between gap-4">
-              <div className="flex items-center gap-1.5 overflow-x-auto">
-                {featuredReelPhotos.map((p, idx) => (
-                  <button
-                    key={p.id || idx}
-                    onClick={() => setReelIndex(idx)}
-                    className={`h-2 rounded-full transition-all cursor-pointer ${
-                      idx === reelIndex
-                        ? "w-8 bg-blue-500"
-                        : "w-2 bg-slate-700 hover:bg-slate-500"
-                    }`}
-                    title={`Slide ${idx + 1}`}
-                  />
-                ))}
-              </div>
-
-              <div className="text-[11px] text-slate-400 font-medium flex items-center gap-2">
-                <Sparkles className="w-3 h-3 text-blue-400" />
-                <span>Auto-playing • Click photos below to explore full albums</span>
-              </div>
-            </div>
-          </div>
-        </section>
-      )}
 
       {/* ================= TAB CONTROLS & SEARCH ================= */}
       <section className="max-w-7xl mx-auto px-6 lg:px-8 mb-10">
