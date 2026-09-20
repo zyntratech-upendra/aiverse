@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "react-router-dom";
 import { motion, AnimatePresence } from "framer-motion";
 import Button from "../../components/ui/Button";
@@ -292,6 +293,18 @@ const GalleryPage: React.FC = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
+  // Lock background scroll when Lightbox modal is active
+  useEffect(() => {
+    if (activeLightbox) {
+      document.body.style.overflow = "hidden";
+    } else {
+      document.body.style.overflow = "";
+    }
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [activeLightbox]);
+
 
 
   return (
@@ -526,182 +539,185 @@ const GalleryPage: React.FC = () => {
       </section>
 
       {/* ================= ENHANCED LIGHTBOX MODAL WITH PLAY/PAUSE SLIDESHOW ================= */}
-      <AnimatePresence>
-        {activeLightbox && (
-          <div
-            onClick={() => setActiveLightbox(null)}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-slate-950/95 backdrop-blur-md"
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.94 }}
-              animate={{ opacity: 1, scale: 1 }}
-              exit={{ opacity: 0, scale: 0.94 }}
-              onClick={(e) => e.stopPropagation()}
-              className="relative max-w-5xl w-full bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex flex-col max-h-[92vh]"
+      {typeof document !== "undefined" && createPortal(
+        <AnimatePresence>
+          {activeLightbox && (
+            <div
+              onClick={() => setActiveLightbox(null)}
+              className="fixed inset-0 z-[99999] flex items-center justify-center p-3 sm:p-6 bg-slate-950/95 backdrop-blur-md"
             >
-              {/* Top Header */}
-              <div className="p-4 bg-slate-950/95 border-b border-white/10 flex items-center justify-between shrink-0 text-white">
-                <div className="space-y-0.5">
-                  <div className="flex items-center gap-2">
-                    <span
-                      className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full border ${getCategoryStyles(
-                        activeLightbox.section.category
-                      )}`}
-                    >
-                      {activeLightbox.section.category}
-                    </span>
-                    <span className="text-xs text-slate-400 font-medium">
-                      {activeLightbox.section.date}
-                    </span>
-                    <span className="text-[11px] text-blue-400 font-bold bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
-                      Photo {activeLightbox.index + 1} of {activeLightbox.section.photos.length}
-                    </span>
+              <motion.div
+                initial={{ opacity: 0, scale: 0.94 }}
+                animate={{ opacity: 1, scale: 1 }}
+                exit={{ opacity: 0, scale: 0.94 }}
+                onClick={(e) => e.stopPropagation()}
+                className="relative max-w-5xl w-full bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex flex-col max-h-[92vh]"
+              >
+                {/* Top Header */}
+                <div className="p-4 bg-slate-950/95 border-b border-white/10 flex items-center justify-between shrink-0 text-white">
+                  <div className="space-y-0.5">
+                    <div className="flex items-center gap-2">
+                      <span
+                        className={`text-[10px] font-black uppercase px-2 py-0.5 rounded-full border ${getCategoryStyles(
+                          activeLightbox.section.category
+                        )}`}
+                      >
+                        {activeLightbox.section.category}
+                      </span>
+                      <span className="text-xs text-slate-400 font-medium">
+                        {activeLightbox.section.date}
+                      </span>
+                      <span className="text-[11px] text-blue-400 font-bold bg-blue-500/10 px-2 py-0.5 rounded-full border border-blue-500/20">
+                        Photo {activeLightbox.index + 1} of {activeLightbox.section.photos.length}
+                      </span>
+                    </div>
+                    <h3 className="text-base sm:text-lg font-black text-white">
+                      {activeLightbox.section.eventTitle}
+                    </h3>
                   </div>
-                  <h3 className="text-base sm:text-lg font-black text-white">
-                    {activeLightbox.section.eventTitle}
-                  </h3>
+
+                  <div className="flex items-center gap-2">
+                    {/* Play / Pause Toggle Button */}
+                    {activeLightbox.section.photos.length > 1 && (
+                      <button
+                        onClick={() =>
+                          setActiveLightbox((prev) =>
+                            prev ? { ...prev, isAutoplaying: !prev.isAutoplaying } : null
+                          )
+                        }
+                        className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                          activeLightbox.isAutoplaying
+                            ? "bg-blue-600 text-white"
+                            : "bg-white/10 text-slate-300 hover:bg-white/20"
+                        }`}
+                        title="Toggle Slideshow Playback (Spacebar)"
+                      >
+                        {activeLightbox.isAutoplaying ? (
+                          <>
+                            <Pause className="w-3.5 h-3.5 fill-current" />
+                            <span>Playing</span>
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-3.5 h-3.5 fill-current text-green-400" />
+                            <span>Play Slideshow</span>
+                          </>
+                        )}
+                      </button>
+                    )}
+
+                    <a
+                      href={activeLightbox.section.photos[activeLightbox.index]?.imageUrl}
+                      download={`photo-${activeLightbox.index + 1}.jpg`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-white/10 transition-colors"
+                      title="Download Photo"
+                    >
+                      <Download className="h-4 w-4" />
+                    </a>
+
+                    <button
+                      onClick={() => setActiveLightbox(null)}
+                      className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-white/10 transition-colors cursor-pointer"
+                      title="Close (Escape)"
+                    >
+                      <X className="h-5 w-5" />
+                    </button>
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2">
-                  {/* Play / Pause Toggle Button */}
+                {/* High-Res Photo Container with Navigation Controls */}
+                <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden p-2 min-h-[320px]">
+                  <AnimatePresence mode="wait">
+                    <motion.img
+                      key={activeLightbox.section.photos[activeLightbox.index]?.id || activeLightbox.index}
+                      src={activeLightbox.section.photos[activeLightbox.index]?.imageUrl}
+                      alt={activeLightbox.section.eventTitle}
+                      initial={{ opacity: 0, scale: 0.98 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.98 }}
+                      transition={{ duration: 0.25 }}
+                      className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl shadow-2xl"
+                    />
+                  </AnimatePresence>
+
+                  {/* Left arrow */}
                   {activeLightbox.section.photos.length > 1 && (
                     <button
-                      onClick={() =>
-                        setActiveLightbox((prev) =>
-                          prev ? { ...prev, isAutoplaying: !prev.isAutoplaying } : null
-                        )
-                      }
-                      className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
-                        activeLightbox.isAutoplaying
-                          ? "bg-blue-600 text-white"
-                          : "bg-white/10 text-slate-300 hover:bg-white/20"
-                      }`}
-                      title="Toggle Slideshow Playback (Spacebar)"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveLightbox((prev) => {
+                          if (!prev) return null;
+                          const newIdx = prev.index > 0 ? prev.index - 1 : prev.section.photos.length - 1;
+                          return { ...prev, index: newIdx };
+                        });
+                      }}
+                      className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-slate-900/80 hover:bg-blue-600 text-white flex items-center justify-center transition-all shadow-lg cursor-pointer border border-white/10"
+                      title="Previous Photo (Left Arrow)"
                     >
-                      {activeLightbox.isAutoplaying ? (
-                        <>
-                          <Pause className="w-3.5 h-3.5 fill-current" />
-                          <span>Playing</span>
-                        </>
-                      ) : (
-                        <>
-                          <Play className="w-3.5 h-3.5 fill-current text-green-400" />
-                          <span>Play Slideshow</span>
-                        </>
-                      )}
+                      <ChevronLeft className="w-6 h-6" />
                     </button>
                   )}
 
-                  <a
-                    href={activeLightbox.section.photos[activeLightbox.index]?.imageUrl}
-                    download={`photo-${activeLightbox.index + 1}.jpg`}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-white/10 transition-colors"
-                    title="Download Photo"
-                  >
-                    <Download className="h-4 w-4" />
-                  </a>
-
-                  <button
-                    onClick={() => setActiveLightbox(null)}
-                    className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-white/10 transition-colors cursor-pointer"
-                    title="Close (Escape)"
-                  >
-                    <X className="h-5 w-5" />
-                  </button>
-                </div>
-              </div>
-
-              {/* High-Res Photo Container with Navigation Controls */}
-              <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden p-2 min-h-[320px]">
-                <AnimatePresence mode="wait">
-                  <motion.img
-                    key={activeLightbox.section.photos[activeLightbox.index]?.id || activeLightbox.index}
-                    src={activeLightbox.section.photos[activeLightbox.index]?.imageUrl}
-                    alt={activeLightbox.section.eventTitle}
-                    initial={{ opacity: 0, scale: 0.98 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    exit={{ opacity: 0, scale: 0.98 }}
-                    transition={{ duration: 0.25 }}
-                    className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl shadow-2xl"
-                  />
-                </AnimatePresence>
-
-                {/* Left arrow */}
-                {activeLightbox.section.photos.length > 1 && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveLightbox((prev) => {
-                        if (!prev) return null;
-                        const newIdx = prev.index > 0 ? prev.index - 1 : prev.section.photos.length - 1;
-                        return { ...prev, index: newIdx };
-                      });
-                    }}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-slate-900/80 hover:bg-blue-600 text-white flex items-center justify-center transition-all shadow-lg cursor-pointer border border-white/10"
-                    title="Previous Photo (Left Arrow)"
-                  >
-                    <ChevronLeft className="w-6 h-6" />
-                  </button>
-                )}
-
-                {/* Right arrow */}
-                {activeLightbox.section.photos.length > 1 && (
-                  <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setActiveLightbox((prev) => {
-                        if (!prev) return null;
-                        const newIdx = prev.index < prev.section.photos.length - 1 ? prev.index + 1 : 0;
-                        return { ...prev, index: newIdx };
-                      });
-                    }}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-slate-900/80 hover:bg-blue-600 text-white flex items-center justify-center transition-all shadow-lg cursor-pointer border border-white/10"
-                    title="Next Photo (Right Arrow)"
-                  >
-                    <ChevronRight className="w-6 h-6" />
-                  </button>
-                )}
-              </div>
-
-              {/* Bottom Caption & Thumbnails Bar */}
-              <div className="p-4 bg-slate-950/95 border-t border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-300">
-                <div className="space-y-1 max-w-xl">
-                  {activeLightbox.section.photos[activeLightbox.index]?.caption ? (
-                    <p className="font-medium text-slate-200">
-                      {activeLightbox.section.photos[activeLightbox.index].caption}
-                    </p>
-                  ) : activeLightbox.section.description ? (
-                    <p className="text-slate-300">{activeLightbox.section.description}</p>
-                  ) : (
-                    <p className="text-slate-500 italic">No caption provided.</p>
+                  {/* Right arrow */}
+                  {activeLightbox.section.photos.length > 1 && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setActiveLightbox((prev) => {
+                          if (!prev) return null;
+                          const newIdx = prev.index < prev.section.photos.length - 1 ? prev.index + 1 : 0;
+                          return { ...prev, index: newIdx };
+                        });
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-slate-900/80 hover:bg-blue-600 text-white flex items-center justify-center transition-all shadow-lg cursor-pointer border border-white/10"
+                      title="Next Photo (Right Arrow)"
+                    >
+                      <ChevronRight className="w-6 h-6" />
+                    </button>
                   )}
                 </div>
 
-                {/* Thumbnails Row if multi-photo */}
-                {activeLightbox.section.photos.length > 1 && (
-                  <div className="flex items-center gap-1.5 overflow-x-auto max-w-xs py-1">
-                    {activeLightbox.section.photos.map((p, idx) => (
-                      <button
-                        key={p.id || idx}
-                        onClick={() => setActiveLightbox((prev) => prev ? { ...prev, index: idx } : null)}
-                        className={`w-10 h-8 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer ${
-                          idx === activeLightbox.index
-                            ? "border-blue-500 scale-105"
-                            : "border-transparent opacity-50 hover:opacity-100"
-                        }`}
-                      >
-                        <img src={p.imageUrl} alt="" className="w-full h-full object-cover" />
-                      </button>
-                    ))}
+                {/* Bottom Caption & Thumbnails Bar */}
+                <div className="p-4 bg-slate-950/95 border-t border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-300">
+                  <div className="space-y-1 max-w-xl">
+                    {activeLightbox.section.photos[activeLightbox.index]?.caption ? (
+                      <p className="font-medium text-slate-200">
+                        {activeLightbox.section.photos[activeLightbox.index].caption}
+                      </p>
+                    ) : activeLightbox.section.description ? (
+                      <p className="text-slate-300">{activeLightbox.section.description}</p>
+                    ) : (
+                      <p className="text-slate-500 italic">No caption provided.</p>
+                    )}
                   </div>
-                )}
-              </div>
-            </motion.div>
-          </div>
-        )}
-      </AnimatePresence>
+
+                  {/* Thumbnails Row if multi-photo */}
+                  {activeLightbox.section.photos.length > 1 && (
+                    <div className="flex items-center gap-1.5 overflow-x-auto max-w-xs py-1">
+                      {activeLightbox.section.photos.map((p, idx) => (
+                        <button
+                          key={p.id || idx}
+                          onClick={() => setActiveLightbox((prev) => prev ? { ...prev, index: idx } : null)}
+                          className={`w-10 h-8 rounded-lg overflow-hidden shrink-0 border-2 transition-all cursor-pointer ${
+                            idx === activeLightbox.index
+                              ? "border-blue-500 scale-105"
+                              : "border-transparent opacity-50 hover:opacity-100"
+                          }`}
+                        >
+                          <img src={p.imageUrl} alt="" className="w-full h-full object-cover" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
 
       {/* ================= CALL TO ACTION SECTION ================= */}
       <section className="max-w-5xl mx-auto px-6 lg:px-8 mb-12">
