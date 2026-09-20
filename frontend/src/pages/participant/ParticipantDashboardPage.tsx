@@ -27,7 +27,7 @@ import {
 import SEO from "../../components/layout/SEO";
 import TeamReviewPage from "./TeamReviewPage";
 import ProjectSubmissionPage from "./ProjectSubmissionPage";
-import { fetchRegistrations, fetchEvents, fetchSubmission } from "../../services/apiClient";
+import { fetchRegistrations, fetchRegistrationById, fetchEvents, fetchSubmission } from "../../services/apiClient";
 import { getAllQuizzes, getQuizById } from "../../services/quizService";
 import { dataCache } from "../../utils/dataCache";
 import type { Quiz, QuizSubmission } from "../../types/quiz";
@@ -263,32 +263,10 @@ export const ParticipantDashboardPage: React.FC = () => {
 
         targetReg = foundReg;
 
-        // Fetch participant's existing quiz submissions across all identifiers in parallel
         const subMap: Record<string, QuizSubmission> = {};
         const fetchSubmissionsFromAllSources = async () => {
           try {
-            const queries = [];
-            if (user?.uid) {
-              queries.push(getDocs(query(collection(db, "quizSubmissions"), where("userId", "==", user.uid))));
-            }
-            if (cleanEmail) {
-              queries.push(getDocs(query(collection(db, "quizSubmissions"), where("userEmail", "==", cleanEmail))));
-            }
-            if (targetReg?.id) {
-              queries.push(getDocs(query(collection(db, "quizSubmissions"), where("teamId", "==", targetReg.id))));
-            }
-
-            const results = await Promise.allSettled(queries);
-            results.forEach((res) => {
-              if (res.status === "fulfilled" && res.value) {
-                res.value.forEach((d: any) => {
-                  const s = { id: d.id, ...d.data() } as QuizSubmission;
-                  if (s.quizId) subMap[s.quizId] = s;
-                });
-              }
-            });
-
-            // If API has quizzes, also try to fetch submission for each quiz via API
+            // If API has quizzes, try to fetch submission for each quiz via API
             if (Array.isArray(quizzesList)) {
               await Promise.allSettled(
                 quizzesList.map(async (q) => {
@@ -420,9 +398,8 @@ export const ParticipantDashboardPage: React.FC = () => {
           let hasAccess = false;
           if (user?.registrationId) {
             try {
-              const regDoc = await getDoc(doc(db, "registrations", user.registrationId));
-              if (regDoc.exists()) {
-                const rData = regDoc.data();
+              const rData = await fetchRegistrationById(user.registrationId).catch(() => null);
+              if (rData) {
                 const isConfirmed = String(rData.status || "").toLowerCase().trim() === "confirmed";
                 hasAccess = Boolean(isConfirmed && rData.accessGranted !== false && rData.loginAccessGranted !== false);
               }
@@ -461,9 +438,8 @@ export const ParticipantDashboardPage: React.FC = () => {
     let poll: any = null;
     const check = async () => {
       try {
-        const snap = await getDoc(doc(db, "registrations", regIdToWatch));
-        if (snap.exists()) {
-          const data = snap.data();
+        const data = await fetchRegistrationById(regIdToWatch).catch(() => null);
+        if (data) {
           if (data.accessGranted === false || data.loginAccessGranted === false) {
             console.warn("[ParticipantDashboard] Real-time revoke detected on registration:", regIdToWatch);
             logout().finally(() => { window.location.href = "/login"; });
@@ -474,7 +450,7 @@ export const ParticipantDashboardPage: React.FC = () => {
       }
     };
     check();
-    poll = setInterval(check, 5000);
+    poll = setInterval(check, 10000);
     return () => { if (poll) clearInterval(poll); };
   }, [targetRegId, user?.registrationId, logout]);
 
