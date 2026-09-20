@@ -8,9 +8,7 @@ import {
   Eye,
   BookOpen,
   Search,
-  Lightbulb,
-  Flame,
-  X
+  Lightbulb
 } from "lucide-react";
 import Button from "../../components/ui/Button";
 import SEO from "../../components/layout/SEO";
@@ -61,8 +59,6 @@ const defaultHighlights: HighlightEvent[] = [
 const HomePage: React.FC = () => {
   const [highlights, setHighlights] = useState<HighlightEvent[]>(() => dataCache.get<HighlightEvent[]>("home_highlights") || defaultHighlights);
   const [openRegEvents, setOpenRegEvents] = useState<OpenEventItem[]>([]);
-  const [showRegPopup, setShowRegPopup] = useState<boolean>(false);
-  const [isStickyCardDismissed, setIsStickyCardDismissed] = useState<boolean>(false);
   const [heroImages, setHeroImages] = useState<string[]>(() => {
     const cached = dataCache.get<any>("portal_config");
     return cached?.heroImages && Array.isArray(cached.heroImages) && cached.heroImages.length > 0
@@ -331,16 +327,9 @@ const HomePage: React.FC = () => {
             setHighlights(defaultHighlights);
           }
 
-          // Process open registration pop-up
+          // Process open registration events for the hero card
           if (openList.length > 0) {
             setOpenRegEvents(openList);
-            const isDismissed = sessionStorage.getItem("aiverse_reg_popup_dismissed");
-            if (!isDismissed) {
-              const timer = setTimeout(() => {
-                setShowRegPopup(true);
-              }, 600);
-              return () => clearTimeout(timer);
-            }
           }
         }
       } catch (err) {
@@ -355,13 +344,6 @@ const HomePage: React.FC = () => {
       isMounted = false;
     };
   }, []);
-
-  const handleClosePopup = () => {
-    setShowRegPopup(false);
-    try {
-      sessionStorage.setItem("aiverse_reg_popup_dismissed", "true");
-    } catch {}
-  };
 
   // Animation variants
   const fadeInUp = {
@@ -385,13 +367,6 @@ const HomePage: React.FC = () => {
 
   return (
     <div className="overflow-hidden bg-[#F8FAFC]">
-      {/* Event Registrations Open Pop-up Modal */}
-      <EventRegistrationPopup
-        events={openRegEvents}
-        isOpen={showRegPopup}
-        onClose={handleClosePopup}
-      />
-
       <SEO
         title="AI Verse | Official AI & Data Science Club of VIT Bhimavaram"
         description="Welcome to AI Verse, the premier Artificial Intelligence and Data Science technical club at Vishnu Institute of Technology, Bhimavaram (VITB). Join us to explore Machine Learning, Deep Learning, Generative AI, and Data Analytics through hands-on workshops, national-level hackathons, and innovative student projects."
@@ -399,6 +374,10 @@ const HomePage: React.FC = () => {
         url="/"
         type="website"
       />
+
+      {/* Floating Live Event Registration Card (Fixed on Screen) */}
+      <EventRegistrationPopup events={openRegEvents} />
+
       {/* ================= HERO SECTION ================= */}
       <section className="relative min-h-[90vh] flex items-center pt-8 pb-16 lg:py-24">
         {/* Animated Background Gradients */}
@@ -804,77 +783,6 @@ const HomePage: React.FC = () => {
           </div>
         </div>
       </section>
-
-      {/* ================= STICKY BOTTOM FLOATING EVENT REGISTRATION CARD ================= */}
-      {openRegEvents.length > 0 && !isStickyCardDismissed && (
-        <motion.div
-          initial={{ opacity: 0, y: 50, scale: 0.95 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          exit={{ opacity: 0, y: 50, scale: 0.95 }}
-          transition={{ type: "spring", stiffness: 320, damping: 26 }}
-          className="fixed bottom-4 sm:bottom-6 right-4 sm:right-6 md:right-8 z-50 max-w-sm sm:max-w-md w-[calc(100%-2rem)] sm:w-auto shadow-[0_20px_45px_rgba(15,23,42,0.35)]"
-        >
-          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 p-[1.5px]">
-            <div className="relative rounded-[15px] bg-slate-950/92 backdrop-blur-xl px-4 py-3 sm:px-4.5 sm:py-3.5 flex items-center justify-between gap-3 text-left">
-              {/* Ambient Glow */}
-              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/25 rounded-full blur-2xl pointer-events-none" />
-
-              {/* Left: Flame & Event Info */}
-              <Link
-                to={`/events/${openRegEvents[0].id}/register`}
-                className="flex items-center gap-3 min-w-0 group flex-1"
-              >
-                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white shadow-md shrink-0 animate-pulse">
-                  <Flame className="w-5 h-5 fill-white text-white" />
-                </div>
-                <div className="min-w-0 space-y-0.5">
-                  <div className="flex items-center gap-2">
-                    <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
-                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-300">
-                      Registrations Open
-                    </span>
-                    <span className="text-[10px] font-bold text-blue-200 bg-blue-500/30 px-1.5 py-0.2 rounded">
-                      {openRegEvents[0].type || "Hackathon"}
-                    </span>
-                    {openRegEvents.length > 1 && (
-                      <span className="text-[9px] font-bold text-slate-300 bg-white/10 px-1.5 py-0.2 rounded-full">
-                        +{openRegEvents.length - 1} more
-                      </span>
-                    )}
-                  </div>
-                  <h4 className="text-xs sm:text-sm font-extrabold text-white truncate group-hover:text-blue-200 transition-colors">
-                    {openRegEvents[0].title}
-                  </h4>
-                  <p className="text-[11px] text-slate-300 truncate">
-                    {formatEventDateRange(openRegEvents[0].startDate || openRegEvents[0].date, openRegEvents[0].endDate)}
-                  </p>
-                </div>
-              </Link>
-
-              {/* Right: Quick Action Pill & Dismiss Button */}
-              <div className="shrink-0 flex items-center gap-2">
-                <Link
-                  to={`/events/${openRegEvents[0].id}/register`}
-                  className="flex items-center gap-1 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-full transition-all duration-200 shadow-sm group/btn cursor-pointer"
-                >
-                  <span>Register</span>
-                  <ArrowRight className="w-3.5 h-3.5 group-hover/btn:translate-x-0.5 transition-transform" />
-                </Link>
-
-                <button
-                  type="button"
-                  onClick={() => setIsStickyCardDismissed(true)}
-                  className="p-1 rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-                  title="Dismiss banner"
-                  aria-label="Dismiss banner"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          </div>
-        </motion.div>
-      )}
 
     </div>
   );
