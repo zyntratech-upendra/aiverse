@@ -26,7 +26,7 @@ import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
 import { formatEventDateRange } from "../../utils/dateFormatter";
 import { userService } from "../../services/userService";
-import { fetchEvents, fetchEventById, createRegistration, uploadImage, sendEmail } from "../../services/apiClient";
+import { fetchEvents, fetchEventById, createRegistration, updateRegistration, uploadImage, sendEmail } from "../../services/apiClient";
 
 interface Teammate {
   name: string;
