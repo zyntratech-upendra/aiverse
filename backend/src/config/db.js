@@ -24,12 +24,13 @@ const connectDB = async () => {
     try {
       console.log(`MongoDB connection attempt ${attempt}/${MAX_RETRIES}...`);
       const conn = await mongoose.connect(mongoURI, {
-        maxPoolSize: 100,
-        minPoolSize: 10,
+        maxPoolSize: 50,
+        minPoolSize: 1,
+        family: 4,
         maxIdleTimeMS: 30000,
-        serverSelectionTimeoutMS: 15000,
-        connectTimeoutMS: 30000,
-        socketTimeoutMS: 45000,
+        serverSelectionTimeoutMS: 10000,
+        connectTimeoutMS: 15000,
+        socketTimeoutMS: 30000,
         heartbeatFrequencyMS: 10000,
         retryWrites: true,
         retryReads: true,

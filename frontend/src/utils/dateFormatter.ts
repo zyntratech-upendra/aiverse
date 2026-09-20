@@ -123,3 +123,65 @@ export const formatSingleDate = (dateStr: string): string => {
   }
   return dateStr;
 };
+
+/**
+ * Formats competition round dates into the requested format:
+ * e.g., "22,23-oct-26" (startday,endday-month-year) or "24-sep-26" (single day)
+ */
+export const formatRoundDateRange = (startDateStr?: string, endDateStr?: string): string => {
+  const cleanStart = (startDateStr || "").trim();
+  const cleanEnd = (endDateStr || "").trim();
+
+  if (!cleanStart || cleanStart === "TBD") {
+    if (cleanEnd && cleanEnd !== "TBD") {
+      const d = parseDateSafe(cleanEnd);
+      if (d) {
+        const day = d.getDate();
+        const month = d.toLocaleString("en-US", { month: "short" }).toLowerCase();
+        const yr = String(d.getFullYear()).slice(-2);
+        return `${day}-${month}-${yr}`;
+      }
+      return cleanEnd;
+    }
+    return "TBD";
+  }
+
+  const d1 = parseDateSafe(cleanStart);
+  const d2 = cleanEnd && cleanEnd !== "TBD" ? parseDateSafe(cleanEnd) : null;
+
+  if (d1 && d2) {
+    const d1Day = d1.getDate();
+    const d2Day = d2.getDate();
+    const d1Month = d1.toLocaleString("en-US", { month: "short" }).toLowerCase();
+    const d2Month = d2.toLocaleString("en-US", { month: "short" }).toLowerCase();
+    const d1Yr = String(d1.getFullYear()).slice(-2);
+    const d2Yr = String(d2.getFullYear()).slice(-2);
+
+    // If same day
+    if (d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth() && d1Day === d2Day) {
+      return `${d1Day}-${d1Month}-${d1Yr}`;
+    }
+
+    // If same month and same year (e.g. 22,23-oct-26 or 24,25-sep-26)
+    if (d1.getFullYear() === d2.getFullYear() && d1.getMonth() === d2.getMonth()) {
+      return `${d1Day},${d2Day}-${d1Month}-${d1Yr}`;
+    }
+
+    // If different months, same year (e.g. 28-sep,2-oct-26)
+    if (d1.getFullYear() === d2.getFullYear()) {
+      return `${d1Day}-${d1Month},${d2Day}-${d2Month}-${d1Yr}`;
+    }
+
+    // If different years (e.g. 28-dec-25,2-jan-26)
+    return `${d1Day}-${d1Month}-${d1Yr},${d2Day}-${d2Month}-${d2Yr}`;
+  }
+
+  if (d1 && !d2) {
+    const day = d1.getDate();
+    const month = d1.toLocaleString("en-US", { month: "short" }).toLowerCase();
+    const yr = String(d1.getFullYear()).slice(-2);
+    return `${day}-${month}-${yr}`;
+  }
+
+  return cleanStart;
+};

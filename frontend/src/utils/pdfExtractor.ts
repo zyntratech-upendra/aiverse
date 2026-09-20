@@ -1,15 +1,4 @@
-import * as pdfjsLib from "pdfjs-dist";
-import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import type { QuizQuestion } from "../types/quiz";
-
-// Configure PDF.js worker reliably via Vite URL
-if (typeof window !== "undefined") {
-  try {
-    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
-  } catch (e) {
-    console.warn("Could not set pdf workerSrc", e);
-  }
-}
 
 /**
  * Extracts complete plain text from a PDF File across all pages.
@@ -18,6 +7,10 @@ export async function extractTextFromPdf(file: File): Promise<string> {
   const arrayBuffer = await file.arrayBuffer();
   
   try {
+    const pdfjsLib = await import("pdfjs-dist");
+    const pdfjsWorker = (await import("pdfjs-dist/build/pdf.worker.min.mjs?url")).default;
+    pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorker;
+
     const loadingTask = pdfjsLib.getDocument({
       data: new Uint8Array(arrayBuffer),
       useSystemFonts: true,

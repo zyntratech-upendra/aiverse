@@ -1390,11 +1390,11 @@ interface ExcelScoreRow {
             evaluatedAt: Date.now()
           };
 
-          if (r.id) {
-            await updateDoc(doc(db, "quizSubmissions", r.id), patchData).catch(() => null);
+          if (r.id && selectedQuizId) {
+            await api.updateQuizSubmission(selectedQuizId, r.id, patchData).catch(() => null);
           }
           if (subMatch?.teamId) {
-            await updateDoc(doc(db, "registrations", subMatch.teamId), {
+            await api.updateRegistration(subMatch.teamId, {
               quizScore: r.score,
               quizPercentage: r.percentage,
               quizPassed: r.passed,
@@ -4077,12 +4077,9 @@ Answer: A`;
                                   console.warn("Backend updateQuizSubmission fallback:", e);
                                 }
                                 
-                                // 3. Update Firestore documents in parallel
-                                if (inspectingSubmission.id) {
-                                  await updateDoc(doc(db, "quizSubmissions", inspectingSubmission.id), patchData).catch(() => null);
-                                }
+                                // 3. Update registration if teamId is present
                                 if (inspectingSubmission.teamId) {
-                                  await updateDoc(doc(db, "registrations", inspectingSubmission.teamId), {
+                                  await api.updateRegistration(inspectingSubmission.teamId, {
                                     quizScore: inspectingSubmission.score,
                                     quizPercentage: inspectingSubmission.percentage,
                                     quizPassed: inspectingSubmission.passed,

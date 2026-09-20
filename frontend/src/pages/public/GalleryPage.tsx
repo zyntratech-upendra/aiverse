@@ -16,7 +16,11 @@ import {
   Eye, 
   Search, 
   Image as ImageIcon,
-  Download
+  Download,
+  Play,
+  Pause,
+  Maximize2,
+  Film
 } from "lucide-react";
 
 export interface EventPhoto {
@@ -67,15 +71,24 @@ const normalizeCategory = (cat?: string): EventPhoto["category"] => {
 const GalleryPage: React.FC = () => {
   const [activeTab, setActiveTab] = useState<"All" | "Workshops" | "Hackathons" | "Technical Events">("All");
   const [searchQuery, setSearchQuery] = useState("");
-  const [photos, setPhotos] = useState<EventPhoto[]>(() => dataCache.get<EventPhoto[]>("public_gallery_photos") || []);
-  const [loading, setLoading] = useState<boolean>(() => !dataCache.get<EventPhoto[]>("public_gallery_photos"));
+  const [photos, setPhotos] = useState<EventPhoto[]>(() => {
+    const cached = dataCache.get<EventPhoto[]>("public_gallery_photos");
+    return (cached && Array.isArray(cached)) ? cached : [];
+  });
+  const [loading, setLoading] = useState<boolean>(true);
   
-  // Lightbox State (Active Event Section & Photo Index)
+  // Featured Showcase Reel State
+  const [reelIndex, setReelIndex] = useState(0);
+  const [isReelPlaying, setIsReelPlaying] = useState(true);
+
+  // Lightbox State (Active Event Section, Photo Index, and Autoplay State)
   const [activeLightbox, setActiveLightbox] = useState<{
     section: EventGallerySection;
     index: number;
+    isAutoplaying?: boolean;
   } | null>(null);
 
+  // Fetch albums from backend
   useEffect(() => {
     const fetchGallery = async () => {
       try {
@@ -89,28 +102,30 @@ const GalleryPage: React.FC = () => {
           if (data?.bannerImage && typeof data.bannerImage === "string" && data.bannerImage.trim() !== "") {
             return data.bannerImage;
           }
-          if (data?.coverImage && typeof data.coverImage === "string" && (data.coverImage.startsWith("data:") || data.coverImage.startsWith("http") || data.coverImage.startsWith("/"))) {
+          if (data?.coverImage && typeof data.coverImage === "string" && data.coverImage.trim() !== "") {
             return data.coverImage;
+          }
+          if (Array.isArray(data?.images) && data.images.length > 0) {
+            const first = data.images[0];
+            const u = typeof first === "string" ? first : first?.url;
+            if (u && typeof u === "string" && u.trim() !== "") return u;
           }
           return "";
         };
 
-        // Fetch albums from backend API (Cloudinary images stored in MongoDB Atlas)
         const backendItems = await fetchAlbums();
-
         const list: EventPhoto[] = [];
 
         (backendItems || []).forEach((data: any) => {
-          if (data.status === "Draft") return; // Skip drafts
+          if (data.status === "Draft") return;
 
           const category = normalizeCategory(data.category);
-          const dateStr = data.date || "Just now";
+          const dateStr = data.date || "Recent Event";
           const drive = data.driveLink || "";
           const tags = Array.isArray(data.tags) ? data.tags : [];
           const createdAt = data.createdAt || data.created_at || Date.now();
           const baseTitle = (data.eventTitle || data.title || "Visual Moment").trim();
 
-          // Case A: Item contains multiple images inside `images` array
           if (Array.isArray(data.images) && data.images.length > 0) {
             data.images.forEach((imgObj: any, idx: number) => {
               const url = typeof imgObj === "string" ? imgObj : imgObj?.url;
@@ -128,7 +143,6 @@ const GalleryPage: React.FC = () => {
               });
             });
           } else {
-            // Case B: Single photo item
             const photoUrl = resolveCover(data);
             if (photoUrl) {
               list.push({
@@ -163,7 +177,6 @@ const GalleryPage: React.FC = () => {
     const groupMap = new Map<string, EventGallerySection>();
 
     photos.forEach((photo) => {
-      // Clean event title: strip trailing sequential numbers like "(1)", "(2)", "#1"
       const cleanTitle = photo.title
         .replace(/\s*\(\d+\)$/, "")
         .replace(/\s*#\d+$/, "")
@@ -185,7 +198,6 @@ const GalleryPage: React.FC = () => {
         });
       } else {
         const group = groupMap.get(groupKey)!;
-        // Avoid duplicate photos
         if (!group.photos.some((p) => p.imageUrl === photo.imageUrl && p.id === photo.id)) {
           group.photos.push(photo);
         }
@@ -200,6 +212,46 @@ const GalleryPage: React.FC = () => {
 
     return Array.from(groupMap.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
   }, [photos]);
+
+  // Featured Photos List for the Auto-Playing Top Showcase Reel
+  const featuredReelPhotos = useMemo<EventPhoto[]>(() => {
+    if (photos.length === 0) return [];
+    const seen = new Set<string>();
+    const result: EventPhoto[] = [];
+    for (const p of photos) {
+      if (!seen.has(p.imageUrl)) {
+        seen.add(p.imageUrl);
+        result.push(p);
+      }
+      if (result.length >= 8) break;
+    }
+    return result.length > 0 ? result : photos.slice(0, 8);
+  }, [photos]);
+
+  // Continuous Auto-play for the Featured Top Reel (4s interval)
+  useEffect(() => {
+    if (!isReelPlaying || featuredReelPhotos.length <= 1) return;
+    const timer = setInterval(() => {
+      setReelIndex((prev) => (prev + 1) % featuredReelPhotos.length);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, [isReelPlaying, featuredReelPhotos.length]);
+
+  // Continuous Auto-play for the Active Lightbox Modal (3.5s interval)
+  useEffect(() => {
+    if (!activeLightbox || !activeLightbox.isAutoplaying) return;
+    if (activeLightbox.section.photos.length <= 1) return;
+
+    const timer = setInterval(() => {
+      setActiveLightbox((prev) => {
+        if (!prev || !prev.isAutoplaying) return prev;
+        const nextIdx = (prev.index + 1) % prev.section.photos.length;
+        return { ...prev, index: nextIdx };
+      });
+    }, 3500);
+
+    return () => clearInterval(timer);
+  }, [activeLightbox?.isAutoplaying, activeLightbox?.section.photos.length]);
 
   // Filter grouped events by selected category tab and search query
   const filteredEvents = useMemo(() => {
@@ -236,7 +288,7 @@ const GalleryPage: React.FC = () => {
     }
   };
 
-  // Keyboard navigation for Lightbox
+  // Keyboard navigation for Lightbox & Slideshow
   const handleKeyDown = useCallback(
     (e: KeyboardEvent) => {
       if (!activeLightbox) return;
@@ -254,6 +306,12 @@ const GalleryPage: React.FC = () => {
           const newIdx = prev.index < prev.section.photos.length - 1 ? prev.index + 1 : 0;
           return { ...prev, index: newIdx };
         });
+      } else if (e.key === " ") {
+        e.preventDefault();
+        setActiveLightbox((prev) => {
+          if (!prev) return null;
+          return { ...prev, isAutoplaying: !prev.isAutoplaying };
+        });
       }
     },
     [activeLightbox]
@@ -264,6 +322,8 @@ const GalleryPage: React.FC = () => {
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [handleKeyDown]);
 
+  const currentReelPhoto = featuredReelPhotos[reelIndex] || featuredReelPhotos[0];
+
   return (
     <div className="overflow-hidden bg-[#FAFBFC] pb-24 min-h-screen font-sans">
       <SEO 
@@ -271,35 +331,19 @@ const GalleryPage: React.FC = () => {
         description="Explore the visual journey of AI Verse at Vishnu Institute of Technology, Bhimavaram. View photo highlights of our national-level hackathons, AI/ML workshops, tech expos, and student achievements." 
         keywords="AI Verse Gallery, Hackathon Photos, Tech Expo Images, VIT Bhimavaram Student Events, AI Workshops Gallery, Tech Club Photos Andhra Pradesh"
         url="/gallery"
-        schema={{
-          "@context": "https://schema.org",
-          "@type": "ImageGallery",
-          "name": "AI Verse VITB Photo Gallery",
-          "url": "https://aiversevitb.in/gallery",
-          "description": "Visual highlights of technical workshops, hackathons, and AI projects at Vishnu Institute of Technology, Bhimavaram.",
-          "publisher": {
-            "@type": "EducationalOrganization",
-            "name": "AI Verse VITB",
-            "url": "https://aiversevitb.in"
-          }
-        }}
       />
       
       {/* ================= HERO / HEADER SECTION ================= */}
-      <section className="relative pt-28 pb-14 px-6 lg:px-8 text-center bg-gradient-to-b from-blue-50/25 via-white to-transparent">
-        <div className="absolute inset-0 overflow-hidden pointer-events-none -z-10">
-          <div className="absolute top-[10%] left-[50%] -translate-x-1/2 w-[700px] h-[500px] rounded-full bg-blue-50/40 blur-[120px]"></div>
-        </div>
-
-        <div className="max-w-3xl mx-auto space-y-4">
+      <section className="relative pt-28 pb-8 px-6 lg:px-8 text-center bg-gradient-to-b from-blue-50/30 via-white to-transparent">
+        <div className="max-w-4xl mx-auto space-y-4">
           <motion.div
             initial={{ opacity: 0, scale: 0.95 }}
             animate={{ opacity: 1, scale: 1 }}
             transition={{ duration: 0.5 }}
-            className="inline-flex items-center gap-1.5 px-3.5 py-1 bg-blue-50 border border-blue-200/60 rounded-full text-[#2563EB] text-[10px] font-black tracking-widest uppercase"
+            className="inline-flex items-center gap-2 px-4 py-1.5 bg-blue-50 border border-blue-200/80 rounded-full text-[#2563EB] text-xs font-black tracking-widest uppercase shadow-xs"
           >
             <Sparkles className="w-3.5 h-3.5 text-blue-600" />
-            <span>Visual Archive & Moments</span>
+            <span>Interactive Visual Archive & Live Slideshows</span>
           </motion.div>
 
           <motion.h1 
@@ -314,12 +358,168 @@ const GalleryPage: React.FC = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.6, delay: 0.2 }}
-            className="text-slate-500 text-sm sm:text-base leading-relaxed max-w-xl mx-auto font-normal"
+            className="text-slate-500 text-sm sm:text-base leading-relaxed max-w-2xl mx-auto font-normal"
           >
-            A visual documentation of trailblazing workshops, competitive student hackathons, and collaborative milestones shaped by our community.
+            Experience dynamic photo reels of trailblazing AI workshops, high-stakes student hackathons, and landmark club events.
           </motion.p>
         </div>
       </section>
+
+      {/* ================= FEATURED AUTO-PLAYING SHOWCASE REEL ================= */}
+      {featuredReelPhotos.length > 0 && currentReelPhoto && (
+        <section className="max-w-7xl mx-auto px-6 lg:px-8 mb-12">
+          <div className="relative rounded-3xl overflow-hidden shadow-xl border border-slate-200/90 bg-slate-950">
+            {/* Background & Main Active Photo with Smooth Transition */}
+            <div className="relative aspect-[16/9] sm:aspect-[21/9] md:h-[480px] w-full flex items-center justify-center overflow-hidden">
+              <AnimatePresence mode="wait">
+                <motion.div
+                  key={currentReelPhoto.imageUrl}
+                  initial={{ opacity: 0, scale: 1.05 }}
+                  animate={{ opacity: 1, scale: 1 }}
+                  exit={{ opacity: 0, scale: 0.97 }}
+                  transition={{ duration: 0.65, ease: "easeInOut" }}
+                  className="absolute inset-0 w-full h-full"
+                >
+                  <img
+                    src={currentReelPhoto.imageUrl}
+                    alt={currentReelPhoto.title}
+                    className="w-full h-full object-cover object-center"
+                  />
+                  {/* Subtle Gradient Overlays for Readability */}
+                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/95 via-slate-950/40 to-transparent" />
+                  <div className="absolute inset-0 bg-gradient-to-r from-slate-950/80 via-transparent to-transparent" />
+                </motion.div>
+              </AnimatePresence>
+
+              {/* Top Controls Overlay */}
+              <div className="absolute top-4 left-4 right-4 flex items-center justify-between z-20 pointer-events-auto">
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-900/80 backdrop-blur-md border border-white/15 text-white text-[11px] font-black tracking-wide">
+                    <Film className="w-3.5 h-3.5 text-blue-400" />
+                    <span>Featured Reel</span>
+                  </span>
+                  <span className="hidden sm:inline-flex items-center gap-1 px-2.5 py-1 rounded-full bg-blue-600/90 text-white text-[10px] font-extrabold uppercase tracking-wider">
+                    {currentReelPhoto.category}
+                  </span>
+                </div>
+
+                <div className="flex items-center gap-2 bg-slate-900/80 backdrop-blur-md px-3 py-1.5 rounded-full border border-white/15">
+                  <button
+                    onClick={() => setIsReelPlaying(!isReelPlaying)}
+                    className="flex items-center gap-1.5 text-white hover:text-blue-400 transition-colors text-xs font-bold cursor-pointer"
+                    title={isReelPlaying ? "Pause Auto-play" : "Play Slideshow"}
+                  >
+                    {isReelPlaying ? (
+                      <>
+                        <Pause className="w-3.5 h-3.5 fill-current" />
+                        <span className="hidden sm:inline">Playing</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-3.5 h-3.5 fill-current text-green-400" />
+                        <span className="hidden sm:inline text-green-400">Play Reel</span>
+                      </>
+                    )}
+                  </button>
+
+                  <div className="w-px h-3.5 bg-white/20" />
+
+                  <span className="text-[11px] font-mono text-slate-300">
+                    {reelIndex + 1} / {featuredReelPhotos.length}
+                  </span>
+                </div>
+              </div>
+
+              {/* Left / Right Arrow Buttons */}
+              <button
+                onClick={() => {
+                  setReelIndex((prev) => (prev > 0 ? prev - 1 : featuredReelPhotos.length - 1));
+                }}
+                className="absolute left-4 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-slate-900/80 hover:bg-blue-600 text-white backdrop-blur-md border border-white/15 flex items-center justify-center transition-all shadow-lg hover:scale-105 cursor-pointer"
+                title="Previous Slide"
+              >
+                <ChevronLeft className="w-6 h-6" />
+              </button>
+
+              <button
+                onClick={() => {
+                  setReelIndex((prev) => (prev + 1) % featuredReelPhotos.length);
+                }}
+                className="absolute right-4 top-1/2 -translate-y-1/2 z-20 w-11 h-11 rounded-full bg-slate-900/80 hover:bg-blue-600 text-white backdrop-blur-md border border-white/15 flex items-center justify-center transition-all shadow-lg hover:scale-105 cursor-pointer"
+                title="Next Slide"
+              >
+                <ChevronRight className="w-6 h-6" />
+              </button>
+
+              {/* Bottom Caption & Interactive Info */}
+              <div className="absolute bottom-6 left-6 right-6 z-20 flex flex-col md:flex-row md:items-end justify-between gap-4 text-white">
+                <div className="space-y-1.5 max-w-2xl">
+                  <div className="flex items-center gap-2 text-xs font-bold text-blue-400">
+                    <Calendar className="w-3.5 h-3.5" />
+                    <span>{currentReelPhoto.date}</span>
+                  </div>
+                  <h3 className="text-2xl sm:text-3xl font-black text-white tracking-tight drop-shadow-md">
+                    {currentReelPhoto.title}
+                  </h3>
+                  {currentReelPhoto.caption && (
+                    <p className="text-xs sm:text-sm text-slate-300 font-medium line-clamp-2 drop-shadow-sm">
+                      {currentReelPhoto.caption}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-3 shrink-0">
+                  <button
+                    onClick={() => {
+                      const matchedSection = groupedEvents.find(g => g.photos.some(p => p.imageUrl === currentReelPhoto.imageUrl)) || {
+                        eventKey: "featured-reel",
+                        eventTitle: "Featured Spotlight",
+                        category: currentReelPhoto.category,
+                        date: currentReelPhoto.date,
+                        createdAt: Date.now(),
+                        photos: featuredReelPhotos
+                      };
+                      const foundIdx = matchedSection.photos.findIndex(p => p.imageUrl === currentReelPhoto.imageUrl);
+                      setActiveLightbox({
+                        section: matchedSection,
+                        index: foundIdx >= 0 ? foundIdx : 0,
+                        isAutoplaying: true
+                      });
+                    }}
+                    className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-lg flex items-center gap-2 hover:scale-102 cursor-pointer"
+                  >
+                    <Maximize2 className="w-3.5 h-3.5" />
+                    <span>Full Screen Slideshow</span>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Bottom Dots & Progress Bar Indicator */}
+            <div className="bg-slate-950 px-6 py-3 border-t border-white/10 flex items-center justify-between gap-4">
+              <div className="flex items-center gap-1.5 overflow-x-auto">
+                {featuredReelPhotos.map((p, idx) => (
+                  <button
+                    key={p.id || idx}
+                    onClick={() => setReelIndex(idx)}
+                    className={`h-2 rounded-full transition-all cursor-pointer ${
+                      idx === reelIndex
+                        ? "w-8 bg-blue-500"
+                        : "w-2 bg-slate-700 hover:bg-slate-500"
+                    }`}
+                    title={`Slide ${idx + 1}`}
+                  />
+                ))}
+              </div>
+
+              <div className="text-[11px] text-slate-400 font-medium flex items-center gap-2">
+                <Sparkles className="w-3 h-3 text-blue-400" />
+                <span>Auto-playing • Click photos below to explore full albums</span>
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {/* ================= TAB CONTROLS & SEARCH ================= */}
       <section className="max-w-7xl mx-auto px-6 lg:px-8 mb-10">
@@ -412,8 +612,8 @@ const GalleryPage: React.FC = () => {
                 transition={{ duration: 0.4 }}
                 className="bg-white rounded-3xl p-6 sm:p-8 border border-slate-200/80 shadow-xs hover:shadow-md transition-shadow space-y-6"
               >
-                {/* ================= UPPER: EVENT NAME & DETAILS HEADER ================= */}
-                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
+                {/* ================= UPPER: EVENT NAME & CONTROLS HEADER ================= */}
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-slate-100">
                   <div className="space-y-1.5">
                     <div className="flex flex-wrap items-center gap-2">
                       <span className={`px-2.5 py-0.5 text-[10px] font-black rounded-full uppercase tracking-wider border ${getCategoryStyles(eventSection.category)}`}>
@@ -439,17 +639,28 @@ const GalleryPage: React.FC = () => {
                     )}
                   </div>
 
-                  {eventSection.driveLink && (
-                    <a
-                      href={eventSection.driveLink}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-600 text-xs font-bold transition-colors w-fit shadow-2xs"
+                  {/* Actions (Play Slideshow & Drive Link) */}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button
+                      onClick={() => setActiveLightbox({ section: eventSection, index: 0, isAutoplaying: true })}
+                      className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-bold transition-all shadow-xs cursor-pointer hover:scale-102"
                     >
-                      <span>Drive Folder</span>
-                      <ExternalLink className="w-3.5 h-3.5" />
-                    </a>
-                  )}
+                      <Play className="w-3.5 h-3.5 fill-current" />
+                      <span>Play Slideshow</span>
+                    </button>
+
+                    {eventSection.driveLink && (
+                      <a
+                        href={eventSection.driveLink}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-colors shadow-2xs"
+                      >
+                        <span>Drive Folder</span>
+                        <ExternalLink className="w-3.5 h-3.5" />
+                      </a>
+                    )}
+                  </div>
                 </div>
 
                 {/* ================= SIDE BY SIDE: EVENT IMAGES GRID ================= */}
@@ -457,7 +668,7 @@ const GalleryPage: React.FC = () => {
                   {eventSection.photos.map((photo, pIdx) => (
                     <motion.div
                       key={photo.id}
-                      onClick={() => setActiveLightbox({ section: eventSection, index: pIdx })}
+                      onClick={() => setActiveLightbox({ section: eventSection, index: pIdx, isAutoplaying: false })}
                       whileHover={{ scale: 1.02 }}
                       transition={{ duration: 0.2 }}
                       className="group relative aspect-[4/3] rounded-2xl overflow-hidden bg-slate-900 shadow-2xs border border-slate-200/80 cursor-pointer flex items-center justify-center"
@@ -470,16 +681,24 @@ const GalleryPage: React.FC = () => {
                       />
 
                       {/* Hover Overlay */}
-                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/80 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex items-end justify-between p-3">
-                        <span className="text-white text-xs font-bold flex items-center gap-1.5">
-                          <Eye className="w-3.5 h-3.5 text-blue-400" />
-                          <span>View Full</span>
-                        </span>
-                        {photo.caption && (
-                          <span className="text-[10px] text-white/90 truncate max-w-[140px] font-medium">
-                            {photo.caption}
+                      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/85 via-slate-950/20 to-transparent opacity-0 group-hover:opacity-100 transition-opacity flex flex-col justify-between p-3.5">
+                        <div className="flex justify-end">
+                          <span className="p-1.5 rounded-lg bg-black/50 text-white backdrop-blur-xs">
+                            <Eye className="w-3.5 h-3.5" />
                           </span>
-                        )}
+                        </div>
+
+                        <div className="space-y-1">
+                          <span className="text-white text-xs font-bold flex items-center gap-1.5">
+                            <Play className="w-3 h-3 fill-current text-blue-400" />
+                            <span>Click to View / Play</span>
+                          </span>
+                          {photo.caption && (
+                            <p className="text-[10px] text-slate-200 truncate font-medium">
+                              {photo.caption}
+                            </p>
+                          )}
+                        </div>
                       </div>
                     </motion.div>
                   ))}
@@ -490,12 +709,12 @@ const GalleryPage: React.FC = () => {
         )}
       </section>
 
-      {/* ================= ENHANCED LIGHTBOX MODAL WITH EVENT NAVIGATION ================= */}
+      {/* ================= ENHANCED LIGHTBOX MODAL WITH PLAY/PAUSE SLIDESHOW ================= */}
       <AnimatePresence>
         {activeLightbox && (
           <div
             onClick={() => setActiveLightbox(null)}
-            className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-slate-950/92 backdrop-blur-md"
+            className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-6 bg-slate-950/95 backdrop-blur-md"
           >
             <motion.div
               initial={{ opacity: 0, scale: 0.94 }}
@@ -505,7 +724,7 @@ const GalleryPage: React.FC = () => {
               className="relative max-w-5xl w-full bg-slate-900 rounded-3xl overflow-hidden shadow-2xl border border-white/10 flex flex-col max-h-[92vh]"
             >
               {/* Top Header */}
-              <div className="p-4 bg-slate-950/90 border-b border-white/10 flex items-center justify-between shrink-0 text-white">
+              <div className="p-4 bg-slate-950/95 border-b border-white/10 flex items-center justify-between shrink-0 text-white">
                 <div className="space-y-0.5">
                   <div className="flex items-center gap-2">
                     <span
@@ -528,6 +747,35 @@ const GalleryPage: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-2">
+                  {/* Play / Pause Toggle Button */}
+                  {activeLightbox.section.photos.length > 1 && (
+                    <button
+                      onClick={() =>
+                        setActiveLightbox((prev) =>
+                          prev ? { ...prev, isAutoplaying: !prev.isAutoplaying } : null
+                        )
+                      }
+                      className={`px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 transition-all cursor-pointer ${
+                        activeLightbox.isAutoplaying
+                          ? "bg-blue-600 text-white"
+                          : "bg-white/10 text-slate-300 hover:bg-white/20"
+                      }`}
+                      title="Toggle Slideshow Playback (Spacebar)"
+                    >
+                      {activeLightbox.isAutoplaying ? (
+                        <>
+                          <Pause className="w-3.5 h-3.5 fill-current" />
+                          <span>Playing</span>
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-3.5 h-3.5 fill-current text-green-400" />
+                          <span>Play Slideshow</span>
+                        </>
+                      )}
+                    </button>
+                  )}
+
                   <a
                     href={activeLightbox.section.photos[activeLightbox.index]?.imageUrl}
                     download={`photo-${activeLightbox.index + 1}.jpg`}
@@ -538,17 +786,19 @@ const GalleryPage: React.FC = () => {
                   >
                     <Download className="h-4 w-4" />
                   </a>
+
                   <button
                     onClick={() => setActiveLightbox(null)}
                     className="p-2 text-slate-400 hover:text-white rounded-full hover:bg-white/10 transition-colors cursor-pointer"
+                    title="Close (Escape)"
                   >
                     <X className="h-5 w-5" />
                   </button>
                 </div>
               </div>
 
-              {/* High-Res Photo Container with Navigation Arrows */}
-              <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden p-2 min-h-[300px]">
+              {/* High-Res Photo Container with Navigation Controls */}
+              <div className="relative flex-1 bg-black flex items-center justify-center overflow-hidden p-2 min-h-[320px]">
                 <AnimatePresence mode="wait">
                   <motion.img
                     key={activeLightbox.section.photos[activeLightbox.index]?.id || activeLightbox.index}
@@ -557,7 +807,7 @@ const GalleryPage: React.FC = () => {
                     initial={{ opacity: 0, scale: 0.98 }}
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.98 }}
-                    transition={{ duration: 0.2 }}
+                    transition={{ duration: 0.25 }}
                     className="max-h-[65vh] w-auto max-w-full object-contain rounded-xl shadow-2xl"
                   />
                 </AnimatePresence>
@@ -573,10 +823,10 @@ const GalleryPage: React.FC = () => {
                         return { ...prev, index: newIdx };
                       });
                     }}
-                    className="absolute left-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/80 hover:bg-blue-600 text-white flex items-center justify-center transition-all shadow-lg cursor-pointer border border-white/10"
-                    title="Previous Photo"
+                    className="absolute left-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-slate-900/80 hover:bg-blue-600 text-white flex items-center justify-center transition-all shadow-lg cursor-pointer border border-white/10"
+                    title="Previous Photo (Left Arrow)"
                   >
-                    <ChevronLeft className="w-5 h-5" />
+                    <ChevronLeft className="w-6 h-6" />
                   </button>
                 )}
 
@@ -591,16 +841,16 @@ const GalleryPage: React.FC = () => {
                         return { ...prev, index: newIdx };
                       });
                     }}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 w-10 h-10 rounded-full bg-slate-900/80 hover:bg-blue-600 text-white flex items-center justify-center transition-all shadow-lg cursor-pointer border border-white/10"
-                    title="Next Photo"
+                    className="absolute right-3 top-1/2 -translate-y-1/2 w-11 h-11 rounded-full bg-slate-900/80 hover:bg-blue-600 text-white flex items-center justify-center transition-all shadow-lg cursor-pointer border border-white/10"
+                    title="Next Photo (Right Arrow)"
                   >
-                    <ChevronRight className="w-5 h-5" />
+                    <ChevronRight className="w-6 h-6" />
                   </button>
                 )}
               </div>
 
               {/* Bottom Caption & Thumbnails Bar */}
-              <div className="p-4 bg-slate-950/90 border-t border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-300">
+              <div className="p-4 bg-slate-950/95 border-t border-white/10 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 text-xs text-slate-300">
                 <div className="space-y-1 max-w-xl">
                   {activeLightbox.section.photos[activeLightbox.index]?.caption ? (
                     <p className="font-medium text-slate-200">
@@ -640,9 +890,6 @@ const GalleryPage: React.FC = () => {
       {/* ================= CALL TO ACTION SECTION ================= */}
       <section className="max-w-5xl mx-auto px-6 lg:px-8 mb-12">
         <div className="bg-gradient-to-r from-[#2563EB] to-blue-600 rounded-[28px] p-10 md:p-14 text-center text-white border border-blue-700 shadow-xl relative overflow-hidden">
-          <div className="absolute -top-32 -left-32 w-64 h-64 bg-[radial-gradient(circle,rgba(255,255,255,0.1)_0%,transparent_70%)] pointer-events-none transform-gpu" />
-          <div className="absolute -bottom-32 -right-32 w-64 h-64 bg-[radial-gradient(circle,rgba(255,255,255,0.15)_0%,transparent_70%)] pointer-events-none transform-gpu" />
-          
           <div className="max-w-xl mx-auto space-y-6 relative z-10">
             <h2 className="text-3xl md:text-4xl font-serif font-semibold leading-tight tracking-tight">
               Be Part of the Next Frame

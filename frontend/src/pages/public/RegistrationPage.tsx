@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from "react";
 import { useParams, Link } from "react-router-dom";
 import {
   Calendar,
-  Clock,
   MapPin,
   ArrowRight,
   ArrowLeft,
@@ -24,7 +23,7 @@ import {
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
-import { formatEventDateRange } from "../../utils/dateFormatter";
+import { formatRoundDateRange } from "../../utils/dateFormatter";
 import { userService } from "../../services/userService";
 import { fetchEvents, fetchEventById, createRegistration, updateRegistration, uploadImage, sendEmail } from "../../services/apiClient";
 
@@ -834,7 +833,7 @@ const RegistrationPage: React.FC = () => {
                       <div className="leading-normal text-left">
                         <h4 className="text-xs font-black text-slate-855">Attend on Event Schedule</h4>
                         <p className="text-[10px] text-slate-500 font-medium mt-0.5 leading-relaxed">
-                          Please be present on {formatEventDateRange(event.startDate || event.date, event.endDate)} at {event.time} to participate in the quiz.
+                          Please be present on {formatRoundDateRange(event.startDate || event.date, event.endDate)} to participate in the quiz.
                         </p>
                       </div>
                     </div>
@@ -951,11 +950,7 @@ const RegistrationPage: React.FC = () => {
               <div className="space-y-3.5 text-xs text-slate-550 font-semibold pt-1 border-t border-slate-50">
                 <div className="flex items-center gap-2.5">
                   <Calendar className="h-4.5 w-4.5 text-blue-600 shrink-0" />
-                  <span>{formatEventDateRange(event.startDate || event.date, event.endDate)}</span>
-                </div>
-                <div className="flex items-center gap-2.5">
-                  <Clock className="h-4.5 w-4.5 text-blue-600 shrink-0" />
-                  <span>{event.time}</span>
+                  <span>{formatRoundDateRange(event.startDate || event.date, event.endDate)}</span>
                 </div>
                 <div className="flex items-center gap-2.5">
                   <MapPin className="h-4.5 w-4.5 text-blue-600 shrink-0" />
@@ -1406,11 +1401,7 @@ const RegistrationPage: React.FC = () => {
                   <div className="space-y-3 text-xs text-slate-550 font-semibold pt-1 border-t border-slate-50 mt-1">
                     <div className="flex items-center gap-2.5">
                       <Calendar className="h-4.5 w-4.5 text-blue-600 shrink-0" />
-                      <span>{formatEventDateRange(event.startDate || event.date, event.endDate)}</span>
-                    </div>
-                    <div className="flex items-center gap-2.5">
-                      <Clock className="h-4.5 w-4.5 text-blue-600 shrink-0" />
-                      <span>{event.time}</span>
+                      <span>{formatRoundDateRange(event.startDate || event.date, event.endDate)}</span>
                     </div>
                     <div className="flex items-center gap-2.5">
                       <MapPin className="h-4.5 w-4.5 text-blue-600 shrink-0" />
@@ -2006,11 +1997,7 @@ const RegistrationPage: React.FC = () => {
                   <div className="space-y-3.5 text-xs text-slate-550 font-semibold pt-1 border-t border-slate-50">
                     <div className="flex items-center gap-2.5">
                       <Calendar className="h-4.5 w-4.5 text-blue-600 shrink-0" />
-                      <span>{event.date}</span>
-                    </div>
-                    <div className="flex items-center gap-2.5">
-                      <Clock className="h-4.5 w-4.5 text-blue-600 shrink-0" />
-                      <span>{event.time}</span>
+                      <span>{formatRoundDateRange(event.startDate || event.date, event.endDate)}</span>
                     </div>
                     <div className="flex items-center gap-2.5">
                       <MapPin className="h-4.5 w-4.5 text-blue-600 shrink-0" />

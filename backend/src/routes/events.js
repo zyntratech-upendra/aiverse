@@ -3,6 +3,7 @@ const router = express.Router();
 const mongoose = require('mongoose');
 const Event = require('../models/Event');
 const Registration = require('../models/Registration');
+const connectDB = require('../config/db');
 const { optionalAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { pick } = require('../utils/sanitize');
@@ -11,9 +12,42 @@ const { uploadToCloudinaryIfBase64 } = require('../utils/cloudinaryHelper');
 async function sanitizeEventImages(eventData) {
   if (eventData.posterUrl) eventData.posterUrl = await uploadToCloudinaryIfBase64(eventData.posterUrl, 'ai_verse/events');
   if (eventData.image) eventData.image = await uploadToCloudinaryIfBase64(eventData.image, 'ai_verse/events');
+  if (eventData.posterPreview) eventData.posterPreview = await uploadToCloudinaryIfBase64(eventData.posterPreview, 'ai_verse/events');
   if (eventData.bannerImage) eventData.bannerImage = await uploadToCloudinaryIfBase64(eventData.bannerImage, 'ai_verse/events');
   if (eventData.coverImage) eventData.coverImage = await uploadToCloudinaryIfBase64(eventData.coverImage, 'ai_verse/events');
+  if (eventData.speakerImagePreview) eventData.speakerImagePreview = await uploadToCloudinaryIfBase64(eventData.speakerImagePreview, 'ai_verse/events');
+  if (eventData.paymentQrImagePreview) eventData.paymentQrImagePreview = await uploadToCloudinaryIfBase64(eventData.paymentQrImagePreview, 'ai_verse/events');
+  if (eventData.juryImagePreview) eventData.juryImagePreview = await uploadToCloudinaryIfBase64(eventData.juryImagePreview, 'ai_verse/events');
+  if (Array.isArray(eventData.posterImages)) {
+    eventData.posterImages = await Promise.all(eventData.posterImages.map(async (pi) => {
+      if (!pi) return pi;
+      let preview = pi.preview;
+      let url = pi.url;
+      if (preview) preview = await uploadToCloudinaryIfBase64(preview, 'ai_verse/events');
+      if (url) url = await uploadToCloudinaryIfBase64(url, 'ai_verse/events');
+      return { filename: pi.filename || 'poster.png', preview: preview || url, url: url || preview };
+    }));
+  }
   return eventData;
+}
+
+// In-memory caching & stampede prevention for high-speed event delivery
+const cachedEventsMap = new Map();
+const lastEventsCacheTimeMap = new Map();
+const cachedSingleEventMap = new Map();
+const lastSingleEventCacheTimeMap = new Map();
+const EVENTS_CACHE_TTL = 15000; // 15 seconds
+const inFlightEventsMap = new Map();
+const inFlightSingleEventMap = new Map();
+
+function invalidateEventsCache() {
+  cachedEventsMap.clear();
+  lastEventsCacheTimeMap.clear();
+  inFlightEventsMap.clear();
+  cachedSingleEventMap.clear();
+  lastSingleEventCacheTimeMap.clear();
+  inFlightSingleEventMap.clear();
+  cachedCounts = null;
 }
 
 // Helper to compute registration counts for events (counting active teams/registrations)
@@ -73,20 +107,40 @@ router.get(
   '/',
   optionalAuth,
   asyncHandler(async (req, res) => {
+    try {
+      await connectDB();
+    } catch (e) {}
+
     const { category, track, isLive } = req.query;
-    const filter = {};
-    if (category) filter.category = category;
-    if (track) filter.track = track;
-    if (isLive !== undefined) filter.isLive = isLive === 'true';
+    const cacheKey = `events_${category || ''}_${track || ''}_${isLive || ''}`;
+    const now = Date.now();
 
-    const [events, { idMap, titleMap }] = await Promise.all([
-      Event.find(filter).sort({ createdAt: -1 }).lean(),
-      getRegistrationCountsMap()
-    ]);
+    const cached = cachedEventsMap.get(cacheKey);
+    const lastTime = lastEventsCacheTimeMap.get(cacheKey) || 0;
 
-    res.set('Cache-Control', 'public, max-age=10, stale-while-revalidate=30');
-    res.json(
-      events.map((e) => {
+    if (cached && cached.length > 0 && (now - lastTime < EVENTS_CACHE_TTL)) {
+      res.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+      return res.json(cached);
+    }
+
+    if (inFlightEventsMap.has(cacheKey)) {
+      const result = await inFlightEventsMap.get(cacheKey);
+      res.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+      return res.json(result);
+    }
+
+    const fetchPromise = (async () => {
+      const filter = {};
+      if (category) filter.category = category;
+      if (track) filter.track = track;
+      if (isLive !== undefined) filter.isLive = isLive === 'true';
+
+      const [events, { idMap, titleMap }] = await Promise.all([
+        Event.find(filter).sort({ createdAt: -1 }).lean(),
+        getRegistrationCountsMap()
+      ]);
+
+      const formatted = events.map((e) => {
         const id = String(e._id || e.id || '').trim();
         const title = String(e.title || '').trim().toLowerCase();
         const computedSeats = (id && idMap[id]) || (title && titleMap[title]) || 0;
@@ -95,8 +149,28 @@ router.get(
           id: e._id,
           currentReg: computedSeats
         };
-      })
-    );
+      });
+
+      cachedEventsMap.set(cacheKey, formatted);
+      lastEventsCacheTimeMap.set(cacheKey, Date.now());
+      // Seed single events cache
+      formatted.forEach((ev) => {
+        if (ev._id) cachedSingleEventMap.set(String(ev._id), ev);
+        if (ev.id) cachedSingleEventMap.set(String(ev.id), ev);
+        if (ev._id) lastSingleEventCacheTimeMap.set(String(ev._id), Date.now());
+      });
+      return formatted;
+    })();
+
+    inFlightEventsMap.set(cacheKey, fetchPromise);
+
+    try {
+      const data = await fetchPromise;
+      res.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+      res.json(data);
+    } finally {
+      inFlightEventsMap.delete(cacheKey);
+    }
   })
 );
 
@@ -105,32 +179,86 @@ router.get(
   '/:id',
   optionalAuth,
   asyncHandler(async (req, res) => {
+    try {
+      await connectDB();
+    } catch (e) {}
+
     const id = req.params.id;
-    let event = null;
-    if (mongoose.Types.ObjectId.isValid(id)) {
-      event = await Event.findById(id).lean();
-    }
-    if (!event) {
-      event = await Event.findOne({ $or: [{ id: id }, { _id: id }] }).lean();
-    }
-    if (!event) {
-      return res.status(404).json({ success: false, error: 'Event not found' });
+    const now = Date.now();
+
+    // 1. Direct in-memory hit
+    const cached = cachedSingleEventMap.get(id);
+    const lastTime = lastSingleEventCacheTimeMap.get(id) || 0;
+    if (cached && (now - lastTime < EVENTS_CACHE_TTL)) {
+      res.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+      return res.json(cached);
     }
 
-    const evId = String(event._id || event.id || id).trim();
-    const evTitle = String(event.title || '').trim();
+    // 2. Check in-flight request
+    if (inFlightSingleEventMap.has(id)) {
+      const result = await inFlightSingleEventMap.get(id);
+      if (!result) return res.status(404).json({ success: false, error: 'Event not found' });
+      res.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+      return res.json(result);
+    }
 
-    // Fast indexed count for single event
-    const computedSeats = await Registration.countDocuments({
-      $or: [{ eventId: evId }, { eventTitle: evTitle }]
-    }).catch(() => event.currentReg || 0);
+    // 3. Check if any cached list in memory contains this event
+    for (const list of cachedEventsMap.values()) {
+      if (Array.isArray(list)) {
+        const found = list.find((e) => String(e._id || e.id) === String(id) || String(e.id) === String(id));
+        if (found) {
+          cachedSingleEventMap.set(id, found);
+          lastSingleEventCacheTimeMap.set(id, Date.now());
+          res.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+          return res.json(found);
+        }
+      }
+    }
 
-    res.set('Cache-Control', 'public, max-age=10, stale-while-revalidate=30');
-    res.json({
-      ...event,
-      id: event._id,
-      currentReg: computedSeats
-    });
+    // 4. Fetch from MongoDB with stampede protection
+    const fetchPromise = (async () => {
+      let event = null;
+      if (mongoose.Types.ObjectId.isValid(id)) {
+        event = await Event.findById(id).lean();
+      }
+      if (!event) {
+        event = await Event.findOne({ $or: [{ id: id }, { _id: id }] }).lean();
+      }
+      if (!event) {
+        return null;
+      }
+
+      const evId = String(event._id || event.id || id).trim();
+      const evTitle = String(event.title || '').trim().toLowerCase();
+
+      const { idMap, titleMap } = await getRegistrationCountsMap();
+      const computedSeats = (evId && idMap[evId]) || (evTitle && titleMap[evTitle]) || event.currentReg || 0;
+
+      const formatted = {
+        ...event,
+        id: event._id,
+        currentReg: computedSeats
+      };
+
+      cachedSingleEventMap.set(id, formatted);
+      if (event._id) cachedSingleEventMap.set(String(event._id), formatted);
+      if (event.id) cachedSingleEventMap.set(String(event.id), formatted);
+      lastSingleEventCacheTimeMap.set(id, Date.now());
+      return formatted;
+    })();
+
+    inFlightSingleEventMap.set(id, fetchPromise);
+
+    try {
+      const result = await fetchPromise;
+      if (!result) {
+        return res.status(404).json({ success: false, error: 'Event not found' });
+      }
+      res.set('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+      res.json(result);
+    } finally {
+      inFlightSingleEventMap.delete(id);
+    }
   })
 );
 
@@ -153,6 +281,7 @@ router.post(
     });
 
     const saved = await newEvent.save();
+    invalidateEventsCache();
     res.status(201).json({ success: true, id: saved._id, event: { ...saved.toObject(), id: saved._id } });
   })
 );
@@ -178,6 +307,7 @@ router.put(
       return res.status(404).json({ success: false, error: 'Event not found' });
     }
 
+    invalidateEventsCache();
     res.json({ success: true, event: { ...updated, id: updated._id } });
   })
 );
@@ -193,6 +323,7 @@ router.delete(
       return res.status(404).json({ success: false, error: 'Event not found' });
     }
 
+    invalidateEventsCache();
     res.json({ success: true, message: `Event ${id} deleted successfully` });
   })
 );

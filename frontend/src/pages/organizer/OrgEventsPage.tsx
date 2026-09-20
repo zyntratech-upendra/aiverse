@@ -22,9 +22,6 @@ import Button from "../../components/ui/Button";
 import sparkImg from "../../assets/images/spark.png";
 import hackathonImg from "../../assets/images/hackathon.png";
 import seminarImg from "../../assets/images/seminar.png";
-import galleryLabImg from "../../assets/images/gallery_lab.png";
-import galleryCodingImg from "../../assets/images/gallery_coding.png";
-import galleryCollabImg from "../../assets/images/gallery_collab.png";
 
 interface EventItem {
   id: string;
@@ -43,6 +40,12 @@ interface EventItem {
   posterPreview?: string;
   imageName?: string;
 }
+
+const getEventImage = (imageName?: string, category?: string) => {
+  if (imageName === "hackathonImg" || category === "HACKATHONS") return hackathonImg;
+  if (imageName === "seminarImg" || category === "LECTURES") return seminarImg;
+  return sparkImg;
+};
 
 const OrgEventsPage: React.FC = () => {
   const { user } = useAuth();
@@ -127,17 +130,6 @@ const OrgEventsPage: React.FC = () => {
   useEffect(() => {
     fetchEvents();
   }, []);
-
-
-  // Helper to map event image name to actual asset
-  const getEventImage = (imageName?: string, category?: string) => {
-    if (imageName?.includes("collab")) return galleryCollabImg;
-    if (imageName?.includes("coding")) return galleryCodingImg;
-    if (imageName?.includes("lab")) return galleryLabImg;
-    if (imageName?.includes("hackathon") || category === "HACKATHONS") return hackathonImg;
-    if (imageName?.includes("seminar") || category === "LECTURES") return seminarImg;
-    return sparkImg;
-  };
 
   // Filter & Search Logic
   const filteredEvents = useMemo(() => {

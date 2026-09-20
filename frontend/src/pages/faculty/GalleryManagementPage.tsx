@@ -28,14 +28,6 @@ import {
 } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
-// Import local fallback assets
-import galleryLab from "../../assets/images/gallery_lab.png";
-import gallerySymposium from "../../assets/images/gallery_symposium.png";
-import galleryVr from "../../assets/images/gallery_vr.png";
-import galleryCoding from "../../assets/images/gallery_coding.png";
-import galleryCoworking from "../../assets/images/gallery_coworking.png";
-import galleryCollab from "../../assets/images/gallery_collab.png";
-
 export interface GalleryPhotoItem {
   id: string;
   title: string;
@@ -227,15 +219,15 @@ export const GalleryManagementPage: React.FC = () => {
     if (data?.bannerImage && typeof data.bannerImage === "string" && data.bannerImage.trim() !== "") {
       return data.bannerImage;
     }
-    if (data?.coverImage && typeof data.coverImage === "string" && (data.coverImage.startsWith("data:") || data.coverImage.startsWith("http") || data.coverImage.startsWith("/"))) {
+    if (data?.coverImage && typeof data.coverImage === "string" && data.coverImage.trim() !== "") {
       return data.coverImage;
     }
-    if (data?.coverImage === "galleryCoding" || data?.category === "Hackathons") return galleryCoding;
-    if (data?.coverImage === "gallerySymposium" || data?.category === "Technical Events" || data?.category === "Symposiums" || data?.category === "Socials") return gallerySymposium;
-    if (data?.coverImage === "galleryCoworking") return galleryCoworking;
-    if (data?.coverImage === "galleryCollab") return galleryCollab;
-    if (data?.coverImage === "galleryVr") return galleryVr;
-    return galleryLab;
+    if (Array.isArray(data?.images) && data.images.length > 0) {
+      const first = data.images[0];
+      const u = typeof first === "string" ? first : first?.url;
+      if (u && typeof u === "string" && u.trim() !== "") return u;
+    }
+    return "";
   };
 
   // Normalize category helper

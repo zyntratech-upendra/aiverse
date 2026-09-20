@@ -1,3 +1,7 @@
+const dns = require('dns');
+try {
+  dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
+} catch (e) {}
 require('dotenv').config();
 const express = require('express');
 const cors = require('cors');
@@ -52,8 +56,16 @@ app.use(
     origin: '*',
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowedHeaders: ['Content-Type', 'Authorization', 'Accept'],
+    maxAge: 86400, // Cache preflight requests for 24 hours in the browser
+    optionsSuccessStatus: 204,
   })
 );
+// Fast preflight responder with explicit Cache-Control
+app.options('*', (req, res) => {
+  res.setHeader('Access-Control-Max-Age', '86400');
+  res.setHeader('Cache-Control', 'public, max-age=86400');
+  res.sendStatus(204);
+});
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ extended: true, limit: '25mb' }));
 

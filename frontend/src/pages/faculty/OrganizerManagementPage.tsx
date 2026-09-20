@@ -15,7 +15,7 @@ import {
   MoreVertical,
   Trash2
 } from "lucide-react";
-import { fetchEvents as apiFetchEvents, fetchUsers as apiFetchUsers, fetchOrganizers, createOrganizer, deleteOrganizer, updateUser } from "../../services/apiClient";
+import { fetchEvents as apiFetchEvents, fetchUsers as apiFetchUsers, fetchOrganizers, createOrganizer, deleteOrganizer, updateUser, fetchSettings } from "../../services/apiClient";
 import { userService } from "../../services/userService";
 
 // Import local assets if they exist
@@ -158,13 +158,10 @@ const OrganizerManagementPage: React.FC = () => {
   useEffect(() => {
     const fetchRoles = async () => {
       try {
-        const getSnap = await getDocs(collection(db, "settings"));
-        getSnap.forEach(d => {
-          if (d.id === "portal_config") {
-            const data = d.data();
-            if (data.availableRoles) setAvailableRoles(data.availableRoles);
-          }
-        });
+        const config = await fetchSettings("portal_config");
+        if (config?.availableRoles) {
+          setAvailableRoles(config.availableRoles);
+        }
       } catch (e) {
         console.error("Error loading available roles:", e);
       }

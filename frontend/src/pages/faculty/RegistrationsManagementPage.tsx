@@ -19,7 +19,8 @@ import {
   Mail,
   Building2,
   GraduationCap,
-  MapPin
+  MapPin,
+  Calendar
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
 import { 

@@ -15,11 +15,11 @@ import {
   Check,
   CheckCircle2 
 } from "lucide-react";
-
+import { userService } from "../../services/userService";
+import { updateUser, uploadImage } from "../../services/apiClient";
 
 const ProfilePage: React.FC = () => {
   const { user } = useAuth();
-
 
   // Profile data state
   const [profile, setProfile] = useState({
@@ -42,17 +42,33 @@ const ProfilePage: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handlePhotoUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
+      try {
+        const uploadRes = await uploadImage(file, "profile_photos");
+        const photoUrl = uploadRes?.url || (uploadRes as any)?.secure_url;
+        if (photoUrl) {
+          setProfile(prev => ({ ...prev, image: photoUrl }));
+          const targetId = user?.uid || user?.email;
+          if (targetId) {
+            await updateUser(targetId, { image: photoUrl });
+            addToast("Profile photo updated successfully!", "success");
+          }
+          return;
+        }
+      } catch (err) {
+        console.warn("Upload image API notice, falling back to base64:", err);
+      }
+
       const reader = new FileReader();
       reader.onloadend = async () => {
         const base64 = reader.result as string;
         setProfile(prev => ({ ...prev, image: base64 }));
-        if (user?.uid) {
+        const targetId = user?.uid || user?.email;
+        if (targetId) {
           try {
-            const docRef = doc(db, "users", user.uid);
-            await setDoc(docRef, { image: base64 }, { merge: true });
+            await updateUser(targetId, { image: base64 });
             addToast("Profile photo updated successfully!", "success");
           } catch (err) {
             console.error("Error saving photo:", err);
@@ -80,52 +96,38 @@ const ProfilePage: React.FC = () => {
     }, 4500);
   };
 
-  // Load profile from Firestore
+  // Load profile from database
   useEffect(() => {
     const loadProfileData = async () => {
-      if (!user?.uid) {
+      const lookupKey = user?.uid || user?.email;
+      if (!lookupKey) {
         setIsLoading(false);
         return;
       }
 
       try {
-        const docRef = doc(db, "users", user.uid);
-        const docSnap = await getDoc(docRef);
+        const dbUser = await userService.getUserById(lookupKey) || (user.email ? await userService.getUserByEmail(user.email) : null);
 
-        if (docSnap.exists()) {
-          const dbData = docSnap.data();
+        if (dbUser) {
           const loadedProfile = {
-            name: dbData.name || user.name || "Dr. Sarah Chen",
-            role: dbData.role || (user.role === "faculty" ? "Senior AI Advisor & Faculty Coordinator" : "Senior Coordinator"),
-            department: dbData.department || "Department of Computer Science & Artificial Intelligence",
-            email: dbData.email || user.email || "sarah.chen@azure.edu",
-            phone: dbData.phone || "+1 (555) 012-3456",
-            office: dbData.office || "Turing Wing, Room 402B",
-            timezone: dbData.timezone || "GMT -05:00 (EST)",
-            bio: dbData.bio || "Pioneering researcher in the field of Large Language Models and Neural Architecture. Over 15 years of experience in both academia and industry-leading labs. Currently focused on ethical AI frameworks and high-performance generative systems. Dedicated to mentoring the next generation of innovators in computational science.",
-            image: dbData.image || ""
+            name: dbUser.name || dbUser.display_name || user.name || "Dr. Sarah Chen",
+            role: dbUser.position || (user.role === "faculty" ? "Senior AI Advisor & Faculty Coordinator" : "Senior Coordinator"),
+            department: (dbUser as any).department || "Department of Computer Science & Artificial Intelligence",
+            email: dbUser.email || user.email || "sarah.chen@azure.edu",
+            phone: dbUser.phone || "+1 (555) 012-3456",
+            office: (dbUser as any).office || "Turing Wing, Room 402B",
+            timezone: (dbUser as any).timezone || "GMT -05:00 (EST)",
+            bio: dbUser.bio || "Pioneering researcher in the field of Large Language Models and Neural Architecture. Over 15 years of experience in both academia and industry-leading labs. Currently focused on ethical AI frameworks and high-performance generative systems. Dedicated to mentoring the next generation of innovators in computational science.",
+            image: dbUser.image || ""
           };
           
           setProfile(loadedProfile);
           setTempBio(loadedProfile.bio);
           setTempPhone(loadedProfile.phone);
           setTempOffice(loadedProfile.office);
-        } else {
-          // Document doesn't exist, create it with default profile information
-          const defaultData = {
-            name: user.name || "Dr. Sarah Chen",
-            role: user.role === "faculty" ? "Faculty Advisor" : "Senior Coordinator",
-            email: user.email,
-            phone: "+1 (555) 012-3456",
-            office: "Turing Wing, Room 402B",
-            timezone: "GMT -05:00 (EST)",
-            bio: "Pioneering researcher in the field of Large Language Models and Neural Architecture. Over 15 years of experience in both academia and industry-leading labs. Currently focused on ethical AI frameworks and high-performance generative systems. Dedicated to mentoring the next generation of innovators in computational science.",
-            department: "Department of Computer Science & Artificial Intelligence"
-          };
-          await setDoc(docRef, defaultData, { merge: true });
         }
       } catch (err) {
-        console.error("Error loading profile from Firestore:", err);
+        console.error("Error loading profile:", err);
         addToast("Failed to load profile. Using local defaults.", "warning");
       } finally {
         setIsLoading(false);
@@ -138,20 +140,20 @@ const ProfilePage: React.FC = () => {
   // Handle Edit/Save Click
   const handleEditToggle = async () => {
     if (isEditing) {
-      if (!user?.uid) {
+      const targetId = user?.uid || user?.email;
+      if (!targetId) {
         addToast("No active session. Changes could not be saved to the database.", "error");
         return;
       }
       setIsSaving(true);
       try {
-        const docRef = doc(db, "users", user.uid);
         const updatedFields = {
           bio: tempBio,
           phone: tempPhone,
           office: tempOffice
         };
         
-        await setDoc(docRef, updatedFields, { merge: true });
+        await updateUser(targetId, updatedFields);
         
         setProfile(prev => ({
           ...prev,
@@ -160,7 +162,7 @@ const ProfilePage: React.FC = () => {
         
         addToast("Profile information updated successfully!", "success");
       } catch (err) {
-        console.error("Error saving profile to Firestore:", err);
+        console.error("Error saving profile:", err);
         addToast("Failed to save changes. Please try again.", "error");
       } finally {
         setIsSaving(false);

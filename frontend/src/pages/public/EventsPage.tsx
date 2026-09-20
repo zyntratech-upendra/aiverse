@@ -87,14 +87,11 @@ const EventsPage: React.FC = () => {
             eventType = "Workshop";
           }
           
-          let img = sparkImg;
-          if (data.imageName === "hackathonImg" || catUpper.includes("HACKATHON")) img = hackathonImg;
-          else if (data.imageName === "seminarImg" || catUpper.includes("LECTURE") || catUpper.includes("SEMINAR")) img = seminarImg;
-          
-          if (data.posterPreview) {
-            img = data.posterPreview;
-          } else if (data.posterImages && data.posterImages[0]?.preview) {
-            img = data.posterImages[0].preview;
+          let img = data.posterUrl || data.posterPreview || data.image || data.coverImage || (data.posterImages && data.posterImages[0]?.preview) || (data.posterImages && data.posterImages[0]?.url) || "";
+          if (!img) {
+            if (data.imageName === "hackathonImg" || catUpper.includes("HACKATHON")) img = hackathonImg;
+            else if (data.imageName === "seminarImg" || catUpper.includes("LECTURE") || catUpper.includes("SEMINAR")) img = seminarImg;
+            else img = sparkImg;
           }
 
           let timeText = data.time || "10:00 AM";

@@ -1557,24 +1557,23 @@ const SettingsPage: React.FC = () => {
 
             <div className="space-y-4">
               {/* Live Public Card Simulation Preview */}
-              <div className="relative rounded-2xl overflow-hidden aspect-[4/3] bg-slate-900 shadow-md border border-slate-100 group">
+              <div className="relative rounded-2xl overflow-hidden aspect-[4/3] bg-slate-100 shadow-md border border-slate-200/80 group">
                 <img
                   src={currentConfig.aboutImage || "/homepage/g.jpeg"}
                   alt="About Us Spotlight Preview"
-                  className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                  className="w-full h-full object-cover object-center group-hover:scale-102 transition-transform duration-500"
                   onError={(e) => {
                     (e.currentTarget as HTMLImageElement).src = "/homepage/g.jpeg";
                   }}
                 />
-                <div className="absolute inset-0 bg-gradient-to-t from-slate-950/75 via-slate-950/20 to-transparent pointer-events-none" />
                 
                 {/* Floating Badges Simulation */}
                 <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white text-xs pointer-events-none">
-                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-black/50 backdrop-blur-md border border-white/20 font-semibold text-[10px]">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-slate-950/80 border border-white/20 font-bold text-[10px]">
                     <Sparkles className="h-3 w-3 text-blue-400" />
                     VIT Bhimavaram
                   </span>
-                  <span className="px-2 py-0.5 rounded-full bg-blue-600/85 backdrop-blur-md font-bold text-[9px] uppercase tracking-wider">
+                  <span className="px-2 py-0.5 rounded-full bg-blue-600 font-black text-[9px] uppercase tracking-wider">
                     Estd. 2022
                   </span>
                 </div>

@@ -2,6 +2,7 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Album = require('../models/Album');
+const connectDB = require('../config/db');
 const { optionalAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { pick } = require('../utils/sanitize');
@@ -29,7 +30,7 @@ async function sanitizeAlbumImages(item) {
 // In-memory caching & stampede prevention for high-speed album delivery
 const cachedAlbumsMap = new Map();
 const lastCacheTimeMap = new Map();
-const ALBUMS_CACHE_TTL = 30000; // 30 seconds
+const ALBUMS_CACHE_TTL = 15000; // 15 seconds
 const inFlightFetchMap = new Map();
 
 function invalidateAlbumsCache() {
@@ -43,6 +44,10 @@ router.get(
   '/',
   optionalAuth,
   asyncHandler(async (req, res) => {
+    try {
+      await connectDB();
+    } catch (e) {}
+
     const { eventId, category, status } = req.query;
     const cacheKey = `albums_${eventId || ''}_${category || ''}_${status || ''}`;
     const now = Date.now();
@@ -50,7 +55,7 @@ router.get(
     const cached = cachedAlbumsMap.get(cacheKey);
     const lastTime = lastCacheTimeMap.get(cacheKey) || 0;
 
-    if (cached && now - lastTime < ALBUMS_CACHE_TTL) {
+    if (cached && cached.length > 0 && now - lastTime < ALBUMS_CACHE_TTL) {
       res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
       return res.json(cached);
     }
@@ -69,7 +74,6 @@ router.get(
 
       let albums = [];
       try {
-        // Fast query with maxTimeMS constraint to prevent connection hangs
         albums = await Album.find(filter)
           .maxTimeMS(6000)
           .sort({ order: 1, createdAt: -1 })

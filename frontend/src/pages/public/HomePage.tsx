@@ -8,15 +8,19 @@ import {
   Eye,
   BookOpen,
   Search,
-  Lightbulb
+  Lightbulb,
+  Flame,
+  X
 } from "lucide-react";
 import Button from "../../components/ui/Button";
 import SEO from "../../components/layout/SEO";
 
 import { dataCache } from "../../utils/dataCache";
-import { fetchSettings } from "../../services/apiClient";
+import { fetchSettings, fetchEvents } from "../../services/apiClient";
 import HeroImageCarousel from "../../components/home/HeroImageCarousel";
-import { formatEventDateRange } from "../../utils/dateFormatter";
+import EventRegistrationPopup from "../../components/home/EventRegistrationPopup";
+import type { OpenEventItem } from "../../components/home/EventRegistrationPopup";
+import { formatEventDateRange, parseDateSafe } from "../../utils/dateFormatter";
 
 // Fallback assets
 import sparkImg from "../../assets/images/spark.png";
@@ -56,6 +60,9 @@ const defaultHighlights: HighlightEvent[] = [
 
 const HomePage: React.FC = () => {
   const [highlights, setHighlights] = useState<HighlightEvent[]>(() => dataCache.get<HighlightEvent[]>("home_highlights") || defaultHighlights);
+  const [openRegEvents, setOpenRegEvents] = useState<OpenEventItem[]>([]);
+  const [showRegPopup, setShowRegPopup] = useState<boolean>(false);
+  const [isStickyCardDismissed, setIsStickyCardDismissed] = useState<boolean>(false);
   const [heroImages, setHeroImages] = useState<string[]>(() => {
     const cached = dataCache.get<any>("portal_config");
     return cached?.heroImages && Array.isArray(cached.heroImages) && cached.heroImages.length > 0
@@ -107,36 +114,157 @@ const HomePage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const fetchHighlights = async () => {
+    let isMounted = true;
+    const fetchEventData = async () => {
       try {
-        const API_BASE = ((import.meta.env.VITE_API_BASE as string) || 'http://localhost:4000/api').replace(/\/+$/, '');
-        const res = await fetch(`${API_BASE}/events`);
-        const eventsData: any[] = res.ok ? await res.json() : [];
+        let eventsData: any[] = [];
+        try {
+          eventsData = await fetchEvents();
+        } catch {
+          const API_BASE = ((import.meta.env.VITE_API_BASE as string) || 'http://localhost:4000/api').replace(/\/+$/, '');
+          const res = await fetch(`${API_BASE}/events`);
+          eventsData = res.ok ? await res.json() : [];
+        }
+
+        if (!Array.isArray(eventsData)) eventsData = [];
+
         const list: HighlightEvent[] = [];
+        const openList: OpenEventItem[] = [];
         const titlesSeen = new Set<string>();
+        const openIdsSeen = new Set<string>();
+
+        const parseTimeString = (timeStr?: string): { hours: number; minutes: number } | null => {
+          if (!timeStr) return null;
+          const parts = timeStr.split("-");
+          const target = (parts[parts.length - 1] || "").trim();
+          const match = target.match(/(\d{1,2}):(\d{2})(?:\s*([ap]m))?/i);
+          if (!match) return null;
+          let hours = parseInt(match[1], 10);
+          const minutes = parseInt(match[2], 10);
+          const meridian = match[3]?.toLowerCase();
+          if (meridian === "pm" && hours < 12) hours += 12;
+          if (meridian === "am" && hours === 12) hours = 0;
+          return { hours, minutes };
+        };
+
+        const isEventRegistrationOpen = (ev: any): boolean => {
+          if (!ev) return false;
+          const status = String(ev.status || "").trim().toLowerCase();
+          if (status === "draft" || status === "completed" || status === "archived" || status === "closed") {
+            return false;
+          }
+          if (ev.allowRegistrations === false || ev.allowRegistrations === "false") {
+            return false;
+          }
+          if (ev.isPastEvent) {
+            return false;
+          }
+
+          const now = Date.now();
+
+          // Check registration deadline if set
+          const deadlineDateStr = ev.regDeadline || ev.registrationDeadline;
+          const deadlineTimeStr = ev.regDeadlineTime || ev.registrationDeadlineTime || ev.endTime;
+          if (deadlineDateStr) {
+            const d = parseDateSafe(deadlineDateStr);
+            if (d) {
+              if (deadlineTimeStr) {
+                const t = parseTimeString(deadlineTimeStr);
+                if (t) {
+                  d.setHours(t.hours, t.minutes, 59, 999);
+                } else {
+                  d.setHours(23, 59, 59, 999);
+                }
+              } else {
+                d.setHours(23, 59, 59, 999);
+              }
+              if (now > d.getTime()) {
+                return false;
+              }
+            }
+          }
+
+          // Check event end date / event date
+          const eventDateStr = ev.endDate || ev.startDate || ev.date;
+          if (eventDateStr && eventDateStr !== "TBD") {
+            const d = parseDateSafe(eventDateStr);
+            if (d) {
+              const eventTimeStr = ev.endTime || ev.time;
+              if (eventTimeStr) {
+                const t = parseTimeString(eventTimeStr);
+                if (t) {
+                  d.setHours(t.hours, t.minutes, 59, 999);
+                } else {
+                  d.setHours(23, 59, 59, 999);
+                }
+              } else {
+                d.setHours(23, 59, 59, 999);
+              }
+              if (now > d.getTime()) {
+                return false;
+              }
+            }
+          }
+
+          return true;
+        };
 
         for (const data of eventsData) {
           if (data.status === "Draft") continue;
 
+          const evId = String(data.id || data._id || "").trim();
           const title = (data.title || "").trim();
+
+          let eventType = "Workshop";
+          const catUpper = String(data.category || "").toUpperCase();
+          if (catUpper.includes("HACKATHON")) eventType = "Hackathon";
+          else if (catUpper.includes("LECTURE") || catUpper.includes("SEMINAR")) eventType = "Seminar";
+          else if (catUpper.includes("QUIZ")) eventType = "Quiz";
+
+          let img = data.posterUrl || data.posterPreview || data.image || data.coverImage || (data.posterImages && data.posterImages[0]?.preview) || (data.posterImages && data.posterImages[0]?.url) || "";
+          if (!img) {
+            if (data.imageName === "hackathonImg" || catUpper.includes("HACKATHON")) img = hackathonImg;
+            else if (data.imageName === "seminarImg" || catUpper.includes("LECTURE") || catUpper.includes("SEMINAR")) img = seminarImg;
+            else img = sparkImg;
+          }
+
+          // Check if registration is open for this event
+          if (isEventRegistrationOpen(data) && evId && !openIdsSeen.has(evId)) {
+            openIdsSeen.add(evId);
+
+            let timeText = data.time || "10:00 AM";
+            if (data.startTime) {
+              timeText = data.startTime;
+              if (data.endTime) timeText += ` - ${data.endTime}`;
+            }
+
+            openList.push({
+              id: evId,
+              title: title || "Upcoming Event",
+              type: eventType,
+              category: data.category || eventType,
+              date: data.date || data.startDate || "TBD",
+              startDate: data.startDate || data.date || "TBD",
+              endDate: data.endDate || "",
+              time: timeText,
+              location: data.location || data.venue || "Campus Auditorium / Offline",
+              description: data.description || data.shortDescription || "",
+              image: img,
+              registrationDeadline: data.regDeadline || data.registrationDeadline || "",
+              registrationDeadlineTime: data.regDeadlineTime || data.registrationDeadlineTime || "",
+              isPaidEvent: data.isPaidEvent !== undefined ? Boolean(data.isPaidEvent) : (Number(data.registrationFee) > 0),
+              registrationFee: data.registrationFee !== undefined ? Number(data.registrationFee) : 0,
+              pricingType: data.pricingType === "per_team" || data.pricingModel === "per_team" ? "per_team" : "per_person",
+              currentReg: Number(data.currentReg) || 0,
+              maxReg: Number(data.maxReg) || 100
+            });
+          }
 
           if (title && titlesSeen.has(title.toLowerCase())) continue;
           if (title) titlesSeen.add(title.toLowerCase());
 
-          let eventType = "Workshop";
-          if (data.category === "HACKATHONS") eventType = "Hackathon";
-          else if (data.category === "LECTURES") eventType = "Seminar";
-
-          let img = sparkImg;
-          if (data.imageName === "hackathonImg" || data.category === "HACKATHONS") img = hackathonImg;
-          else if (data.imageName === "seminarImg" || data.category === "LECTURES") img = seminarImg;
-
-          if (data.posterPreview) {
-            img = data.posterPreview;
-          }
-
           list.push({
-            id: data.id || data._id,
+            id: evId,
             title: title,
             category: eventType,
             date: formatEventDateRange(data.startDate || data.date, data.endDate),
@@ -146,75 +274,94 @@ const HomePage: React.FC = () => {
           });
         }
 
-        if (list.length > 0) {
-          const parseEventDate = (dateStr: string): number => {
-            if (!dateStr) return Infinity;
-            const parsed = Date.parse(dateStr);
-            if (!isNaN(parsed)) return parsed;
-            const currentYear = new Date().getFullYear();
-            const parsedWithYear = Date.parse(`${dateStr}, ${currentYear}`);
-            if (!isNaN(parsedWithYear)) return parsedWithYear;
+        if (isMounted) {
+          // Process highlights
+          if (list.length > 0) {
+            const parseEventDate = (dateStr: string): number => {
+              if (!dateStr) return Infinity;
+              const parsed = Date.parse(dateStr);
+              if (!isNaN(parsed)) return parsed;
+              const currentYear = new Date().getFullYear();
+              const parsedWithYear = Date.parse(`${dateStr}, ${currentYear}`);
+              if (!isNaN(parsedWithYear)) return parsedWithYear;
 
-            const monthNames: Record<string, number> = {
-              jan: 0, january: 0,
-              feb: 1, february: 1,
-              mar: 2, march: 2,
-              apr: 3, april: 3,
-              may: 4,
-              jun: 5, june: 5,
-              jul: 6, july: 6,
-              aug: 7, august: 7,
-              sep: 8, sept: 8, september: 8,
-              oct: 9, october: 9,
-              nov: 10, november: 10,
-              dec: 11, december: 11
-            };
+              const monthNames: Record<string, number> = {
+                jan: 0, january: 0, feb: 1, february: 1, mar: 2, march: 2,
+                apr: 3, april: 3, may: 4, jun: 5, june: 5, jul: 6, july: 6,
+                aug: 7, august: 7, sep: 8, sept: 8, september: 8, oct: 9, october: 9,
+                nov: 10, november: 10, dec: 11, december: 11
+              };
 
-            const tokens = dateStr.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
-            let foundMonth = -1;
-            let foundDay = -1;
-            let foundYear = currentYear;
+              const tokens = dateStr.toLowerCase().replace(/[^a-z0-9\s]/g, " ").split(/\s+/).filter(Boolean);
+              let foundMonth = -1;
+              let foundDay = -1;
+              let foundYear = currentYear;
 
-            for (const t of tokens) {
-              if (monthNames[t] !== undefined) {
-                foundMonth = monthNames[t];
-              } else {
-                const n = parseInt(t, 10);
-                if (!isNaN(n)) {
-                  if (n > 1900 && n < 2100) foundYear = n;
-                  else if (n >= 1 && n <= 31 && foundDay === -1) foundDay = n;
+              for (const t of tokens) {
+                if (monthNames[t] !== undefined) {
+                  foundMonth = monthNames[t];
+                } else {
+                  const n = parseInt(t, 10);
+                  if (!isNaN(n)) {
+                    if (n > 1900 && n < 2100) foundYear = n;
+                    else if (n >= 1 && n <= 31 && foundDay === -1) foundDay = n;
+                  }
                 }
               }
+
+              if (foundMonth !== -1 && foundDay !== -1) {
+                return new Date(foundYear, foundMonth, foundDay).getTime();
+              }
+
+              return Infinity;
+            };
+
+            const now = Date.now() - 24 * 60 * 60 * 1000;
+            const upcoming = list.filter(e => parseEventDate(e.date) >= now);
+            const past = list.filter(e => parseEventDate(e.date) < now);
+
+            upcoming.sort((a, b) => parseEventDate(a.date) - parseEventDate(b.date));
+            past.sort((a, b) => parseEventDate(b.date) - parseEventDate(a.date));
+
+            const combined = [...upcoming, ...past];
+            const topHighlights = combined.slice(0, 2);
+            setHighlights(topHighlights);
+            dataCache.set("home_highlights", topHighlights);
+          } else {
+            setHighlights(defaultHighlights);
+          }
+
+          // Process open registration pop-up
+          if (openList.length > 0) {
+            setOpenRegEvents(openList);
+            const isDismissed = sessionStorage.getItem("aiverse_reg_popup_dismissed");
+            if (!isDismissed) {
+              const timer = setTimeout(() => {
+                setShowRegPopup(true);
+              }, 600);
+              return () => clearTimeout(timer);
             }
-
-            if (foundMonth !== -1 && foundDay !== -1) {
-              return new Date(foundYear, foundMonth, foundDay).getTime();
-            }
-
-            return Infinity;
-          };
-
-          const now = Date.now() - 24 * 60 * 60 * 1000;
-          const upcoming = list.filter(e => parseEventDate(e.date) >= now);
-          const past = list.filter(e => parseEventDate(e.date) < now);
-
-          upcoming.sort((a, b) => parseEventDate(a.date) - parseEventDate(b.date));
-          past.sort((a, b) => parseEventDate(b.date) - parseEventDate(a.date));
-
-          const combined = [...upcoming, ...past];
-          const topHighlights = combined.slice(0, 2);
-          setHighlights(topHighlights);
-          dataCache.set("home_highlights", topHighlights);
-        } else {
-          setHighlights(defaultHighlights);
+          }
         }
       } catch (err) {
-        console.error("Error loading highlights:", err);
-        setHighlights(defaultHighlights);
+        console.error("Error loading events & highlights:", err);
+        if (isMounted) {
+          setHighlights(defaultHighlights);
+        }
       }
     };
-    fetchHighlights();
+    fetchEventData();
+    return () => {
+      isMounted = false;
+    };
   }, []);
+
+  const handleClosePopup = () => {
+    setShowRegPopup(false);
+    try {
+      sessionStorage.setItem("aiverse_reg_popup_dismissed", "true");
+    } catch {}
+  };
 
   // Animation variants
   const fadeInUp = {
@@ -236,10 +383,15 @@ const HomePage: React.FC = () => {
     }
   };
 
-
-
   return (
     <div className="overflow-hidden bg-[#F8FAFC]">
+      {/* Event Registrations Open Pop-up Modal */}
+      <EventRegistrationPopup
+        events={openRegEvents}
+        isOpen={showRegPopup}
+        onClose={handleClosePopup}
+      />
+
       <SEO
         title="AI Verse | Official AI & Data Science Club of VIT Bhimavaram"
         description="Welcome to AI Verse, the premier Artificial Intelligence and Data Science technical club at Vishnu Institute of Technology, Bhimavaram (VITB). Join us to explore Machine Learning, Deep Learning, Generative AI, and Data Analytics through hands-on workshops, national-level hackathons, and innovative student projects."
@@ -350,11 +502,12 @@ const HomePage: React.FC = () => {
               
               {/* Left Column: Visual Media & Badges */}
               <motion.div variants={fadeInUp} className="lg:col-span-5 space-y-4">
-                <div className="relative rounded-2xl overflow-hidden aspect-[4/3] bg-slate-900 shadow-md group border border-slate-100">
+                <div className="relative rounded-2xl overflow-hidden aspect-[4/3] bg-slate-100 shadow-lg group border border-slate-200/80">
                   <img
                     src={aboutImage || "/homepage/g.jpeg"}
                     alt="AI Verse Community at VIT Bhimavaram"
-                    className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700"
+                    className="w-full h-full object-cover object-center transition-transform duration-500 group-hover:scale-102"
+                    loading="eager"
                     onError={(e) => {
                       const target = e.currentTarget as HTMLImageElement;
                       if (target.src !== `${window.location.origin}/homepage/g.jpeg`) {
@@ -362,15 +515,14 @@ const HomePage: React.FC = () => {
                       }
                     }}
                   />
-                  <div className="absolute inset-0 bg-gradient-to-t from-slate-950/75 via-slate-950/20 to-transparent" />
                   
                   {/* Floating Chips inside Image */}
-                  <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between text-white text-xs">
-                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-black/50 backdrop-blur-md border border-white/20 font-semibold text-[11px]">
+                  <div className="absolute bottom-3 left-3 right-3 flex items-center justify-between text-white text-xs pointer-events-none">
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-slate-950/80 border border-white/20 font-bold text-[11px] shadow-md">
                       <Sparkles className="h-3 w-3 text-blue-400" />
                       VIT Bhimavaram
                     </span>
-                    <span className="px-2.5 py-1 rounded-full bg-blue-600/85 backdrop-blur-md font-bold text-[10px] uppercase tracking-wider">
+                    <span className="px-2.5 py-1 rounded-full bg-blue-600 font-black text-[10px] uppercase tracking-wider shadow-md">
                       Estd. 2022
                     </span>
                   </div>
@@ -652,6 +804,77 @@ const HomePage: React.FC = () => {
           </div>
         </div>
       </section>
+
+      {/* ================= STICKY BOTTOM FLOATING EVENT REGISTRATION CARD ================= */}
+      {openRegEvents.length > 0 && !isStickyCardDismissed && (
+        <motion.div
+          initial={{ opacity: 0, y: 50, scale: 0.95 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 50, scale: 0.95 }}
+          transition={{ type: "spring", stiffness: 320, damping: 26 }}
+          className="fixed bottom-4 sm:bottom-6 right-4 sm:right-6 md:right-8 z-50 max-w-sm sm:max-w-md w-[calc(100%-2rem)] sm:w-auto shadow-[0_20px_45px_rgba(15,23,42,0.35)]"
+        >
+          <div className="relative overflow-hidden rounded-2xl bg-gradient-to-r from-blue-600 via-indigo-600 to-blue-700 p-[1.5px]">
+            <div className="relative rounded-[15px] bg-slate-950/92 backdrop-blur-xl px-4 py-3 sm:px-4.5 sm:py-3.5 flex items-center justify-between gap-3 text-left">
+              {/* Ambient Glow */}
+              <div className="absolute top-0 right-0 w-32 h-32 bg-blue-500/25 rounded-full blur-2xl pointer-events-none" />
+
+              {/* Left: Flame & Event Info */}
+              <Link
+                to={`/events/${openRegEvents[0].id}/register`}
+                className="flex items-center gap-3 min-w-0 group flex-1"
+              >
+                <div className="w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br from-amber-400 to-orange-500 flex items-center justify-center text-white shadow-md shrink-0 animate-pulse">
+                  <Flame className="w-5 h-5 fill-white text-white" />
+                </div>
+                <div className="min-w-0 space-y-0.5">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-2 w-2 rounded-full bg-emerald-400 animate-ping" />
+                    <span className="text-[10px] font-extrabold uppercase tracking-wider text-amber-300">
+                      Registrations Open
+                    </span>
+                    <span className="text-[10px] font-bold text-blue-200 bg-blue-500/30 px-1.5 py-0.2 rounded">
+                      {openRegEvents[0].type || "Hackathon"}
+                    </span>
+                    {openRegEvents.length > 1 && (
+                      <span className="text-[9px] font-bold text-slate-300 bg-white/10 px-1.5 py-0.2 rounded-full">
+                        +{openRegEvents.length - 1} more
+                      </span>
+                    )}
+                  </div>
+                  <h4 className="text-xs sm:text-sm font-extrabold text-white truncate group-hover:text-blue-200 transition-colors">
+                    {openRegEvents[0].title}
+                  </h4>
+                  <p className="text-[11px] text-slate-300 truncate">
+                    {formatEventDateRange(openRegEvents[0].startDate || openRegEvents[0].date, openRegEvents[0].endDate)}
+                  </p>
+                </div>
+              </Link>
+
+              {/* Right: Quick Action Pill & Dismiss Button */}
+              <div className="shrink-0 flex items-center gap-2">
+                <Link
+                  to={`/events/${openRegEvents[0].id}/register`}
+                  className="flex items-center gap-1 bg-blue-600 hover:bg-blue-500 text-white font-bold text-xs px-3.5 py-1.5 rounded-full transition-all duration-200 shadow-sm group/btn cursor-pointer"
+                >
+                  <span>Register</span>
+                  <ArrowRight className="w-3.5 h-3.5 group-hover/btn:translate-x-0.5 transition-transform" />
+                </Link>
+
+                <button
+                  type="button"
+                  onClick={() => setIsStickyCardDismissed(true)}
+                  className="p-1 rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+                  title="Dismiss banner"
+                  aria-label="Dismiss banner"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      )}
 
     </div>
   );

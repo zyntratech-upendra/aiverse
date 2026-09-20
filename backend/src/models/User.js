@@ -38,6 +38,7 @@ const UserSchema = new Schema(
   }
 );
 
+UserSchema.index({ uid: 1 });
 UserSchema.index({ email: 1 });
 UserSchema.index({ personal_email: 1 });
 UserSchema.index({ registration_id: 1 });

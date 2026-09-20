@@ -421,13 +421,13 @@ const ContactInquiriesPage: React.FC = () => {
 
           {/* Status Tabs */}
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
-            {[
+            {([
               { id: "all", label: "All Messages", count: inquiries.length },
               { id: "new", label: "Unread", count: newCount },
               { id: "read", label: "Read", count: inquiries.filter((i) => i.status === "read").length },
               { id: "replied", label: "Replied", count: repliedCount },
               { id: "archived", label: "Archived", count: inquiries.filter((i) => i.status === "archived").length }
-            ].map((tab) => (
+            ] as const).map((tab) => (
               <button
                 key={tab.id}
                 onClick={() => setStatusFilter(tab.id)}

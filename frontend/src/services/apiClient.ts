@@ -101,6 +101,13 @@ export function authHeaders(isJson = true) {
   return headers;
 }
 
+export function publicHeaders() {
+  const headers: Record<string, string> = {};
+  const token = getToken();
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+}
+
 export async function ensureAuthToken(): Promise<string | null> {
   const currentToken = getToken();
   if (currentToken) return currentToken;
@@ -320,14 +327,14 @@ export async function bulkMarkAttendance(payload: { records: any[]; eventId?: st
 // Quizzes & Assessment
 // ==========================================
 export async function fetchQuiz(id: string) {
-  const res = await fetch(`${API_BASE}/quizzes/${id}`, { headers: authHeaders() });
+  const res = await fetch(`${API_BASE}/quizzes/${id}`, { headers: publicHeaders() });
   if (!res.ok) throw new Error('Failed to fetch quiz');
   return res.json();
 }
 
 export async function fetchAllQuizzes(query?: { eventId?: string; status?: string }) {
   const params = new URLSearchParams(query as any).toString();
-  const res = await fetch(`${API_BASE}/quizzes${params ? `?${params}` : ''}`, { headers: authHeaders() });
+  const res = await fetch(`${API_BASE}/quizzes${params ? `?${params}` : ''}`, { headers: publicHeaders() });
   if (!res.ok) throw new Error('Failed to fetch quizzes');
   return res.json();
 }
@@ -473,7 +480,7 @@ export async function fetchEvents(query?: { category?: string; track?: string; i
     const cached = getCachedApiData(cacheKey);
     if (cached) return cached;
   }
-  const res = await fetch(`${API_BASE}/events${params ? `?${params}` : ''}`, { headers: authHeaders() });
+  const res = await fetch(`${API_BASE}/events${params ? `?${params}` : ''}`, { headers: publicHeaders() });
   if (!res.ok) throw new Error('Failed to fetch events');
   const data = await res.json();
   setCachedApiData(cacheKey, data, 15000);
@@ -486,7 +493,7 @@ export async function fetchEventById(id: string, forceRefresh = false) {
     const cached = getCachedApiData(cacheKey);
     if (cached) return cached;
   }
-  const res = await fetch(`${API_BASE}/events/${id}`, { headers: authHeaders() });
+  const res = await fetch(`${API_BASE}/events/${id}`, { headers: publicHeaders() });
   if (!res.ok) throw new Error('Failed to fetch event');
   const data = await res.json();
   setCachedApiData(cacheKey, data, 15000);
@@ -612,15 +619,7 @@ export async function fetchTeamMembers(forceRefresh = false) {
     if (cached) return cached;
   }
   try {
-    const headers: Record<string, string> = {
-      'Content-Type': 'application/json'
-    };
-    const authH = authHeaders();
-    if (authH && (authH as any).Authorization) {
-      headers['Authorization'] = (authH as any).Authorization;
-    }
-
-    const res = await fetch(`${API_BASE}/users/team`, { headers });
+    const res = await fetch(`${API_BASE}/users/team`, { headers: publicHeaders() });
     if (res.ok) {
       const data = await res.json();
       setCachedApiData(cacheKey, data, 60000); // 60s cache
@@ -632,7 +631,7 @@ export async function fetchTeamMembers(forceRefresh = false) {
 
   // Fallback to organizers endpoint if /users/team is unavailable
   try {
-    const orgRes = await fetch(`${API_BASE}/organizers`);
+    const orgRes = await fetch(`${API_BASE}/organizers`, { headers: publicHeaders() });
     if (orgRes.ok) {
       const data = await orgRes.json();
       setCachedApiData(cacheKey, data, 60000);
@@ -742,7 +741,7 @@ export async function fetchAlbums(query?: { eventId?: string; category?: string;
 
   try {
     const res = await fetchWithRetry(`${API_BASE}/albums${params}`, {
-      headers: authHeaders(),
+      headers: publicHeaders(),
     }, 2, 800);
     if (!res.ok) throw new Error(`Failed to fetch albums (${res.status})`);
     const data = await res.json();
@@ -847,13 +846,21 @@ export async function updateJuryEvaluation(id: string, patch: any) {
 // ==========================================
 // Settings & Configuration
 // ==========================================
-export async function fetchSettings(key?: string) {
-  const res = await fetch(`${API_BASE}/settings${key ? `/${key}` : ''}`, { headers: authHeaders() });
+export async function fetchSettings(key?: string, forceRefresh = false) {
+  const cacheKey = `settings:${key || 'all'}`;
+  if (!forceRefresh) {
+    const cached = getCachedApiData(cacheKey);
+    if (cached) return cached;
+  }
+  const res = await fetch(`${API_BASE}/settings${key ? `/${key}` : ''}`, { headers: publicHeaders() });
   if (!res.ok) return null;
-  return res.json();
+  const data = await res.json();
+  setCachedApiData(cacheKey, data, 30000);
+  return data;
 }
 
 export async function updateSettings(key: string, data: any) {
+  clearApiCache('settings');
   const res = await fetch(`${API_BASE}/settings/${key}`, {
     method: 'POST',
     headers: authHeaders(),

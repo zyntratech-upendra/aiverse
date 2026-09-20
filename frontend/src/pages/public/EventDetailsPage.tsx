@@ -2,7 +2,6 @@ import React, { useState, useEffect } from "react";
 import { useParams, Link } from "react-router-dom";
 import { 
   Calendar, 
-  Clock, 
   MapPin, 
   ArrowRight, 
   ChevronRight, 
@@ -19,10 +18,9 @@ import {
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
 import Button from "../../components/ui/Button";
-import { fetchEvents, fetchEventById, fetchOrganizers } from "../../services/apiClient";
-import { userService } from "../../services/userService";
+import { fetchEvents, fetchEventById, fetchTeamMembers } from "../../services/apiClient";
 import { dataCache } from "../../utils/dataCache";
-import { formatEventDateRange } from "../../utils/dateFormatter";
+import { formatRoundDateRange } from "../../utils/dateFormatter";
 import { StructuredEventOverview } from "../../components/events/StructuredEventOverview";
 
 // Import local assets
@@ -43,7 +41,7 @@ const getInitials = (name: string): string => {
 interface DetailedEvent {
   id: string;
   title: string;
-  type: "Workshop" | "Hackathon" | "Seminar" | "Networking";
+  type: "Workshop" | "Hackathon" | "Seminar" | "Networking" | "Quiz";
   date: string;
   time: string;
   location: string;
@@ -66,7 +64,24 @@ interface DetailedEvent {
   speakerTwitter?: string;
   speakerImagePreview?: string;
   facultyCoordinator?: string;
+  facultyCoordinatorEmail?: string;
+  facultyCoordinatorPhone?: string;
+  facultyCoordinator2?: string;
+  facultyCoordinatorEmail2?: string;
+  facultyCoordinatorPhone2?: string;
   studentCoordinator?: string;
+  studentCoordinatorEmail?: string;
+  studentCoordinatorPhone?: string;
+  studentCoordinator2?: string;
+  studentCoordinatorEmail2?: string;
+  studentCoordinatorPhone2?: string;
+  coordinators?: Array<{
+    name: string;
+    role?: string;
+    email?: string;
+    phone?: string;
+    image?: string;
+  }>;
   juryName?: string;
   juryRole?: string;
   juryBio?: string;
@@ -109,14 +124,178 @@ interface DetailedEvent {
   }>;
 }
 
+const mapRawToDetailedEvent = (data: any, defaultId: string): DetailedEvent => {
+  const evId = data.id || data._id || defaultId;
+  let eventType: DetailedEvent["type"] = "Workshop";
+  const catUpper = String(data.category || "").toUpperCase();
+  if (catUpper.includes("HACKATHON")) eventType = "Hackathon";
+  else if (catUpper.includes("LECTURE") || catUpper.includes("SEMINAR")) eventType = "Seminar";
+  else if (catUpper.includes("QUIZ")) eventType = "Quiz";
+  
+  // 1. Resolve actual uploaded poster / image
+  let actualImg = "";
+  if (Array.isArray(data.posterImages) && data.posterImages.length > 0) {
+    actualImg = data.posterImages[0]?.preview || data.posterImages[0]?.url || "";
+  }
+  if (!actualImg) {
+    actualImg = data.posterUrl || data.posterPreview || data.image || data.coverImage || data.bannerImage || data.banner || "";
+  }
+
+  // Fallback assets ONLY if no custom poster/image exists
+  let fallbackImg = sparkImg;
+  if (data.imageName === "hackathonImg" || catUpper.includes("HACKATHON")) fallbackImg = hackathonImg;
+  else if (data.imageName === "seminarImg" || catUpper.includes("SEMINAR") || catUpper.includes("LECTURE")) fallbackImg = seminarImg;
+
+  const img = actualImg || fallbackImg;
+
+  let eventImages: { filename: string; preview: string }[] = [];
+  if (Array.isArray(data.posterImages) && data.posterImages.length > 0) {
+    eventImages = data.posterImages.map((pi: any, idx: number) => ({
+      filename: pi?.filename || `poster-${idx + 1}.png`,
+      preview: pi?.preview || pi?.url || img
+    }));
+  } else if (actualImg) {
+    eventImages = [{ filename: 'poster.png', preview: actualImg }];
+  } else {
+    eventImages = [{ filename: 'default.png', preview: fallbackImg }];
+  }
+
+  let timeText = data.time || "10:00 AM";
+  if (data.startTime) {
+    timeText = data.startTime;
+    if (data.endTime) timeText += ` - ${data.endTime}`;
+  }
+
+  const hasAgenda = data.hasAgenda === false || data.hasAgenda === "false"
+    ? false
+    : data.hasAgenda === true || data.hasAgenda === "true"
+    ? true
+    : Boolean((Array.isArray(data.agendaItems) && data.agendaItems.length > 0) || (data.agendaTitle1 && data.agendaTitle1 !== "Morning Keynote: The Future of Compute"));
+
+  const facCoords = Array.isArray(data.coordinators)
+    ? data.coordinators.filter((c: any) => (c.role || "").toLowerCase().includes("faculty"))
+    : [];
+  const stuCoords = Array.isArray(data.coordinators)
+    ? data.coordinators.filter((c: any) => (c.role || "").toLowerCase().includes("student"))
+    : [];
+
+  return {
+    id: evId,
+    title: data.title || "",
+    type: eventType,
+    date: data.date || "Oct 24",
+    time: timeText,
+    location: data.location || "Virtual Hub",
+    description: data.description || "No description provided.",
+    image: img,
+    posterImages: eventImages,
+    primaryTag: data.primaryTag || "",
+    status: data.status || "Opened",
+    maxReg: data.maxReg || 100,
+    currentReg: Math.max(0, Number(data.currentReg) || 0),
+    startDate: data.startDate || "",
+    endDate: data.endDate || "",
+    startTime: data.startTime || "",
+    endTime: data.endTime || "",
+    isVirtual: data.isVirtual !== undefined ? data.isVirtual : true,
+    speakerName: data.speakerName || "",
+    speakerRole: data.speakerRole || "",
+    speakerBio: data.speakerBio || "",
+    speakerLinkedin: data.speakerLinkedin || "#",
+    speakerTwitter: data.speakerTwitter || "#",
+    speakerImagePreview: data.speakerImagePreview || "",
+    facultyCoordinator: data.facultyCoordinator || facCoords[0]?.name || "",
+    facultyCoordinatorEmail: data.facultyCoordinatorEmail || facCoords[0]?.email || "",
+    facultyCoordinatorPhone: data.facultyCoordinatorPhone || facCoords[0]?.phone || "",
+    facultyCoordinator2: data.facultyCoordinator2 || facCoords[1]?.name || "",
+    facultyCoordinatorEmail2: data.facultyCoordinatorEmail2 || facCoords[1]?.email || "",
+    facultyCoordinatorPhone2: data.facultyCoordinatorPhone2 || facCoords[1]?.phone || "",
+    studentCoordinator: data.studentCoordinator || stuCoords[0]?.name || "",
+    studentCoordinatorEmail: data.studentCoordinatorEmail || stuCoords[0]?.email || "",
+    studentCoordinatorPhone: data.studentCoordinatorPhone || stuCoords[0]?.phone || "",
+    studentCoordinator2: data.studentCoordinator2 || stuCoords[1]?.name || "",
+    studentCoordinatorEmail2: data.studentCoordinatorEmail2 || stuCoords[1]?.email || "",
+    studentCoordinatorPhone2: data.studentCoordinatorPhone2 || stuCoords[1]?.phone || "",
+    coordinators: data.coordinators || [],
+    juryName: data.juryName || "",
+    juryRole: data.juryRole || "",
+    juryBio: data.juryBio || "",
+    juryLinkedin: data.juryLinkedin || "#",
+    juryImagePreview: data.juryImagePreview || "",
+    minTeamSize: data.minTeamSize || null,
+    maxTeamSize: data.maxTeamSize || null,
+    registrationFee: data.registrationFee !== undefined ? Number(data.registrationFee) : 0,
+    pricingType: data.pricingType === "per_team" || data.pricingModel === "per_team" ? "per_team" : "per_person",
+    isPaidEvent: data.isPaidEvent !== undefined ? Boolean(data.isPaidEvent) : (Number(data.registrationFee) > 0),
+    paymentQrImagePreview: data.paymentQrImagePreview || data.paymentQr || "",
+    paymentQr: data.paymentQr || data.paymentQrImagePreview || "",
+    upiId: data.upiId || "",
+    hasAgenda,
+    agendaTime1: hasAgenda ? (data.agendaTime1 || "") : "",
+    agendaTitle1: hasAgenda ? (data.agendaTitle1 || "") : "",
+    agendaDesc1: hasAgenda ? (data.agendaDesc1 || "") : "",
+    agendaTime2: hasAgenda ? (data.agendaTime2 || "") : "",
+    agendaTitle2: hasAgenda ? (data.agendaTitle2 || "") : "",
+    agendaDesc2: hasAgenda ? (data.agendaDesc2 || "") : "",
+    agendaTime3: hasAgenda ? (data.agendaTime3 || "") : "",
+    agendaTitle3: hasAgenda ? (data.agendaTitle3 || "") : "",
+    agendaDesc3: hasAgenda ? (data.agendaDesc3 || "") : "",
+    agendaItems: hasAgenda ? (Array.isArray(data.agendaItems) ? data.agendaItems : []) : [],
+    regDeadline: data.regDeadline || data.registrationDeadline || "",
+    regDeadlineTime: data.regDeadlineTime || data.registrationDeadlineTime || "",
+    registrationDeadline: data.regDeadline || data.registrationDeadline || "",
+    registrationDeadlineTime: data.regDeadlineTime || data.registrationDeadlineTime || "",
+    allowRegistrations: data.allowRegistrations !== undefined ? data.allowRegistrations : true,
+    rounds: data.rounds || []
+  };
+};
+
+const findCachedEvent = (eventId?: string): DetailedEvent | null => {
+  if (!eventId) return null;
+  const direct = dataCache.get<DetailedEvent>(`event_detail_${eventId}`);
+  if (direct) return direct;
+
+  const candidateLists = [
+    dataCache.get<any[]>("public_events"),
+    dataCache.get<any[]>("faculty_events"),
+    dataCache.get<any[]>("all_events"),
+    dataCache.get<any[]>("home_highlights"),
+    dataCache.get<any[]>("org_dashboard_events")
+  ];
+
+  for (const list of candidateLists) {
+    if (Array.isArray(list)) {
+      const found = list.find((e: any) =>
+        e?.id === eventId ||
+        e?._id === eventId ||
+        (e?.title && e.title.toLowerCase().replace(/[^a-z0-9]/g, "-").includes(eventId.toLowerCase()))
+      );
+      if (found) {
+        return mapRawToDetailedEvent(found, eventId);
+      }
+    }
+  }
+  return null;
+};
+
 const EventDetailsPage: React.FC = () => {
   const { id } = useParams<{ id: string }>();
-  const [event, setEvent] = useState<DetailedEvent | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
+  const initialCachedEvent = React.useMemo(() => findCachedEvent(id), [id]);
+  const [event, setEvent] = useState<DetailedEvent | null>(() => initialCachedEvent);
+  const [loading, setLoading] = useState<boolean>(() => !initialCachedEvent);
   const [relatedEvents, setRelatedEvents] = useState<DetailedEvent[]>([]);
   const [currentImageIndex, setCurrentImageIndex] = useState<number>(0);
 
   const [facultyProfile, setFacultyProfile] = useState<{
+    name: string;
+    role?: string;
+    position?: string;
+    image?: string;
+    email?: string;
+    phone?: string;
+  } | null>(null);
+
+  const [facultyProfile2, setFacultyProfile2] = useState<{
     name: string;
     role?: string;
     position?: string;
@@ -134,261 +313,162 @@ const EventDetailsPage: React.FC = () => {
     phone?: string;
   } | null>(null);
 
+  const [studentProfile2, setStudentProfile2] = useState<{
+    name: string;
+    role?: string;
+    position?: string;
+    image?: string;
+    email?: string;
+    phone?: string;
+  } | null>(null);
+
   useEffect(() => {
+    window.scrollTo({ top: 0, left: 0, behavior: "instant" as ScrollBehavior });
+    setCurrentImageIndex(0);
     if (!id) return;
 
-    // 1. Instant Cache Hydration
-    const cachedEvent = dataCache.get<DetailedEvent>(`event_detail_${id}`);
-    if (cachedEvent) {
-      setEvent(cachedEvent);
+    // Instant Cache Hydration if not already active
+    const cachedNow = findCachedEvent(id);
+    if (cachedNow && !event) {
+      setEvent(cachedNow);
       setLoading(false);
     }
-    
-    const fetchEventDetails = async () => {
+    if (!cachedNow && !event) {
+      setLoading(true);
+    }
+
+    let isMounted = true;
+
+    const fetchAllData = async () => {
       try {
-        if (!cachedEvent) setLoading(true);
-        // Try direct ID fetch first
-        let docSnap: any = await fetchEventById(id).catch(() => null);
-        if (!docSnap) {
-          const allEvents: any[] = await fetchEvents().catch(() => []);
-          docSnap = (allEvents || []).find((e: any) => 
-            e.id === id || 
-            e._id === id || 
+        // Parallel non-blocking execution for speed
+        const [eventRes, teamRes, allEventsRes] = await Promise.allSettled([
+          fetchEventById(id),
+          fetchTeamMembers(),
+          fetchEvents()
+        ]);
+
+        let docSnap: any = eventRes.status === "fulfilled" ? eventRes.value : null;
+        const allEvents: any[] = allEventsRes.status === "fulfilled" && Array.isArray(allEventsRes.value) ? allEventsRes.value : [];
+        const allPeople: any[] = teamRes.status === "fulfilled" && Array.isArray(teamRes.value) ? teamRes.value : [];
+
+        if (!docSnap && allEvents.length > 0) {
+          docSnap = allEvents.find((e: any) =>
+            e.id === id ||
+            e._id === id ||
             (e.title && e.title.toLowerCase().replace(/[^a-z0-9]/g, "-").includes(id.toLowerCase()))
           ) || null;
         }
 
+        if (!isMounted) return;
+
         if (docSnap) {
-          const data = docSnap || {};
-          
-          let eventType: DetailedEvent["type"] = "Workshop";
-          const catUpper = String(data.category || "").toUpperCase();
-          if (catUpper === "HACKATHONS" || catUpper === "HACKATHON") eventType = "Hackathon";
-          else if (catUpper === "LECTURES" || catUpper === "SEMINAR" || catUpper === "SEMINARS") eventType = "Seminar";
-          
-          let img = data.coverImage || data.bannerImage || sparkImg;
-          if (data.imageName === "hackathonImg" || catUpper === "HACKATHONS" || catUpper === "HACKATHON") img = data.coverImage || hackathonImg;
-          else if (data.imageName === "seminarImg" || catUpper === "LECTURES" || catUpper === "SEMINAR") img = data.coverImage || seminarImg;
-          
-          let eventImages: {filename: string, preview: string}[] = [];
-          if (data.posterImages && data.posterImages.length > 0) {
-            eventImages = data.posterImages;
-            img = eventImages[0].preview;
-          } else if (data.posterPreview) {
-            img = data.posterPreview;
-            eventImages = [{filename: 'poster.png', preview: data.posterPreview}];
-          } else if (data.coverImage) {
-            img = data.coverImage;
-            eventImages = [{filename: 'cover.png', preview: data.coverImage}];
-          } else {
-            eventImages = [{filename: 'default.png', preview: img}];
-          }
+          const formattedEvent = mapRawToDetailedEvent(docSnap, id);
+          setEvent(formattedEvent);
+          dataCache.set(`event_detail_${id}`, formattedEvent, 60_000);
 
-          let timeText = data.time || "10:00 AM";
-          if (data.startTime) {
-            timeText = data.startTime;
-            if (data.endTime) timeText += ` - ${data.endTime}`;
-          }
+          // Helper to match coordinator with member directory
+          const resolveProfile = (
+            name?: string,
+            email?: string,
+            phone?: string,
+            defaultRole = "Coordinator",
+            defaultPosition = "Organizer"
+          ) => {
+            if (!name && !email) return null;
+            const cleanName = (name || "").toLowerCase().replace(/dr\.|mr\.|mrs\.|prof\./g, "").trim();
+            const cleanEmail = (email || "").toLowerCase().trim();
 
-          const facName = data.facultyCoordinator || "";
-          const stuName = data.studentCoordinator || "";
+            const found = allPeople.find(p => {
+              const pEmail = (p.email || "").toLowerCase().trim();
+              const pName = (p.name || p.fullName || "").toLowerCase().replace(/dr\.|mr\.|mrs\.|prof\./g, "").trim();
+              if (cleanEmail && pEmail === cleanEmail) return true;
+              if (cleanName && pName && (pName.includes(cleanName) || cleanName.includes(pName))) return true;
+              return false;
+            });
 
-          // Query user database in parallel to enrich coordinator profiles
-          let matchedFac: any = null;
-          let matchedStu: any = null;
-
-          try {
-            const allPeople: any[] = [];
-            
-            const [supaRes, orgsRes] = await Promise.allSettled([
-              userService.getUsers(),
-              fetchOrganizers()
-            ]);
-
-            if (supaRes.status === "fulfilled" && Array.isArray(supaRes.value)) {
-              allPeople.push(...supaRes.value);
-            }
-            if (orgsRes.status === "fulfilled" && Array.isArray(orgsRes.value)) {
-              allPeople.push(...orgsRes.value);
+            if (found) {
+              return {
+                name: found.name || found.fullName || name || "",
+                role: found.role || defaultRole,
+                position: found.position || defaultPosition,
+                image: found.image || "",
+                email: found.email || email || "",
+                phone: found.phone || found.phoneNumber || phone || ""
+              };
             }
 
-            if (facName) {
-              const facClean = facName.toLowerCase().replace(/dr\.|mr\.|mrs\.|prof\./g, "").trim();
-              const facEmail = (data.facultyCoordinatorEmail || "").toLowerCase().trim();
-              const found = allPeople.find(p => {
-                const pEmail = (p.email || "").toLowerCase().trim();
-                const pName = (p.name || p.fullName || "").toLowerCase().replace(/dr\.|mr\.|mrs\.|prof\./g, "").trim();
-                if (facEmail && pEmail === facEmail) return true;
-                if (facClean && pName && (pName.includes(facClean) || facClean.includes(pName))) return true;
-                return false;
-              });
-
-              if (found) {
-                matchedFac = {
-                  name: found.name || found.fullName || facName,
-                  role: found.role || "Faculty Coordinator",
-                  position: found.position || "Faculty In-Charge",
-                  image: found.image || "",
-                  email: found.email || facEmail || "",
-                  phone: found.phone || found.phoneNumber || ""
-                };
-              } else {
-                matchedFac = {
-                  name: facName,
-                  role: "Faculty Coordinator",
-                  position: "Faculty In-Charge",
-                  image: "",
-                  email: facEmail || "",
-                  phone: ""
-                };
-              }
-            }
-
-            if (stuName) {
-              const stuClean = stuName.toLowerCase().trim();
-              const stuEmail = (data.studentCoordinatorEmail || "").toLowerCase().trim();
-              const found = allPeople.find(p => {
-                const pEmail = (p.email || "").toLowerCase().trim();
-                const pName = (p.name || p.fullName || "").toLowerCase().trim();
-                if (stuEmail && pEmail === stuEmail) return true;
-                if (stuClean && pName && (pName.includes(stuClean) || stuClean.includes(pName))) return true;
-                return false;
-              });
-
-              if (found) {
-                matchedStu = {
-                  name: found.name || found.fullName || stuName,
-                  role: found.role || "Student Organizer",
-                  position: found.position || "Student Coordinator",
-                  image: found.image || "",
-                  email: found.email || stuEmail || "",
-                  phone: found.phone || found.phoneNumber || ""
-                };
-              } else {
-                matchedStu = {
-                  name: stuName,
-                  role: "Student Organizer",
-                  position: "Student Coordinator",
-                  image: "",
-                  email: stuEmail || "",
-                  phone: ""
-                };
-              }
-            }
-          } catch (err) {
-            console.warn("Notice enriching coordinator details:", err);
-          }
-
-          setFacultyProfile(matchedFac);
-          setStudentProfile(matchedStu);
-
-          const hasAgenda = data.hasAgenda === false || data.hasAgenda === "false"
-            ? false
-            : data.hasAgenda === true || data.hasAgenda === "true"
-            ? true
-            : Boolean((Array.isArray(data.agendaItems) && data.agendaItems.length > 0) || (data.agendaTitle1 && data.agendaTitle1 !== "Morning Keynote: The Future of Compute"));
-
-          const eventDetailObj: DetailedEvent = {
-            id: docSnap.id || docSnap._id || id,
-            title: data.title || "",
-            type: eventType,
-            date: data.date || "Oct 24",
-            time: timeText,
-            location: data.location || "Virtual Hub",
-            description: data.description || "No description provided.",
-            image: img,
-            posterImages: eventImages,
-            primaryTag: data.primaryTag || "",
-            status: data.status || "Opened",
-            maxReg: data.maxReg || 100,
-            currentReg: Math.max(0, Number(data.currentReg) || 0),
-            startDate: data.startDate || "",
-            endDate: data.endDate || "",
-            startTime: data.startTime || "",
-            endTime: data.endTime || "",
-            isVirtual: data.isVirtual !== undefined ? data.isVirtual : true,
-            speakerName: data.speakerName || "",
-            speakerRole: data.speakerRole || "",
-            speakerBio: data.speakerBio || "",
-            speakerLinkedin: data.speakerLinkedin || "#",
-            speakerTwitter: data.speakerTwitter || "#",
-            speakerImagePreview: data.speakerImagePreview || "",
-            facultyCoordinator: data.facultyCoordinator || "",
-            studentCoordinator: data.studentCoordinator || "",
-            juryName: data.juryName || "",
-            juryRole: data.juryRole || "",
-            juryBio: data.juryBio || "",
-            juryLinkedin: data.juryLinkedin || "#",
-            juryImagePreview: data.juryImagePreview || "",
-            minTeamSize: data.minTeamSize || null,
-            maxTeamSize: data.maxTeamSize || null,
-            registrationFee: data.registrationFee !== undefined ? Number(data.registrationFee) : 0,
-            pricingType: data.pricingType === "per_team" || data.pricingModel === "per_team" ? "per_team" : "per_person",
-            isPaidEvent: data.isPaidEvent !== undefined ? Boolean(data.isPaidEvent) : (Number(data.registrationFee) > 0),
-            paymentQrImagePreview: data.paymentQrImagePreview || data.paymentQr || "",
-            paymentQr: data.paymentQr || data.paymentQrImagePreview || "",
-            upiId: data.upiId || "",
-            hasAgenda,
-            agendaTime1: hasAgenda ? (data.agendaTime1 || "") : "",
-            agendaTitle1: hasAgenda ? (data.agendaTitle1 || "") : "",
-            agendaDesc1: hasAgenda ? (data.agendaDesc1 || "") : "",
-            agendaTime2: hasAgenda ? (data.agendaTime2 || "") : "",
-            agendaTitle2: hasAgenda ? (data.agendaTitle2 || "") : "",
-            agendaDesc2: hasAgenda ? (data.agendaDesc2 || "") : "",
-            agendaTime3: hasAgenda ? (data.agendaTime3 || "") : "",
-            agendaTitle3: hasAgenda ? (data.agendaTitle3 || "") : "",
-            agendaDesc3: hasAgenda ? (data.agendaDesc3 || "") : "",
-            agendaItems: hasAgenda ? (Array.isArray(data.agendaItems) ? data.agendaItems : []) : [],
-            regDeadline: data.regDeadline || data.registrationDeadline || "",
-            regDeadlineTime: data.regDeadlineTime || data.registrationDeadlineTime || "",
-            registrationDeadline: data.regDeadline || data.registrationDeadline || "",
-            registrationDeadlineTime: data.regDeadlineTime || data.registrationDeadlineTime || "",
-            allowRegistrations: data.allowRegistrations !== undefined ? data.allowRegistrations : true,
-            rounds: data.rounds || []
+            return {
+              name: name || "",
+              role: defaultRole,
+              position: defaultPosition,
+              image: "",
+              email: email || "",
+              phone: phone || ""
+            };
           };
 
-          setEvent(eventDetailObj);
-          dataCache.set(`event_detail_${id}`, eventDetailObj);
+          const matchedFac1 = resolveProfile(
+            formattedEvent.facultyCoordinator || docSnap.facultyCoordinator,
+            formattedEvent.facultyCoordinatorEmail || docSnap.facultyCoordinatorEmail,
+            formattedEvent.facultyCoordinatorPhone || docSnap.facultyCoordinatorPhone,
+            "Faculty Coordinator",
+            "Faculty In-Charge"
+          );
+
+          const matchedFac2 = resolveProfile(
+            formattedEvent.facultyCoordinator2 || docSnap.facultyCoordinator2,
+            formattedEvent.facultyCoordinatorEmail2 || docSnap.facultyCoordinatorEmail2,
+            formattedEvent.facultyCoordinatorPhone2 || docSnap.facultyCoordinatorPhone2,
+            "Faculty Coordinator",
+            "Faculty Coordinator"
+          );
+
+          const matchedStu1 = resolveProfile(
+            formattedEvent.studentCoordinator || docSnap.studentCoordinator,
+            formattedEvent.studentCoordinatorEmail || docSnap.studentCoordinatorEmail,
+            formattedEvent.studentCoordinatorPhone || docSnap.studentCoordinatorPhone,
+            "Student Organizer",
+            "Student Lead / Organizer"
+          );
+
+          const matchedStu2 = resolveProfile(
+            formattedEvent.studentCoordinator2 || docSnap.studentCoordinator2,
+            formattedEvent.studentCoordinatorEmail2 || docSnap.studentCoordinatorEmail2,
+            formattedEvent.studentCoordinatorPhone2 || docSnap.studentCoordinatorPhone2,
+            "Student Organizer",
+            "Student Coordinator"
+          );
+
+          setFacultyProfile(matchedFac1);
+          setFacultyProfile2(matchedFac2);
+          setStudentProfile(matchedStu1);
+          setStudentProfile2(matchedStu2);
         }
 
-        // Fetch first 3 other events as related events
-        const allEvents2: any[] = await fetchEvents();
-        const related: any[] = [];
-        (allEvents2 || []).forEach((doc: any) => {
-          const docId = doc._id || doc.id || "";
-          if (docId !== id && related.length < 3) {
-            const data = doc || {};
-            let eventType: DetailedEvent["type"] = "Workshop";
-            if (data.category === "HACKATHONS") eventType = "Hackathon";
-            else if (data.category === "LECTURES") eventType = "Seminar";
-            
-            let img = sparkImg;
-            if (data.imageName === "hackathonImg" || data.category === "HACKATHONS") img = hackathonImg;
-            else if (data.imageName === "seminarImg" || data.category === "LECTURES") img = seminarImg;
-            
-            if (data.posterPreview) {
-              img = data.posterPreview;
+        // Calculate related events
+        if (allEvents.length > 0) {
+          const related: DetailedEvent[] = [];
+          allEvents.forEach((doc: any) => {
+            const docId = doc._id || doc.id || "";
+            if (docId !== id && related.length < 3) {
+              related.push(mapRawToDetailedEvent(doc, docId));
             }
-
-            related.push({
-              id: doc._id || doc.id || "",
-              title: data.title || "",
-              type: eventType,
-              date: data.date || "Oct 24",
-              location: data.location || "Virtual Hub",
-              image: img
-            });
-          }
-        });
-        setRelatedEvents(related);
+          });
+          setRelatedEvents(related);
+        }
       } catch (err) {
         console.error("Error reading event details:", err);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
-    
-    fetchEventDetails();
+
+    fetchAllData();
+
+    return () => {
+      isMounted = false;
+    };
   }, [id]);
 
   if (loading) {
@@ -646,11 +726,7 @@ const EventDetailsPage: React.FC = () => {
               <div className="flex flex-wrap items-center gap-x-6 gap-y-2 pt-4 text-xs sm:text-sm text-slate-550 font-semibold">
                 <span className="flex items-center gap-2">
                   <Calendar className="h-4.5 w-4.5 text-blue-600 shrink-0" />
-                  {formatEventDateRange(event.startDate || event.date, event.endDate)}
-                </span>
-                <span className="flex items-center gap-2">
-                  <Clock className="h-4.5 w-4.5 text-blue-600 shrink-0" />
-                  {event.time}
+                  {formatRoundDateRange(event.startDate || event.date, event.endDate)}
                 </span>
                 <span className="flex items-center gap-2">
                   <MapPin className="h-4.5 w-4.5 text-blue-600 shrink-0" />
@@ -908,27 +984,15 @@ const EventDetailsPage: React.FC = () => {
                         </span>
                       </div>
 
-                      {/* Round Dates & Time display */}
-                      {(rnd.startDate || rnd.endDate || rnd.startTime || rnd.endTime) && (
+                      {/* Round Dates display */}
+                      {(rnd.startDate || rnd.endDate) && (
                         <div className="flex flex-wrap items-center gap-2.5 py-1 text-xs text-slate-500 font-semibold">
-                          {(rnd.startDate || rnd.endDate) && (
-                            <div className="flex items-center gap-1.5 text-indigo-700 font-bold bg-indigo-50/80 px-2.5 py-1 rounded-lg border border-indigo-100/80 text-[11px]">
-                              <Calendar className="h-3.5 w-3.5 text-indigo-600" />
-                              <span>
-                                {rnd.startDate}
-                                {rnd.endDate && rnd.endDate !== rnd.startDate ? ` - ${rnd.endDate}` : ""}
-                              </span>
-                            </div>
-                          )}
-                          {(rnd.startTime || rnd.endTime) && (
-                            <div className="flex items-center gap-1.5 text-slate-600 bg-slate-100/80 px-2.5 py-1 rounded-lg border border-slate-200/60 text-[11px]">
-                              <Clock className="h-3.5 w-3.5 text-slate-500" />
-                              <span>
-                                {rnd.startTime}
-                                {rnd.endTime && rnd.endTime !== rnd.startTime ? ` - ${rnd.endTime}` : ""}
-                              </span>
-                            </div>
-                          )}
+                          <div className="flex items-center gap-1.5 text-indigo-700 font-bold bg-indigo-50/80 px-2.5 py-1 rounded-lg border border-indigo-100/80 text-[11px]">
+                            <Calendar className="h-3.5 w-3.5 text-indigo-600" />
+                            <span>
+                              {formatRoundDateRange(rnd.startDate, rnd.endDate)}
+                            </span>
+                          </div>
                         </div>
                       )}
 
@@ -943,108 +1007,6 @@ const EventDetailsPage: React.FC = () => {
               </div>
             )}
 
-            {/* Event Organizing Leadership & Coordinators (Main Column) */}
-            {(event.facultyCoordinator || event.studentCoordinator || facultyProfile || studentProfile) && (
-              <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.01)] space-y-6 text-left">
-                <div className="flex items-center justify-between border-b border-slate-50 pb-3">
-                  <h2 className="text-xl font-black text-slate-800 tracking-tight flex items-center gap-2">
-                    <Users className="h-4.5 w-4.5 text-blue-600" />
-                    Event Coordinators & Organizing Team
-                  </h2>
-                  <span className="text-[10px] font-extrabold bg-blue-50 text-blue-700 border border-blue-100 px-3 py-1 rounded-full uppercase tracking-wider">
-                    Leadership
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                  {/* Faculty Coordinator Card */}
-                  {(event.facultyCoordinator || facultyProfile) && (
-                    <div className="p-5 rounded-2xl bg-gradient-to-br from-purple-50/60 via-purple-50/20 to-indigo-50/30 border border-purple-100/90 shadow-xs flex flex-col justify-between space-y-3">
-                      <div className="flex items-start gap-3.5">
-                        <div className="relative">
-                          {facultyProfile?.image ? (
-                            <img
-                              src={facultyProfile.image}
-                              alt="Faculty Coordinator"
-                              className="w-14 h-14 rounded-2xl object-cover border-2 border-purple-200 shadow-sm"
-                            />
-                          ) : (
-                            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-purple-600 to-indigo-600 text-white font-black text-base flex items-center justify-center shadow-sm">
-                              {getInitials(facultyProfile?.name || event.facultyCoordinator || "FC")}
-                            </div>
-                          )}
-                          <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-purple-600 text-white flex items-center justify-center shadow-sm">
-                            <GraduationCap className="w-3 h-3" />
-                          </div>
-                        </div>
-
-                        <div className="flex-1 min-w-0">
-                          <span className="text-[9px] font-black text-purple-700 bg-purple-100/90 border border-purple-200/70 px-2 py-0.5 rounded-md uppercase tracking-wider inline-block mb-1">
-                            Faculty Coordinator
-                          </span>
-                          <h4 className="text-sm font-black text-slate-850 truncate">
-                            {facultyProfile?.name || event.facultyCoordinator}
-                          </h4>
-                          <p className="text-[11px] text-slate-500 font-semibold mt-0.5">
-                            {facultyProfile?.position || "Department Coordinator"}
-                          </p>
-                        </div>
-                      </div>
-
-                      {facultyProfile?.email && (
-                        <div className="pt-2 border-t border-purple-100/60 flex items-center gap-1.5 text-xs text-purple-700 font-semibold truncate">
-                          <Mail className="w-3.5 h-3.5 shrink-0" />
-                          <span className="truncate">{facultyProfile.email}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Student Coordinator Card */}
-                  {(event.studentCoordinator || studentProfile) && (
-                    <div className="p-5 rounded-2xl bg-gradient-to-br from-amber-50/60 via-amber-50/20 to-orange-50/30 border border-amber-100/90 shadow-xs flex flex-col justify-between space-y-3">
-                      <div className="flex items-start gap-3.5">
-                        <div className="relative">
-                          {studentProfile?.image ? (
-                            <img
-                              src={studentProfile.image}
-                              alt="Student Coordinator"
-                              className="w-14 h-14 rounded-2xl object-cover border-2 border-amber-200 shadow-sm"
-                            />
-                          ) : (
-                            <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-500 to-orange-600 text-white font-black text-base flex items-center justify-center shadow-sm">
-                              {getInitials(studentProfile?.name || event.studentCoordinator || "SC")}
-                            </div>
-                          )}
-                          <div className="absolute -bottom-1 -right-1 w-5 h-5 rounded-full bg-amber-600 text-white flex items-center justify-center shadow-sm">
-                            <Sparkles className="w-3 h-3" />
-                          </div>
-                        </div>
-
-                        <div className="flex-1 min-w-0">
-                          <span className="text-[9px] font-black text-amber-800 bg-amber-100/90 border border-amber-200/70 px-2 py-0.5 rounded-md uppercase tracking-wider inline-block mb-1">
-                            Student Organizer
-                          </span>
-                          <h4 className="text-sm font-black text-slate-850 truncate">
-                            {studentProfile?.name || event.studentCoordinator}
-                          </h4>
-                          <p className="text-[11px] text-slate-500 font-semibold mt-0.5">
-                            {studentProfile?.position || "Student Lead / Organizer"}
-                          </p>
-                        </div>
-                      </div>
-
-                      {studentProfile?.email && (
-                        <div className="pt-2 border-t border-amber-100/60 flex items-center gap-1.5 text-xs text-amber-700 font-semibold truncate">
-                          <Mail className="w-3.5 h-3.5 shrink-0" />
-                          <span className="truncate">{studentProfile.email}</span>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
 
           </div>
 
@@ -1052,7 +1014,7 @@ const EventDetailsPage: React.FC = () => {
           <div className="lg:col-span-4 space-y-6">
             
             {/* Event Coordinators & Organizing Team (Sidebar Card) */}
-            {(event.facultyCoordinator || event.studentCoordinator || facultyProfile || studentProfile) && (
+            {(event.facultyCoordinator || event.facultyCoordinator2 || event.studentCoordinator || event.studentCoordinator2 || facultyProfile || facultyProfile2 || studentProfile || studentProfile2) && (
               <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.015)] space-y-4 text-left">
                 <h3 className="text-sm font-black text-slate-400 uppercase tracking-wider pb-3 border-b border-slate-50 flex items-center gap-2">
                   <Users className="w-4 h-4 text-blue-600" />
@@ -1060,7 +1022,7 @@ const EventDetailsPage: React.FC = () => {
                 </h3>
 
                 <div className="space-y-3.5">
-                  {/* Faculty Coordinator Item */}
+                  {/* Faculty Coordinator 1 Item */}
                   {(event.facultyCoordinator || facultyProfile) && (
                     <div className="p-3.5 rounded-2xl bg-purple-50/40 border border-purple-100/80 hover:bg-purple-50/70 transition-colors">
                       <div className="flex items-start gap-3">
@@ -1087,12 +1049,12 @@ const EventDetailsPage: React.FC = () => {
                           </h4>
                           <span className="inline-flex items-center gap-1 text-[9px] font-bold text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-md mt-1 border border-purple-200/50">
                             <GraduationCap className="w-3 h-3" />
-                            Faculty Coordinator
+                            {event.facultyCoordinator2 || facultyProfile2 ? "Faculty Coordinator 1" : "Faculty Coordinator"}
                           </span>
-                          {facultyProfile?.email && (
+                          {(facultyProfile?.email || event.facultyCoordinatorEmail) && (
                             <div className="flex items-center gap-1 text-[10px] text-slate-500 font-medium mt-1 truncate">
                               <Mail className="w-3 h-3 text-purple-400 shrink-0" />
-                              <span className="truncate">{facultyProfile.email}</span>
+                              <span className="truncate">{facultyProfile?.email || event.facultyCoordinatorEmail}</span>
                             </div>
                           )}
                         </div>
@@ -1100,7 +1062,47 @@ const EventDetailsPage: React.FC = () => {
                     </div>
                   )}
 
-                  {/* Student Coordinator Item */}
+                  {/* Faculty Coordinator 2 Item */}
+                  {(event.facultyCoordinator2 || facultyProfile2) && (
+                    <div className="p-3.5 rounded-2xl bg-purple-50/40 border border-purple-100/80 hover:bg-purple-50/70 transition-colors">
+                      <div className="flex items-start gap-3">
+                        <div className="relative shrink-0">
+                          {facultyProfile2?.image ? (
+                            <img
+                              src={facultyProfile2.image}
+                              alt="Faculty Coordinator 2"
+                              className="w-11 h-11 rounded-xl object-cover border border-purple-200 shadow-xs"
+                            />
+                          ) : (
+                            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-purple-600 to-indigo-700 text-white font-black text-xs flex items-center justify-center shadow-xs">
+                              {getInitials(facultyProfile2?.name || event.facultyCoordinator2 || "FC")}
+                            </div>
+                          )}
+                          <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-purple-600 text-white flex items-center justify-center shadow-xs" title="Faculty Coordinator 2">
+                            <GraduationCap className="w-2.5 h-2.5" />
+                          </div>
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-xs font-black text-slate-850 truncate">
+                            {facultyProfile2?.name || event.facultyCoordinator2}
+                          </h4>
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold text-purple-700 bg-purple-100/80 px-2 py-0.5 rounded-md mt-1 border border-purple-200/50">
+                            <GraduationCap className="w-3 h-3" />
+                            Faculty Coordinator 2
+                          </span>
+                          {(facultyProfile2?.email || event.facultyCoordinatorEmail2) && (
+                            <div className="flex items-center gap-1 text-[10px] text-slate-500 font-medium mt-1 truncate">
+                              <Mail className="w-3 h-3 text-purple-400 shrink-0" />
+                              <span className="truncate">{facultyProfile2?.email || event.facultyCoordinatorEmail2}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Student Coordinator 1 Item */}
                   {(event.studentCoordinator || studentProfile) && (
                     <div className="p-3.5 rounded-2xl bg-amber-50/40 border border-amber-100/80 hover:bg-amber-50/70 transition-colors">
                       <div className="flex items-start gap-3">
@@ -1116,7 +1118,7 @@ const EventDetailsPage: React.FC = () => {
                               {getInitials(studentProfile?.name || event.studentCoordinator || "SC")}
                             </div>
                           )}
-                          <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-amber-600 text-white flex items-center justify-center shadow-xs" title="Student Organizer">
+                          <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-amber-600 text-white flex items-center justify-center shadow-xs" title="Student Coordinator 1">
                             <Sparkles className="w-2.5 h-2.5" />
                           </div>
                         </div>
@@ -1127,12 +1129,52 @@ const EventDetailsPage: React.FC = () => {
                           </h4>
                           <span className="inline-flex items-center gap-1 text-[9px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-md mt-1 border border-amber-200/50">
                             <Sparkles className="w-3 h-3" />
-                            Student Organizer
+                            {event.studentCoordinator2 || studentProfile2 ? "Student Coordinator 1" : "Student Organizer"}
                           </span>
-                          {studentProfile?.email && (
+                          {(studentProfile?.email || event.studentCoordinatorEmail) && (
                             <div className="flex items-center gap-1 text-[10px] text-slate-500 font-medium mt-1 truncate">
                               <Mail className="w-3 h-3 text-amber-500 shrink-0" />
-                              <span className="truncate">{studentProfile.email}</span>
+                              <span className="truncate">{studentProfile?.email || event.studentCoordinatorEmail}</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Student Coordinator 2 Item */}
+                  {(event.studentCoordinator2 || studentProfile2) && (
+                    <div className="p-3.5 rounded-2xl bg-amber-50/40 border border-amber-100/80 hover:bg-amber-50/70 transition-colors">
+                      <div className="flex items-start gap-3">
+                        <div className="relative shrink-0">
+                          {studentProfile2?.image ? (
+                            <img
+                              src={studentProfile2.image}
+                              alt="Student Coordinator 2"
+                              className="w-11 h-11 rounded-xl object-cover border border-amber-200 shadow-xs"
+                            />
+                          ) : (
+                            <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-amber-500 to-orange-600 text-white font-black text-xs flex items-center justify-center shadow-xs">
+                              {getInitials(studentProfile2?.name || event.studentCoordinator2 || "SC")}
+                            </div>
+                          )}
+                          <div className="absolute -bottom-1 -right-1 w-4 h-4 rounded-full bg-amber-600 text-white flex items-center justify-center shadow-xs" title="Student Coordinator 2">
+                            <Sparkles className="w-2.5 h-2.5" />
+                          </div>
+                        </div>
+
+                        <div className="flex-1 min-w-0">
+                          <h4 className="text-xs font-black text-slate-850 truncate">
+                            {studentProfile2?.name || event.studentCoordinator2}
+                          </h4>
+                          <span className="inline-flex items-center gap-1 text-[9px] font-bold text-amber-800 bg-amber-100/80 px-2 py-0.5 rounded-md mt-1 border border-amber-200/50">
+                            <Sparkles className="w-3 h-3" />
+                            Student Coordinator 2
+                          </span>
+                          {(studentProfile2?.email || event.studentCoordinatorEmail2) && (
+                            <div className="flex items-center gap-1 text-[10px] text-slate-500 font-medium mt-1 truncate">
+                              <Mail className="w-3 h-3 text-amber-500 shrink-0" />
+                              <span className="truncate">{studentProfile2?.email || event.studentCoordinatorEmail2}</span>
                             </div>
                           )}
                         </div>
@@ -1328,7 +1370,7 @@ const EventDetailsPage: React.FC = () => {
                     <div className="flex items-center gap-4 text-[10px] font-bold text-slate-400 pt-1">
                       <span className="flex items-center gap-1">
                         <Calendar className="h-3.5 w-3.5 text-blue-500" />
-                        {formatEventDateRange((rEvent as any).startDate || rEvent.date, (rEvent as any).endDate)}
+                        {formatRoundDateRange((rEvent as any).startDate || rEvent.date, (rEvent as any).endDate)}
                       </span>
                       <span className="flex items-center gap-1">
                         <MapPin className="h-3.5 w-3.5 text-blue-500 truncate" />

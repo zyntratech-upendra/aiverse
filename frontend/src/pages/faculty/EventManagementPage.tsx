@@ -3512,9 +3512,15 @@ const EventManagementPage: React.FC = () => {
   const [formFacultyCoordinator, setFormFacultyCoordinator] = useState("");
   const [formFacultyCoordinatorEmail, setFormFacultyCoordinatorEmail] = useState("");
   const [formFacultyCoordinatorPhone, setFormFacultyCoordinatorPhone] = useState("");
+  const [formFacultyCoordinator2, setFormFacultyCoordinator2] = useState("");
+  const [formFacultyCoordinatorEmail2, setFormFacultyCoordinatorEmail2] = useState("");
+  const [formFacultyCoordinatorPhone2, setFormFacultyCoordinatorPhone2] = useState("");
   const [formStudentCoordinator, setFormStudentCoordinator] = useState("");
   const [formStudentCoordinatorEmail, setFormStudentCoordinatorEmail] = useState("");
   const [formStudentCoordinatorPhone, setFormStudentCoordinatorPhone] = useState("");
+  const [formStudentCoordinator2, setFormStudentCoordinator2] = useState("");
+  const [formStudentCoordinatorEmail2, setFormStudentCoordinatorEmail2] = useState("");
+  const [formStudentCoordinatorPhone2, setFormStudentCoordinatorPhone2] = useState("");
 
   const [formJuryName, setFormJuryName] = useState("");
   const [formJuryRole, setFormJuryRole] = useState("");
@@ -3790,9 +3796,15 @@ const EventManagementPage: React.FC = () => {
         facultyCoordinator: formFacultyCoordinator,
         facultyCoordinatorEmail: formFacultyCoordinatorEmail,
         facultyCoordinatorPhone: formFacultyCoordinatorPhone,
+        facultyCoordinator2: formFacultyCoordinator2,
+        facultyCoordinatorEmail2: formFacultyCoordinatorEmail2,
+        facultyCoordinatorPhone2: formFacultyCoordinatorPhone2,
         studentCoordinator: formStudentCoordinator,
         studentCoordinatorEmail: formStudentCoordinatorEmail,
         studentCoordinatorPhone: formStudentCoordinatorPhone,
+        studentCoordinator2: formStudentCoordinator2,
+        studentCoordinatorEmail2: formStudentCoordinatorEmail2,
+        studentCoordinatorPhone2: formStudentCoordinatorPhone2,
         coordinators: [
           ...(formFacultyCoordinator ? [{
             name: formFacultyCoordinator,
@@ -3800,10 +3812,22 @@ const EventManagementPage: React.FC = () => {
             phone: formFacultyCoordinatorPhone,
             role: "Faculty Coordinator"
           }] : []),
+          ...(formFacultyCoordinator2 ? [{
+            name: formFacultyCoordinator2,
+            email: formFacultyCoordinatorEmail2,
+            phone: formFacultyCoordinatorPhone2,
+            role: "Faculty Coordinator"
+          }] : []),
           ...(formStudentCoordinator ? [{
             name: formStudentCoordinator,
             email: formStudentCoordinatorEmail,
             phone: formStudentCoordinatorPhone,
+            role: "Student Coordinator"
+          }] : []),
+          ...(formStudentCoordinator2 ? [{
+            name: formStudentCoordinator2,
+            email: formStudentCoordinatorEmail2,
+            phone: formStudentCoordinatorPhone2,
             role: "Student Coordinator"
           }] : [])
         ],
@@ -4010,9 +4034,15 @@ const EventManagementPage: React.FC = () => {
       setFormFacultyCoordinator("");
       setFormFacultyCoordinatorEmail("");
       setFormFacultyCoordinatorPhone("");
+      setFormFacultyCoordinator2("");
+      setFormFacultyCoordinatorEmail2("");
+      setFormFacultyCoordinatorPhone2("");
       setFormStudentCoordinator("");
       setFormStudentCoordinatorEmail("");
       setFormStudentCoordinatorPhone("");
+      setFormStudentCoordinator2("");
+      setFormStudentCoordinatorEmail2("");
+      setFormStudentCoordinatorPhone2("");
       setFormJuryName("");
       setFormJuryRole("");
       setFormJuryBio("");
@@ -4199,12 +4229,28 @@ const EventManagementPage: React.FC = () => {
         setFormPaymentQrImagePreview(data.paymentQrImagePreview || data.paymentQr || "");
         setFormUpiId(data.upiId || "");
         setFormWhatsGroupLink(data.whatsGroupLink || "");
-        setFormFacultyCoordinator(data.facultyCoordinator || (data.coordinators?.find((c: any) => c.role?.includes("Faculty"))?.name) || "");
-        setFormFacultyCoordinatorEmail(data.facultyCoordinatorEmail || (data.coordinators?.find((c: any) => c.role?.includes("Faculty"))?.email) || "");
-        setFormFacultyCoordinatorPhone(data.facultyCoordinatorPhone || (data.coordinators?.find((c: any) => c.role?.includes("Faculty"))?.phone) || "");
-        setFormStudentCoordinator(data.studentCoordinator || (data.coordinators?.find((c: any) => c.role?.includes("Student"))?.name) || "");
-        setFormStudentCoordinatorEmail(data.studentCoordinatorEmail || (data.coordinators?.find((c: any) => c.role?.includes("Student"))?.email) || "");
-        setFormStudentCoordinatorPhone(data.studentCoordinatorPhone || (data.coordinators?.find((c: any) => c.role?.includes("Student"))?.phone) || "");
+        const facCoords = Array.isArray(data.coordinators)
+          ? data.coordinators.filter((c: any) => c.role?.includes("Faculty"))
+          : [];
+        const stuCoords = Array.isArray(data.coordinators)
+          ? data.coordinators.filter((c: any) => c.role?.includes("Student"))
+          : [];
+
+        setFormFacultyCoordinator(data.facultyCoordinator || facCoords[0]?.name || "");
+        setFormFacultyCoordinatorEmail(data.facultyCoordinatorEmail || facCoords[0]?.email || "");
+        setFormFacultyCoordinatorPhone(data.facultyCoordinatorPhone || facCoords[0]?.phone || "");
+
+        setFormFacultyCoordinator2(data.facultyCoordinator2 || facCoords[1]?.name || "");
+        setFormFacultyCoordinatorEmail2(data.facultyCoordinatorEmail2 || facCoords[1]?.email || "");
+        setFormFacultyCoordinatorPhone2(data.facultyCoordinatorPhone2 || facCoords[1]?.phone || "");
+
+        setFormStudentCoordinator(data.studentCoordinator || stuCoords[0]?.name || "");
+        setFormStudentCoordinatorEmail(data.studentCoordinatorEmail || stuCoords[0]?.email || "");
+        setFormStudentCoordinatorPhone(data.studentCoordinatorPhone || stuCoords[0]?.phone || "");
+
+        setFormStudentCoordinator2(data.studentCoordinator2 || stuCoords[1]?.name || "");
+        setFormStudentCoordinatorEmail2(data.studentCoordinatorEmail2 || stuCoords[1]?.email || "");
+        setFormStudentCoordinatorPhone2(data.studentCoordinatorPhone2 || stuCoords[1]?.phone || "");
         setFormJuryName(data.juryName || "");
         setFormJuryRole(data.juryRole || "");
         setFormJuryBio(data.juryBio || "");
@@ -4378,9 +4424,15 @@ const EventManagementPage: React.FC = () => {
                   setFormFacultyCoordinator("");
                   setFormFacultyCoordinatorEmail("");
                   setFormFacultyCoordinatorPhone("");
+                  setFormFacultyCoordinator2("");
+                  setFormFacultyCoordinatorEmail2("");
+                  setFormFacultyCoordinatorPhone2("");
                   setFormStudentCoordinator("");
                   setFormStudentCoordinatorEmail("");
                   setFormStudentCoordinatorPhone("");
+                  setFormStudentCoordinator2("");
+                  setFormStudentCoordinatorEmail2("");
+                  setFormStudentCoordinatorPhone2("");
                   setFormCompany("");
                   setFormBatch("");
                   setFormIsPastEvent(false);
@@ -5342,21 +5394,41 @@ const EventManagementPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Faculty Coordinator Card */}
-                  <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.015)] space-y-4 text-left">
+                  {/* Faculty Coordinators Card */}
+                  <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.015)] space-y-5 text-left">
                     <div className="flex items-center justify-between border-b border-slate-50 pb-3">
                       <h3 className="text-sm font-bold text-slate-800 tracking-tight flex items-center gap-2">
                         <div className="w-8 h-8 rounded-xl bg-purple-50 flex items-center justify-center text-purple-600">
                           <Users className="h-4 w-4" />
                         </div>
-                        Faculty Coordinator
+                        Faculty Coordinators
                       </h3>
                       <span className="text-[10px] font-bold text-purple-600 bg-purple-50 px-2.5 py-0.5 rounded-full border border-purple-100">
-                        Faculty Lead
+                        Faculty Leads (Up to 2)
                       </span>
                     </div>
 
-                    <div className="space-y-3">
+                    {/* Faculty Coordinator 1 */}
+                    <div className="p-4 rounded-2xl bg-purple-50/20 border border-purple-100/60 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black text-purple-800 uppercase tracking-wider">
+                          1. Primary Faculty Coordinator
+                        </span>
+                        {formFacultyCoordinator && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormFacultyCoordinator("");
+                              setFormFacultyCoordinatorEmail("");
+                              setFormFacultyCoordinatorPhone("");
+                            }}
+                            className="text-[10px] text-purple-600 hover:text-purple-800 font-bold hover:underline"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+
                       <div>
                         <MemberSelectCombobox
                           label="Coordinator Name"
@@ -5367,7 +5439,7 @@ const EventManagementPage: React.FC = () => {
                             if (user?.phone) setFormFacultyCoordinatorPhone(user.phone);
                           }}
                           users={allUsers}
-                          placeholder="Search or select Faculty Coordinator..."
+                          placeholder="Search or select Primary Faculty Coordinator..."
                           themeColor="purple"
                           strictFilter={false}
                           headerTitle="Faculty Coordinators"
@@ -5399,7 +5471,7 @@ const EventManagementPage: React.FC = () => {
                             placeholder="faculty@vishnu.edu.in"
                             value={formFacultyCoordinatorEmail}
                             onChange={(e) => setFormFacultyCoordinatorEmail(e.target.value)}
-                            className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 font-medium text-xs text-slate-800 bg-slate-50/30 focus:bg-white transition-all"
+                            className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 font-medium text-xs text-slate-800 bg-white transition-all"
                           />
                         </div>
 
@@ -5412,28 +5484,130 @@ const EventManagementPage: React.FC = () => {
                             placeholder="+91 9876543210"
                             value={formFacultyCoordinatorPhone}
                             onChange={(e) => setFormFacultyCoordinatorPhone(e.target.value)}
-                            className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 font-medium text-xs text-slate-800 bg-slate-50/30 focus:bg-white transition-all"
+                            className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 font-medium text-xs text-slate-800 bg-white transition-all"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Faculty Coordinator 2 (Additional) */}
+                    <div className="p-4 rounded-2xl bg-slate-50/60 border border-slate-200/70 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider">
+                          2. Second Faculty Coordinator (Optional)
+                        </span>
+                        {formFacultyCoordinator2 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormFacultyCoordinator2("");
+                              setFormFacultyCoordinatorEmail2("");
+                              setFormFacultyCoordinatorPhone2("");
+                            }}
+                            className="text-[10px] text-red-500 hover:text-red-700 font-bold hover:underline"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+
+                      <div>
+                        <MemberSelectCombobox
+                          label="Coordinator Name"
+                          value={formFacultyCoordinatorEmail2 || formFacultyCoordinator2}
+                          onChange={(val, user) => {
+                            setFormFacultyCoordinator2(user?.name || user?.displayName || val);
+                            setFormFacultyCoordinatorEmail2(user?.email || "");
+                            if (user?.phone) setFormFacultyCoordinatorPhone2(user.phone);
+                          }}
+                          users={allUsers}
+                          placeholder="Search or select Second Faculty Coordinator..."
+                          themeColor="purple"
+                          strictFilter={false}
+                          headerTitle="Faculty Coordinators"
+                          recommendedRole={["Faculty Coordinator", "Faculty Lead", "Faculty Advisor", "Faculty"]}
+                          roleFilter={(u) => {
+                            const r = (u.role || "").toLowerCase().trim();
+                            const p = (u.position || "").toLowerCase().trim();
+                            const e = (u.email || "").toLowerCase().trim();
+                            return (
+                              r === "faculty coordinator" ||
+                              r === "faculty" ||
+                              p.includes("faculty coordinator") ||
+                              p.includes("faculty lead") ||
+                              p.includes("faculty advisor") ||
+                              e.startsWith("facultycoordinator@") ||
+                              (r.includes("faculty") && !r.includes("student"))
+                            );
+                          }}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                            Coordinator Email
+                          </label>
+                          <input
+                            type="email"
+                            placeholder="faculty2@vishnu.edu.in"
+                            value={formFacultyCoordinatorEmail2}
+                            onChange={(e) => setFormFacultyCoordinatorEmail2(e.target.value)}
+                            className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 font-medium text-xs text-slate-800 bg-white transition-all"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                            Coordinator Phone
+                          </label>
+                          <input
+                            type="tel"
+                            placeholder="+91 9876543210"
+                            value={formFacultyCoordinatorPhone2}
+                            onChange={(e) => setFormFacultyCoordinatorPhone2(e.target.value)}
+                            className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 font-medium text-xs text-slate-800 bg-white transition-all"
                           />
                         </div>
                       </div>
                     </div>
                   </div>
 
-                  {/* Student Coordinator Card */}
-                  <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.015)] space-y-4 text-left">
+                  {/* Student Coordinators Card */}
+                  <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-[0_8px_30px_rgba(0,0,0,0.015)] space-y-5 text-left">
                     <div className="flex items-center justify-between border-b border-slate-50 pb-3">
                       <h3 className="text-sm font-bold text-slate-800 tracking-tight flex items-center gap-2">
                         <div className="w-8 h-8 rounded-xl bg-orange-50 flex items-center justify-center text-orange-600">
                           <Users className="h-4 w-4" />
                         </div>
-                        Student Coordinator
+                        Student Coordinators
                       </h3>
                       <span className="text-[10px] font-bold text-orange-600 bg-orange-50 px-2.5 py-0.5 rounded-full border border-orange-100">
-                        Student Lead
+                        Student Leads (Up to 2)
                       </span>
                     </div>
 
-                    <div className="space-y-3">
+                    {/* Student Coordinator 1 */}
+                    <div className="p-4 rounded-2xl bg-orange-50/20 border border-orange-100/60 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black text-orange-800 uppercase tracking-wider">
+                          1. Primary Student Coordinator
+                        </span>
+                        {formStudentCoordinator && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormStudentCoordinator("");
+                              setFormStudentCoordinatorEmail("");
+                              setFormStudentCoordinatorPhone("");
+                            }}
+                            className="text-[10px] text-orange-600 hover:text-orange-800 font-bold hover:underline"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+
                       <div>
                         <MemberSelectCombobox
                           label="Coordinator Name"
@@ -5444,7 +5618,7 @@ const EventManagementPage: React.FC = () => {
                             if (user?.phone) setFormStudentCoordinatorPhone(user.phone);
                           }}
                           users={allUsers}
-                          placeholder="Search or select Student Coordinator..."
+                          placeholder="Search or select Primary Student Coordinator..."
                           themeColor="orange"
                           strictFilter={false}
                           headerTitle="Student Coordinators & Organizers"
@@ -5488,7 +5662,7 @@ const EventManagementPage: React.FC = () => {
                             placeholder="student@aiverse.in"
                             value={formStudentCoordinatorEmail}
                             onChange={(e) => setFormStudentCoordinatorEmail(e.target.value)}
-                            className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 font-medium text-xs text-slate-800 bg-slate-50/30 focus:bg-white transition-all"
+                            className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 font-medium text-xs text-slate-800 bg-white transition-all"
                           />
                         </div>
 
@@ -5501,7 +5675,101 @@ const EventManagementPage: React.FC = () => {
                             placeholder="+91 9876543210"
                             value={formStudentCoordinatorPhone}
                             onChange={(e) => setFormStudentCoordinatorPhone(e.target.value)}
-                            className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 font-medium text-xs text-slate-800 bg-slate-50/30 focus:bg-white transition-all"
+                            className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 font-medium text-xs text-slate-800 bg-white transition-all"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Student Coordinator 2 (Additional) */}
+                    <div className="p-4 rounded-2xl bg-slate-50/60 border border-slate-200/70 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[11px] font-black text-slate-700 uppercase tracking-wider">
+                          2. Second Student Coordinator (Optional)
+                        </span>
+                        {formStudentCoordinator2 && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFormStudentCoordinator2("");
+                              setFormStudentCoordinatorEmail2("");
+                              setFormStudentCoordinatorPhone2("");
+                            }}
+                            className="text-[10px] text-red-500 hover:text-red-700 font-bold hover:underline"
+                          >
+                            Remove
+                          </button>
+                        )}
+                      </div>
+
+                      <div>
+                        <MemberSelectCombobox
+                          label="Coordinator Name"
+                          value={formStudentCoordinatorEmail2 || formStudentCoordinator2}
+                          onChange={(val, user) => {
+                            setFormStudentCoordinator2(user?.name || user?.displayName || val);
+                            setFormStudentCoordinatorEmail2(user?.email || "");
+                            if (user?.phone) setFormStudentCoordinatorPhone2(user.phone);
+                          }}
+                          users={allUsers}
+                          placeholder="Search or select Second Student Coordinator..."
+                          themeColor="orange"
+                          strictFilter={false}
+                          headerTitle="Student Coordinators & Organizers"
+                          roleFilter={(u) => {
+                            const r = (u.role || "").toLowerCase().trim();
+                            const p = (u.position || "").toLowerCase().trim();
+                            const e = (u.email || "").toLowerCase().trim();
+
+                            const isFacultyOrAdmin =
+                              r.includes("faculty") ||
+                              p.includes("faculty") ||
+                              r.includes("admin") ||
+                              p.includes("admin") ||
+                              e === "admin@aiverse.in" ||
+                              e.startsWith("facultycoordinator@");
+
+                            const isParticipantOrTeam =
+                              r.includes("participant") ||
+                              p.includes("participant") ||
+                              r === "team" ||
+                              p === "team" ||
+                              !!u.teamName ||
+                              !!u.team_name ||
+                              !!u.registrationId ||
+                              !!u.registration_id;
+
+                            const isJury = r.includes("jury") || p.includes("jury") || e.startsWith("jury@");
+
+                            return !isFacultyOrAdmin && !isParticipantOrTeam && !isJury;
+                          }}
+                        />
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                            Coordinator Email
+                          </label>
+                          <input
+                            type="email"
+                            placeholder="student2@aiverse.in"
+                            value={formStudentCoordinatorEmail2}
+                            onChange={(e) => setFormStudentCoordinatorEmail2(e.target.value)}
+                            className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 font-medium text-xs text-slate-800 bg-white transition-all"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1">
+                            Coordinator Phone
+                          </label>
+                          <input
+                            type="tel"
+                            placeholder="+91 9876543210"
+                            value={formStudentCoordinatorPhone2}
+                            onChange={(e) => setFormStudentCoordinatorPhone2(e.target.value)}
+                            className="w-full px-3.5 py-2 border border-slate-200 rounded-xl focus:outline-none focus:border-orange-500 font-medium text-xs text-slate-800 bg-white transition-all"
                           />
                         </div>
                       </div>
