@@ -2,9 +2,21 @@ const express = require('express');
 const router = express.Router();
 const mongoose = require('mongoose');
 const Album = require('../models/Album');
-const { optionalAuth, requireAuth, requireAdmin } = require('../middleware/auth');
+const { optionalAuth, requireAdmin } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
 const { pick } = require('../utils/sanitize');
+
+// In-memory caching & stampede prevention for high-speed album delivery
+const cachedAlbumsMap = new Map();
+const lastCacheTimeMap = new Map();
+const ALBUMS_CACHE_TTL = 30000; // 30 seconds
+const inFlightFetchMap = new Map();
+
+function invalidateAlbumsCache() {
+  cachedAlbumsMap.clear();
+  lastCacheTimeMap.clear();
+  inFlightFetchMap.clear();
+}
 
 // GET /api/albums - List albums
 router.get(
@@ -12,13 +24,62 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const { eventId, category, status } = req.query;
-    const filter = {};
-    if (eventId) filter.eventId = eventId;
-    if (category && category !== 'All') filter.category = category;
-    if (status && status !== 'All') filter.status = status;
+    const cacheKey = `albums_${eventId || ''}_${category || ''}_${status || ''}`;
+    const now = Date.now();
 
-    const albums = await Album.find(filter).sort({ order: 1, createdAt: -1 }).lean();
-    res.json(albums.map((a) => ({ ...a, id: a._id })));
+    const cached = cachedAlbumsMap.get(cacheKey);
+    const lastTime = lastCacheTimeMap.get(cacheKey) || 0;
+
+    if (cached && now - lastTime < ALBUMS_CACHE_TTL) {
+      res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+      return res.json(cached);
+    }
+
+    if (inFlightFetchMap.has(cacheKey)) {
+      const result = await inFlightFetchMap.get(cacheKey);
+      res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+      return res.json(result);
+    }
+
+    const fetchPromise = (async () => {
+      const filter = {};
+      if (eventId) filter.eventId = eventId;
+      if (category && category !== 'All') filter.category = category;
+      if (status && status !== 'All') filter.status = status;
+
+      let albums = [];
+      try {
+        // Fast query with maxTimeMS constraint to prevent connection hangs
+        albums = await Album.find(filter)
+          .maxTimeMS(6000)
+          .sort({ order: 1, createdAt: -1 })
+          .lean();
+      } catch (findErr) {
+        console.warn('[albums] DB sort query failed, falling back to basic find:', findErr.message);
+        try {
+          albums = await Album.find(filter).maxTimeMS(4000).lean();
+          albums.sort((a, b) => (a.order || 0) - (b.order || 0) || (b.createdAt || 0) - (a.createdAt || 0));
+        } catch (fallbackErr) {
+          console.error('[albums] DB find failed completely:', fallbackErr.message);
+          return cachedAlbumsMap.get(cacheKey) || [];
+        }
+      }
+
+      const formatted = albums.map((a) => ({ ...a, id: a._id }));
+      cachedAlbumsMap.set(cacheKey, formatted);
+      lastCacheTimeMap.set(cacheKey, Date.now());
+      return formatted;
+    })();
+
+    inFlightFetchMap.set(cacheKey, fetchPromise);
+
+    try {
+      const data = await fetchPromise;
+      res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=60');
+      res.json(data);
+    } finally {
+      inFlightFetchMap.delete(cacheKey);
+    }
   })
 );
 
@@ -28,9 +89,9 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const id = req.params.id;
-    let album = await Album.findById(id).lean();
+    let album = await Album.findById(id).maxTimeMS(4000).lean().catch(() => null);
     if (!album) {
-      album = await Album.findOne({ $or: [{ _id: id }, { id: id }] }).lean();
+      album = await Album.findOne({ $or: [{ _id: id }, { id: id }] }).maxTimeMS(4000).lean().catch(() => null);
     }
     if (!album) {
       return res.status(404).json({ success: false, error: 'Album not found' });
@@ -88,6 +149,7 @@ router.post(
     });
 
     const saved = await Album.insertMany(docsToInsert);
+    invalidateAlbumsCache();
     res.status(201).json({
       success: true,
       count: saved.length,
@@ -118,6 +180,7 @@ router.post(
     });
 
     const saved = await newAlbum.save();
+    invalidateAlbumsCache();
     res.status(201).json({ success: true, id: saved._id, album: { ...saved.toObject(), id: saved._id } });
   })
 );
@@ -145,6 +208,7 @@ router.put(
       return res.status(404).json({ success: false, error: 'Album not found' });
     }
 
+    invalidateAlbumsCache();
     res.json({ success: true, album: { ...updated, id: updated._id } });
   })
 );
@@ -163,6 +227,7 @@ router.delete(
       return res.status(404).json({ success: false, error: 'Album not found' });
     }
 
+    invalidateAlbumsCache();
     res.json({ success: true, message: `Album ${id} deleted successfully` });
   })
 );

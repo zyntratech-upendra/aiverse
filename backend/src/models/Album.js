@@ -47,4 +47,9 @@ AlbumSchema.virtual('id').get(function () {
   return this._id;
 });
 
+AlbumSchema.index({ status: 1, category: 1, order: 1, createdAt: -1 });
+AlbumSchema.index({ order: 1, createdAt: -1 });
+AlbumSchema.index({ eventId: 1 });
+AlbumSchema.index({ createdAt: -1 });
+
 module.exports = mongoose.model('Album', AlbumSchema);

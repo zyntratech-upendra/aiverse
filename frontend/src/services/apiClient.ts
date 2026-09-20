@@ -733,11 +733,31 @@ export async function deleteOrganizer(id: string) {
 // ==========================================
 // Photo Albums & Gallery
 // ==========================================
-export async function fetchAlbums() {
-  await ensureAuthToken();
-  const res = await fetch(`${API_BASE}/albums`, { headers: authHeaders() });
-  if (!res.ok) throw new Error('Failed to fetch albums');
-  return res.json();
+export async function fetchAlbums(query?: { eventId?: string; category?: string; status?: string }) {
+  const cacheKey = `albums_${JSON.stringify(query || {})}`;
+  const cached = getCachedApiData<any[]>(cacheKey);
+  if (cached && Array.isArray(cached)) return cached;
+
+  const params = query ? `?${new URLSearchParams(query as any).toString()}` : '';
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), 6000);
+
+  try {
+    const res = await fetch(`${API_BASE}/albums${params}`, {
+      headers: authHeaders(),
+      signal: controller.signal,
+    });
+    clearTimeout(timeoutId);
+    if (!res.ok) throw new Error(`Failed to fetch albums (${res.status})`);
+    const data = await res.json();
+    if (Array.isArray(data)) {
+      setCachedApiData(cacheKey, data, 30000);
+    }
+    return data;
+  } catch (err) {
+    clearTimeout(timeoutId);
+    throw err;
+  }
 }
 
 export async function createAlbum(albumObj: any) {
@@ -751,6 +771,7 @@ export async function createAlbum(albumObj: any) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || err.message || `Failed to create album (${res.status})`);
   }
+  clearApiCache('albums');
   return res.json();
 }
 
@@ -765,6 +786,7 @@ export async function bulkCreateAlbums(items: any[]) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || err.message || `Failed to bulk create albums (${res.status})`);
   }
+  clearApiCache('albums');
   return res.json();
 }
 
@@ -779,6 +801,7 @@ export async function updateAlbum(id: string, patch: any) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || err.message || `Failed to update album (${res.status})`);
   }
+  clearApiCache('albums');
   return res.json();
 }
 
@@ -792,6 +815,7 @@ export async function deleteAlbum(id: string) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.error || err.message || `Failed to delete album (${res.status})`);
   }
+  clearApiCache('albums');
   return res.json();
 }
 
