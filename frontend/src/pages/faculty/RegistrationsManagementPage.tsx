@@ -63,38 +63,285 @@ const COLLEGE_PALETTE = [
   "#64748B", // Slate-500
 ];
 
-const getCollegeShortName = (rawName: string): string => {
-  if (!rawName) return "Unspecified";
-  const lower = rawName.toLowerCase();
-  if (lower.includes("shri vishnu engineering college for women") || lower.includes("svecw")) return "SVECW";
-  if (lower.includes("vishnu institute of technology") || lower.includes("vitb") || lower.includes("vit bhimavaram")) return "VITB";
-  if (lower.includes("s.r.k.r") || lower.includes("srkr")) return "SRKR";
-  if (lower.includes("bhimavaram institute of engineering") || lower.includes("biet")) return "BIET";
-  if (lower.includes("dnr") || lower.includes("d.n.r")) return "DNR";
-  if (lower.includes("gokaraju") || lower.includes("grit")) return "GRIET";
-  if (lower.includes("vignan") || lower.includes("vvit")) return "VVIT";
-  if (lower.includes("kl university") || lower.includes("klu")) return "KLU";
-  if (lower.includes("aditya")) return "Aditya";
-  if (lower.includes("raghu")) return "Raghu";
-  if (lower.includes("gayatri")) return "GVP";
-  
-  if (rawName.length > 20) {
-    return rawName.slice(0, 18) + "...";
+export interface NormalizedCollege {
+  canonicalName: string;
+  shortName: string;
+  defaultPlace: string;
+}
+
+export const normalizeCollegeInfo = (rawName?: string, rawPlace?: string): NormalizedCollege => {
+  const cleaned = (rawName || "").trim();
+  if (!cleaned) {
+    return {
+      canonicalName: "Vishnu Institute of Technology",
+      shortName: "VITB",
+      defaultPlace: (rawPlace || "").trim() || "Bhimavaram"
+    };
   }
-  return rawName;
+
+  // Create a lower-cased alphanumeric string for robust matching
+  const simplified = cleaned
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  // 1. Shri Vishnu Engineering College for Women
+  if (
+    simplified.includes("shri vishnu engineering college for women") ||
+    simplified.includes("sri vishnu engineering college for women") ||
+    simplified.includes("svecw") ||
+    (simplified.includes("vishnu") && simplified.includes("women"))
+  ) {
+    return {
+      canonicalName: "Shri Vishnu Engineering College for Women",
+      shortName: "SVECW",
+      defaultPlace: (rawPlace || "").trim() || "Bhimavaram"
+    };
+  }
+
+  // 2. BVRIT (Narsapur / Hyderabad)
+  if (
+    simplified.includes("bvrit") ||
+    simplified.includes("b v raju institute of technology") ||
+    simplified.includes("bv raju institute of technology")
+  ) {
+    const isHyd = simplified.includes("hyderabad") || simplified.includes("hyd") || (rawPlace || "").toLowerCase().includes("hyderabad");
+    return {
+      canonicalName: isHyd ? "BVRIT Hyderabad College of Engineering for Women" : "B V Raju Institute of Technology",
+      shortName: isHyd ? "BVRITH" : "BVRIT",
+      defaultPlace: isHyd ? "Hyderabad" : "Narsapur"
+    };
+  }
+
+  // 3. Vishnu Dental College
+  if (simplified.includes("vishnu dental") || simplified === "vdc") {
+    return {
+      canonicalName: "Vishnu Dental College",
+      shortName: "VDC",
+      defaultPlace: (rawPlace || "").trim() || "Bhimavaram"
+    };
+  }
+
+  // 4. Shri Vishnu College of Pharmacy
+  if (
+    simplified.includes("vishnu college of pharmacy") ||
+    simplified.includes("vishnu institute of pharmaceutical") ||
+    simplified === "svcp" ||
+    simplified === "viper"
+  ) {
+    return {
+      canonicalName: "Shri Vishnu College of Pharmacy",
+      shortName: "SVCP",
+      defaultPlace: (rawPlace || "").trim() || "Bhimavaram"
+    };
+  }
+
+  // 5. Vishnu Institute of Technology (VITB / VIT Bhimavaram)
+  if (
+    simplified.includes("vishnu institute of technology") ||
+    simplified === "vitb" ||
+    simplified === "vit b" ||
+    simplified === "vit bhimavaram" ||
+    simplified.includes("vishnu inst of tech") ||
+    simplified.includes("vishnu institute of tech") ||
+    simplified.includes("vishnu inst") ||
+    (simplified.includes("vishnu") && !simplified.includes("women") && !simplified.includes("dental") && !simplified.includes("pharmacy") && !simplified.includes("bvrit"))
+  ) {
+    return {
+      canonicalName: "Vishnu Institute of Technology",
+      shortName: "VITB",
+      defaultPlace: (rawPlace || "").trim() || "Bhimavaram"
+    };
+  }
+
+  // 6. SRKR Engineering College
+  if (
+    simplified.includes("s r k r") ||
+    simplified.includes("srkr") ||
+    simplified.includes("sagi rama") ||
+    simplified.includes("sagagi rama")
+  ) {
+    return {
+      canonicalName: "S.R.K.R. Engineering College",
+      shortName: "SRKR",
+      defaultPlace: (rawPlace || "").trim() || "Bhimavaram"
+    };
+  }
+
+  // 7. BIET (Bhimavaram)
+  if (
+    simplified.includes("bhimavaram institute of engineering") ||
+    simplified.includes("biet")
+  ) {
+    return {
+      canonicalName: "Bhimavaram Institute of Engineering & Technology",
+      shortName: "BIET",
+      defaultPlace: (rawPlace || "").trim() || "Pennada, Bhimavaram"
+    };
+  }
+
+  // 8. DNR College
+  if (
+    simplified.includes("d n r") ||
+    simplified.includes("dnr") ||
+    simplified.includes("dantuluri narayana raju")
+  ) {
+    return {
+      canonicalName: "D.N.R. College of Engineering & Technology",
+      shortName: "DNR",
+      defaultPlace: (rawPlace || "").trim() || "Bhimavaram"
+    };
+  }
+
+  // 9. Swarnandhra
+  if (simplified.includes("swarnandhra")) {
+    return {
+      canonicalName: "Swarnandhra College of Engineering & Technology",
+      shortName: "SCET",
+      defaultPlace: (rawPlace || "").trim() || "Seetharampuram, Narsapur"
+    };
+  }
+
+  // 10. GIET (Rajahmundry)
+  if (simplified.includes("giet") || simplified.includes("godavari institute")) {
+    return {
+      canonicalName: "Godavari Institute of Engineering & Technology",
+      shortName: "GIET",
+      defaultPlace: (rawPlace || "").trim() || "Rajahmundry"
+    };
+  }
+
+  // 11. GRIET (Hyderabad)
+  if (
+    simplified.includes("gokaraju") ||
+    simplified.includes("griet")
+  ) {
+    return {
+      canonicalName: "Gokaraju Rangaraju Institute of Engineering and Technology",
+      shortName: "GRIET",
+      defaultPlace: (rawPlace || "").trim() || "Hyderabad"
+    };
+  }
+
+  // 12. VVIT / Vignan
+  if (
+    simplified.includes("vvit") ||
+    simplified.includes("vasireddy venkatadri")
+  ) {
+    return {
+      canonicalName: "Vasireddy Venkatadri Institute of Technology",
+      shortName: "VVIT",
+      defaultPlace: (rawPlace || "").trim() || "Guntur"
+    };
+  }
+  if (simplified.includes("vignan")) {
+    return {
+      canonicalName: "Vignan's Foundation for Science, Technology & Research",
+      shortName: "Vignan",
+      defaultPlace: (rawPlace || "").trim() || "Vadlamudi, Guntur"
+    };
+  }
+
+  // 13. KL University
+  if (
+    simplified.includes("k l university") ||
+    simplified.includes("kl university") ||
+    simplified.includes("klu") ||
+    simplified.includes("klef") ||
+    simplified.includes("koneru lakshmaiah")
+  ) {
+    return {
+      canonicalName: "Koneru Lakshmaiah Education Foundation (KL University)",
+      shortName: "KLU",
+      defaultPlace: (rawPlace || "").trim() || "Vaddeswaram, Guntur"
+    };
+  }
+
+  // 14. Aditya
+  if (
+    simplified.includes("aditya") ||
+    simplified.includes("aec") ||
+    simplified.includes("acet")
+  ) {
+    return {
+      canonicalName: "Aditya Engineering College",
+      shortName: "Aditya",
+      defaultPlace: (rawPlace || "").trim() || "Surampalem"
+    };
+  }
+
+  // 15. Raghu
+  if (simplified.includes("raghu")) {
+    return {
+      canonicalName: "Raghu Engineering College",
+      shortName: "REC",
+      defaultPlace: (rawPlace || "").trim() || "Visakhapatnam"
+    };
+  }
+
+  // 16. GVP
+  if (simplified.includes("gayatri") || simplified.includes("gvp")) {
+    return {
+      canonicalName: "Gayatri Vidya Parishad College of Engineering",
+      shortName: "GVPCE",
+      defaultPlace: (rawPlace || "").trim() || "Visakhapatnam"
+    };
+  }
+
+  // 17. JNTUK / JNTUH / JNTU
+  if (simplified.includes("jntu")) {
+    if (simplified.includes("kakinada") || simplified.includes("jntuk")) {
+      return { canonicalName: "JNTU Kakinada", shortName: "JNTUK", defaultPlace: "Kakinada" };
+    }
+    if (simplified.includes("hyderabad") || simplified.includes("jntuh")) {
+      return { canonicalName: "JNTU Hyderabad", shortName: "JNTUH", defaultPlace: "Hyderabad" };
+    }
+    return { canonicalName: "Jawaharlal Nehru Technological University", shortName: "JNTU", defaultPlace: "Andhra Pradesh" };
+  }
+
+  // 18. Andhra University
+  if (simplified.includes("andhra university") || simplified === "au") {
+    return {
+      canonicalName: "Andhra University",
+      shortName: "AU",
+      defaultPlace: (rawPlace || "").trim() || "Visakhapatnam"
+    };
+  }
+
+  // Generic Normalization: Clean Title Case
+  const toTitleCase = (str: string) => {
+    return str
+      .toLowerCase()
+      .split(" ")
+      .map(word => {
+        if (word === "of" || word === "and" || word === "for" || word === "in" || word === "&") return word;
+        return word.charAt(0).toUpperCase() + word.slice(1);
+      })
+      .join(" ");
+  };
+
+  const titleCased = toTitleCase(simplified);
+  const short = titleCased.length > 18 ? titleCased.slice(0, 16) + "..." : titleCased;
+
+  return {
+    canonicalName: titleCased,
+    shortName: short,
+    defaultPlace: (rawPlace || "").trim() || "Andhra Pradesh"
+  };
 };
 
 const CollegeDonutChart: React.FC<{
   items: CollegeStatItem[];
-  totalMembers: number;
+  totalTeams: number;
   size?: number;
   donutWidth?: number;
   interactive?: boolean;
   onSliceClick?: (item: CollegeStatItem) => void;
-}> = ({ items, totalMembers, size = 80, donutWidth = 12, interactive = true, onSliceClick }) => {
+}> = ({ items, totalTeams, size = 80, donutWidth = 12, interactive = true, onSliceClick }) => {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
-  if (!items || items.length === 0 || totalMembers === 0) {
+  if (!items || items.length === 0 || totalTeams === 0) {
     return (
       <svg width={size} height={size} viewBox="0 0 100 100" className="rotate-[-90deg]">
         <circle cx="50" cy="50" r="36" fill="transparent" stroke="#E2E8F0" strokeWidth={donutWidth} />
@@ -105,7 +352,7 @@ const CollegeDonutChart: React.FC<{
   if (items.length === 1) {
     const item = items[0];
     return (
-      <div className="relative inline-flex items-center justify-center group/donut" title={`${item.college}: ${item.memberCount} members (100%)`}>
+      <div className="relative inline-flex items-center justify-center group/donut" title={`${item.college}: ${item.teamCount} teams (100%)`}>
         <svg width={size} height={size} viewBox="0 0 100 100" className="rotate-[-90deg] overflow-visible">
           <circle
             cx="50"
@@ -170,7 +417,7 @@ const CollegeDonutChart: React.FC<{
                 }
               }}
             >
-              <title>{`${item.college}: ${item.memberCount} members (${item.percentage.toFixed(1)}%)`}</title>
+              <title>{`${item.college}: ${item.teamCount} teams (${item.percentage.toFixed(1)}%) • ${item.memberCount} members`}</title>
             </circle>
           );
         })}
@@ -760,15 +1007,20 @@ const RegistrationsManagementPage: React.FC = () => {
   const filteredRegistrations = useMemo(() => {
     return registrations.filter(r => {
       const q = searchQuery.toLowerCase().trim();
+      const rawCol = (r.collegeName || r.college || "").trim();
+      const normalizedCol = normalizeCollegeInfo(rawCol, r.collegePlace);
+
       const matchesSearch = 
         !q ||
         (r.teamLeadName || "").toLowerCase().includes(q) ||
         (r.groupName || "").toLowerCase().includes(q) ||
         (r.teamLeadStudentId || "").toLowerCase().includes(q) ||
         (r.eventTitle || "").toLowerCase().includes(q) ||
-        (r.collegeName || "").toLowerCase().includes(q) ||
-        (r.college || "").toLowerCase().includes(q) ||
+        rawCol.toLowerCase().includes(q) ||
+        normalizedCol.canonicalName.toLowerCase().includes(q) ||
+        normalizedCol.shortName.toLowerCase().includes(q) ||
         (r.collegePlace || "").toLowerCase().includes(q) ||
+        normalizedCol.defaultPlace.toLowerCase().includes(q) ||
         (r.members || []).some(m => 
           (m.name || "").toLowerCase().includes(q) ||
           (m.studentId || "").toLowerCase().includes(q)
@@ -792,7 +1044,7 @@ const RegistrationsManagementPage: React.FC = () => {
     });
   }, [registrations, eventsList, searchQuery, selectedEvent, selectedType, selectedStatus]);
 
-  // College-wise registration breakdown (Pie Chart data)
+  // College-wise registration breakdown (Normalized and Team-Based Pie Chart data)
   const collegeStats = useMemo(() => {
     const targetRegs = selectedEvent === "All" 
       ? registrations 
@@ -805,20 +1057,25 @@ const RegistrationsManagementPage: React.FC = () => {
           return matchesTitle || matchesId;
         });
 
-    const collegeMap = new Map<string, { college: string; place?: string; memberCount: number; teamCount: number }>();
+    const collegeMap = new Map<string, { college: string; shortName: string; place?: string; memberCount: number; teamCount: number }>();
+    let totalTeams = 0;
     let totalMembers = 0;
 
     targetRegs.forEach(reg => {
       const rawCol = (reg.collegeName || reg.college || "").trim();
-      const colKey = rawCol || "Vishnu Institute of Technology (Autonomous), Bhimavaram";
+      const rawPlace = (reg.collegePlace || "").trim();
+      const normalized = normalizeCollegeInfo(rawCol, rawPlace);
+      const colKey = normalized.canonicalName;
       const membersInTeam = Math.max(1, reg.teamSize || ((reg.members && reg.members.length > 0) ? reg.members.length + 1 : 1));
 
+      totalTeams += 1;
       totalMembers += membersInTeam;
 
       if (!collegeMap.has(colKey)) {
         collegeMap.set(colKey, {
           college: colKey,
-          place: reg.collegePlace,
+          shortName: normalized.shortName,
+          place: rawPlace || normalized.defaultPlace,
           memberCount: 0,
           teamCount: 0,
         });
@@ -827,17 +1084,20 @@ const RegistrationsManagementPage: React.FC = () => {
       const item = collegeMap.get(colKey)!;
       item.memberCount += membersInTeam;
       item.teamCount += 1;
-      if (!item.place && reg.collegePlace) item.place = reg.collegePlace;
+      if (!item.place && (rawPlace || normalized.defaultPlace)) {
+        item.place = rawPlace || normalized.defaultPlace;
+      }
     });
 
-    const sorted = Array.from(collegeMap.values()).sort((a, b) => b.memberCount - a.memberCount);
+    // Primary ranking by Teams count (descending)
+    const sorted = Array.from(collegeMap.values()).sort((a, b) => b.teamCount - a.teamCount || b.memberCount - a.memberCount);
 
     const result: CollegeStatItem[] = sorted.map((item, index) => {
-      const pct = totalMembers > 0 ? (item.memberCount / totalMembers) * 100 : 0;
+      const pct = totalTeams > 0 ? (item.teamCount / totalTeams) * 100 : 0;
       return {
         college: item.college,
         displayName: item.college,
-        shortName: getCollegeShortName(item.college),
+        shortName: item.shortName,
         place: item.place,
         memberCount: item.memberCount,
         teamCount: item.teamCount,
@@ -848,6 +1108,7 @@ const RegistrationsManagementPage: React.FC = () => {
 
     return {
       items: result,
+      totalTeams,
       totalMembers,
       totalColleges: result.length,
       topCollege: result[0] || null
@@ -884,17 +1145,17 @@ const RegistrationsManagementPage: React.FC = () => {
       "College / Institution Name",
       "Short Code",
       "City / Location",
+      "Total Registered Teams",
       "Total Registered Students",
-      "Total Teams / Registrations",
-      "Percentage Share (%)"
+      "Team Share (%)"
     ];
 
     const rows = collegeStats.items.map(item => [
       `"${item.college.replace(/"/g, '""')}"`,
       `"${item.shortName.replace(/"/g, '""')}"`,
       `"${(item.place || "").replace(/"/g, '""')}"`,
-      item.memberCount,
       item.teamCount,
+      item.memberCount,
       `${item.percentage.toFixed(2)}%`
     ]);
 
@@ -1036,17 +1297,17 @@ const RegistrationsManagementPage: React.FC = () => {
                 <>
                   <CollegeDonutChart 
                     items={collegeStats.items} 
-                    totalMembers={collegeStats.totalMembers} 
+                    totalTeams={collegeStats.totalTeams} 
                     size={68} 
                     donutWidth={8} 
                     interactive={false}
                   />
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none">
                     <span className="text-[11px] font-black text-slate-800 leading-none">
-                      {collegeStats.totalMembers}
+                      {collegeStats.totalTeams}
                     </span>
                     <span className="text-[7.5px] font-bold text-slate-400 leading-none mt-0.5 uppercase tracking-tighter">
-                      members
+                      teams
                     </span>
                   </div>
                 </>
@@ -1078,7 +1339,7 @@ const RegistrationsManagementPage: React.FC = () => {
                       </span>
                     </div>
                     <span className="font-extrabold text-slate-900 shrink-0 text-[11px]">
-                      {item.memberCount} <span className="text-[9px] font-medium text-slate-400">({item.percentage.toFixed(0)}%)</span>
+                      {item.teamCount} <span className="text-[9px] font-medium text-slate-400">teams ({item.percentage.toFixed(0)}%)</span>
                     </span>
                   </div>
                 ))
@@ -2261,7 +2522,7 @@ const RegistrationsManagementPage: React.FC = () => {
                     </span>
                   </div>
                   <p className="text-xs text-slate-500 font-medium mt-0.5">
-                    Live breakdown of student registrations and teams across participating institutions.
+                    Live breakdown of team registrations and participation across institutions.
                   </p>
                 </div>
               </div>
@@ -2285,10 +2546,10 @@ const RegistrationsManagementPage: React.FC = () => {
                   <span className="text-[10px] text-slate-500 font-medium">Institutions</span>
                 </div>
 
-                <div className="bg-blue-50/60 p-3.5 rounded-2xl border border-blue-100/60">
-                  <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider block">Total Students</span>
-                  <p className="text-xl font-black text-blue-900 mt-0.5">{collegeStats.totalMembers}</p>
-                  <span className="text-[10px] text-blue-600 font-medium">Across all teams</span>
+                <div className="bg-indigo-50/60 p-3.5 rounded-2xl border border-indigo-100/60">
+                  <span className="text-[10px] font-bold text-indigo-600 uppercase tracking-wider block">Total Teams</span>
+                  <p className="text-xl font-black text-indigo-950 mt-0.5">{collegeStats.totalTeams}</p>
+                  <span className="text-[10px] text-indigo-700 font-medium">{metrics.group} Groups / {metrics.individual} Solo</span>
                 </div>
 
                 <div className="bg-emerald-50/60 p-3.5 rounded-2xl border border-emerald-100/60">
@@ -2297,14 +2558,14 @@ const RegistrationsManagementPage: React.FC = () => {
                     {collegeStats.topCollege?.shortName || "None"}
                   </p>
                   <span className="text-[10px] text-emerald-700 font-semibold">
-                    {collegeStats.topCollege ? `${collegeStats.topCollege.memberCount} members (${collegeStats.topCollege.percentage.toFixed(0)}%)` : "No data"}
+                    {collegeStats.topCollege ? `${collegeStats.topCollege.teamCount} teams (${collegeStats.topCollege.percentage.toFixed(0)}%)` : "No data"}
                   </span>
                 </div>
 
-                <div className="bg-violet-50/60 p-3.5 rounded-2xl border border-violet-100/60">
-                  <span className="text-[10px] font-bold text-violet-600 uppercase tracking-wider block">Total Teams</span>
-                  <p className="text-xl font-black text-violet-900 mt-0.5">{metrics.total}</p>
-                  <span className="text-[10px] text-violet-700 font-medium">{metrics.group} Groups / {metrics.individual} Solo</span>
+                <div className="bg-blue-50/60 p-3.5 rounded-2xl border border-blue-100/60">
+                  <span className="text-[10px] font-bold text-blue-600 uppercase tracking-wider block">Total Students</span>
+                  <p className="text-xl font-black text-blue-900 mt-0.5">{collegeStats.totalMembers}</p>
+                  <span className="text-[10px] text-blue-600 font-medium">Across all teams</span>
                 </div>
               </div>
 
@@ -2314,16 +2575,16 @@ const RegistrationsManagementPage: React.FC = () => {
                 <div className="relative w-44 h-44 shrink-0 flex items-center justify-center">
                   <CollegeDonutChart 
                     items={collegeStats.items} 
-                    totalMembers={collegeStats.totalMembers} 
+                    totalTeams={collegeStats.totalTeams} 
                     size={160} 
                     donutWidth={16} 
                   />
                   <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-center px-4">
                     <span className="text-2xl font-black text-slate-800 leading-none">
-                      {collegeStats.totalMembers}
+                      {collegeStats.totalTeams}
                     </span>
                     <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mt-1">
-                      Students
+                      Teams
                     </span>
                   </div>
                 </div>
@@ -2331,7 +2592,7 @@ const RegistrationsManagementPage: React.FC = () => {
                 {/* College Share Legend & Progress Bars */}
                 <div className="flex-1 w-full space-y-2.5">
                   <h4 className="text-xs font-extrabold text-slate-700 uppercase tracking-wider">
-                    Institutional Distribution
+                    Institutional Distribution (By Teams)
                   </h4>
                   {collegeStats.items.length === 0 ? (
                     <p className="text-xs text-slate-400">No college data available for this selection.</p>
@@ -2347,8 +2608,8 @@ const RegistrationsManagementPage: React.FC = () => {
                               </span>
                             </div>
                             <div className="flex items-center gap-2 shrink-0">
-                              <span className="font-extrabold text-slate-900">{item.memberCount} students</span>
-                              <span className="text-[11px] font-semibold text-slate-400">({item.percentage.toFixed(1)}%)</span>
+                              <span className="font-extrabold text-slate-900">{item.teamCount} {item.teamCount === 1 ? 'team' : 'teams'}</span>
+                              <span className="text-[11px] font-semibold text-slate-400">({item.percentage.toFixed(1)}%) • {item.memberCount} students</span>
                             </div>
                           </div>
                           {/* Progress bar */}
@@ -2384,9 +2645,9 @@ const RegistrationsManagementPage: React.FC = () => {
                           <th className="py-2.5 px-4">#</th>
                           <th className="py-2.5 px-4">College / Institution</th>
                           <th className="py-2.5 px-4">City/Place</th>
-                          <th className="py-2.5 px-4 text-center">Registered Students</th>
-                          <th className="py-2.5 px-4 text-center">Teams / RSVPs</th>
-                          <th className="py-2.5 px-4 text-center">Share</th>
+                          <th className="py-2.5 px-4 text-center">Registered Teams</th>
+                          <th className="py-2.5 px-4 text-center">Total Students</th>
+                          <th className="py-2.5 px-4 text-center">Team Share</th>
                           <th className="py-2.5 px-4 text-right">Action</th>
                         </tr>
                       </thead>
@@ -2412,14 +2673,14 @@ const RegistrationsManagementPage: React.FC = () => {
                             <td className="py-2.5 px-4 text-slate-600">
                               {item.place || "Bhimavaram"}
                             </td>
-                            <td className="py-2.5 px-4 text-center font-extrabold text-slate-900">
-                              {item.memberCount}
-                            </td>
-                            <td className="py-2.5 px-4 text-center font-bold text-slate-600">
+                            <td className="py-2.5 px-4 text-center font-black text-indigo-700">
                               {item.teamCount}
                             </td>
+                            <td className="py-2.5 px-4 text-center font-bold text-slate-600">
+                              {item.memberCount}
+                            </td>
                             <td className="py-2.5 px-4 text-center">
-                              <span className="px-2 py-0.5 rounded-md font-bold text-[11px] bg-slate-100 text-slate-700">
+                              <span className="px-2 py-0.5 rounded-md font-bold text-[11px] bg-indigo-50 text-indigo-700 border border-indigo-100/60">
                                 {item.percentage.toFixed(1)}%
                               </span>
                             </td>
