@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { 
   ClipboardList, 
   Search, 
@@ -1764,9 +1765,18 @@ const RegistrationsManagementPage: React.FC = () => {
       </div>
 
       {/* Registration Details Modal */}
-      {selectedReg && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="bg-white rounded-3xl border border-slate-100 shadow-2xl max-w-5xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 text-left">
+      {selectedReg && typeof document !== "undefined" && createPortal(
+        <div 
+          className="fixed inset-0 w-screen h-screen z-[99999] flex items-center justify-center p-4 sm:p-6 bg-slate-900/60 backdrop-blur-sm animate-in fade-in duration-200 overflow-hidden"
+          onClick={() => {
+            setSelectedReg(null);
+            setIsEditing(false);
+          }}
+        >
+          <div 
+            className="bg-white rounded-3xl border border-slate-100 shadow-2xl max-w-5xl w-full max-h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200 text-left relative z-10"
+            onClick={(e) => e.stopPropagation()}
+          >
             {/* Sticky Header */}
             <div className="p-5 sm:p-6 border-b border-slate-100 flex justify-between items-center bg-slate-50/80 shrink-0">
               <div>
@@ -2417,13 +2427,20 @@ const RegistrationsManagementPage: React.FC = () => {
             </div>
 
           </div>
-        </div>
+        </div>,
+        document.body
       )}
 
       {/* ================= EXPORT DATA MODAL ================= */}
-      {isExportModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/40 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-lg rounded-3xl border border-slate-100 shadow-2xl overflow-hidden p-6 space-y-6 text-left">
+      {isExportModalOpen && typeof document !== "undefined" && createPortal(
+        <div 
+          className="fixed inset-0 w-screen h-screen z-[99999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 animate-in fade-in duration-200 overflow-hidden"
+          onClick={() => setIsExportModalOpen(false)}
+        >
+          <div 
+            className="bg-white w-full max-w-lg rounded-3xl border border-slate-100 shadow-2xl overflow-hidden p-6 space-y-6 text-left relative z-10 animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-2xl bg-blue-50 text-[#2563EB] flex items-center justify-center font-bold shadow-inner">
@@ -2499,12 +2516,20 @@ const RegistrationsManagementPage: React.FC = () => {
               </button>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body
       )}
+
       {/* ================= COLLEGE DISTRIBUTION ANALYTICS MODAL ================= */}
-      {isCollegeModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/50 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200 overflow-y-auto">
-          <div className="bg-white w-full max-w-3xl rounded-3xl border border-slate-100 shadow-2xl overflow-hidden text-left my-auto max-h-[92vh] flex flex-col">
+      {isCollegeModalOpen && typeof document !== "undefined" && createPortal(
+        <div 
+          className="fixed inset-0 w-screen h-screen z-[99999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4 sm:p-6 animate-in fade-in duration-200 overflow-hidden"
+          onClick={() => setIsCollegeModalOpen(false)}
+        >
+          <div 
+            className="bg-white w-full max-w-3xl rounded-3xl border border-slate-100 shadow-2xl overflow-hidden text-left max-h-[90vh] flex flex-col relative z-10 animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
             
             {/* Modal Header */}
             <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/50 shrink-0">
@@ -2725,7 +2750,8 @@ const RegistrationsManagementPage: React.FC = () => {
             </div>
 
           </div>
-        </div>
+        </div>,
+        document.body
       )}
     </div>
   );
