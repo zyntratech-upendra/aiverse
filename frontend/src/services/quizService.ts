@@ -430,8 +430,6 @@ export function selectSeededCategorizedQuestions<T extends { id: string; categor
           const picked = getSeededRandomQuestions(catQs, Math.min(quota, catQs.length), `${seed}_cat_${cat}`);
           selectedQuestions.push(...picked);
         }
-      } else {
-        selectedQuestions.push(...catQs);
       }
     }
 

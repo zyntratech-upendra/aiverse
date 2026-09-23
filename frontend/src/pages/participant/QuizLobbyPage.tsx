@@ -432,6 +432,14 @@ export const QuizLobbyPage: React.FC = () => {
                   (Random from {quiz.questions?.length || quiz.questionsCount || 0} pool)
                 </span>
               )}
+              {Boolean(quiz.categoryDistribution && Object.keys(quiz.categoryDistribution).length > 0) && (
+                <div className="text-[9px] text-indigo-700 font-semibold block mt-1 leading-tight max-h-12 overflow-y-auto">
+                  {Object.entries(quiz.categoryDistribution)
+                    .filter(([_, count]) => Number(count) > 0)
+                    .map(([cat, count]) => `${count} ${cat}`)
+                    .join(' • ')}
+                </div>
+              )}
             </div>
 
             <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 text-center">

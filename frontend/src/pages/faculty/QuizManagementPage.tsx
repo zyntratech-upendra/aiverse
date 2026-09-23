@@ -616,8 +616,6 @@ interface ExcelScoreRow {
           if (val !== undefined && val !== null && (val as any) !== '') {
             const n = Number(val);
             categoryBasedAttemptCount += (n > 0 ? Math.min(n, total) : 0);
-          } else {
-            categoryBasedAttemptCount += total;
           }
         }
       }
@@ -2858,8 +2856,6 @@ Answer: A`;
                                                 if (qVal !== undefined && qVal !== null && (qVal as any) !== '') {
                                                   const n = Number(qVal);
                                                   newTotalAttempt += (n > 0 ? Math.min(n, total) : 0);
-                                                } else {
-                                                  newTotalAttempt += total;
                                                 }
                                               }
                                             } else {
@@ -2873,7 +2869,7 @@ Answer: A`;
                                               totalMarks: newTotalAttempt * pts
                                             });
                                           }}
-                                          placeholder={`All (${poolCount})`}
+                                          placeholder={`0`}
                                           className="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
                                         />
                                       </div>
