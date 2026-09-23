@@ -625,7 +625,7 @@ interface ExcelScoreRow {
       const displayCount = hasCategoryQuotas
         ? categoryBasedAttemptCount
         : Math.max(0, Number(editingQuiz.questionsToDisplayCount) || 0);
-      const effectiveQCount = (displayCount > 0 && displayCount < qCount) ? displayCount : qCount;
+      const effectiveQCount = (displayCount > 0) ? Math.min(displayCount, qCount) : qCount;
       const calcTotalMarks = effectiveQCount * ptsPerQ;
 
       const payload: Quiz = {
@@ -2618,7 +2618,7 @@ Answer: A`;
                       }
                     } else {
                       const disp = Number(editingQuiz.questionsToDisplayCount) || 0;
-                      effectiveAttemptCount = (disp > 0 && disp < qCount) ? disp : qCount;
+                      effectiveAttemptCount = (disp > 0) ? Math.min(disp, qCount) : qCount;
                     }
 
                     const totalMarks = effectiveAttemptCount * pts;

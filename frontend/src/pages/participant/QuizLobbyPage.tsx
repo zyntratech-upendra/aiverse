@@ -423,7 +423,7 @@ export const QuizLobbyPage: React.FC = () => {
               <HelpCircle className="w-5 h-5 text-indigo-600 mx-auto mb-1.5" />
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Questions</span>
               <span className="text-lg font-black text-[#0F172A]">
-                {quiz.questionsToDisplayCount && quiz.questionsToDisplayCount > 0 && quiz.questionsToDisplayCount < (quiz.questions?.length || quiz.questionsCount || 0)
+                {quiz.questionsToDisplayCount && quiz.questionsToDisplayCount > 0
                   ? `${quiz.questionsToDisplayCount} MCQs`
                   : `${quiz.questions?.length || quiz.questionsCount || 0} MCQs`}
               </span>

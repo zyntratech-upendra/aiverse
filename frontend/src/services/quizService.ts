@@ -297,7 +297,7 @@ export function evaluateQuizAnswers(
   if (Array.isArray(assignedQuestionIds) && assignedQuestionIds.length > 0) {
     const idSet = new Set(assignedQuestionIds);
     questions = questions.filter(q => idSet.has(q.id));
-  } else if (quiz.questionsToDisplayCount && quiz.questionsToDisplayCount > 0 && quiz.questionsToDisplayCount < questions.length) {
+  } else if (quiz.questionsToDisplayCount && quiz.questionsToDisplayCount > 0) {
     const answeredKeys = Object.keys(answers || {});
     if (answeredKeys.length > 0) {
       const answeredSet = new Set(answeredKeys);
@@ -439,8 +439,8 @@ export function selectSeededCategorizedQuestions<T extends { id: string; categor
     return selectedQuestions;
   }
 
-  if (globalCount && globalCount > 0 && globalCount < questions.length) {
-    return getSeededRandomQuestions(questions, globalCount, seed);
+  if (globalCount && globalCount > 0) {
+    return getSeededRandomQuestions(questions, Math.min(globalCount, questions.length), seed);
   }
 
   return questions;

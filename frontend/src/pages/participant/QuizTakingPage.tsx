@@ -112,8 +112,7 @@ export const QuizTakingPage: React.FC = () => {
 
         const hasGlobalSubset = Boolean(
           activeQuiz.questionsToDisplayCount &&
-          activeQuiz.questionsToDisplayCount > 0 &&
-          activeQuiz.questionsToDisplayCount < displayQuestions.length
+          activeQuiz.questionsToDisplayCount > 0
         );
 
         if (hasCategoryDist || hasGlobalSubset) {
