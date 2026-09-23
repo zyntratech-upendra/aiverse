@@ -1536,7 +1536,7 @@ export const ParticipantDashboardPage: React.FC = () => {
                           {/* Action Button Row */}
                           <div className="flex items-center justify-between flex-wrap gap-3 pt-1">
                             <span className="text-xs font-bold text-slate-500">
-                              {quiz.questions?.length || quiz.questionsCount || 0} Questions • {quiz.durationMinutes}m Allotted
+                              {(quiz.questionsToDisplayCount && quiz.questionsToDisplayCount > 0) ? quiz.questionsToDisplayCount : (quiz.questions?.length || quiz.questionsCount || 0)} Questions • {quiz.durationMinutes}m Allotted
                             </span>
 
                             {isSubmitted ? (

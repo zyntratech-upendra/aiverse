@@ -175,7 +175,7 @@ export const QuizCompletionPage: React.FC = () => {
       const filtered = allQuestions.filter(q => idSet.has(q.id));
       if (filtered.length > 0) return filtered;
     }
-    if (quiz?.questionsToDisplayCount && quiz.questionsToDisplayCount > 0 && quiz.questionsToDisplayCount < allQuestions.length) {
+    if (quiz?.questionsToDisplayCount && quiz.questionsToDisplayCount > 0) {
       const answeredKeys = Object.keys(overriddenData?.answers || submission?.answers || {});
       if (answeredKeys.length > 0) {
         const answeredSet = new Set(answeredKeys);
@@ -406,7 +406,7 @@ export const QuizCompletionPage: React.FC = () => {
                   <div className="bg-white p-2.5 rounded-xl border border-slate-200/60 shadow-2xs">
                     <span className="text-[10px] font-bold text-slate-400 block uppercase">Total Questions</span>
                     <span className="text-base font-black text-slate-700">
-                      {questions.length || quiz?.questionsCount || 0}
+                      {(quiz?.questionsToDisplayCount && quiz.questionsToDisplayCount > 0) ? quiz.questionsToDisplayCount : (questions.length || quiz?.questionsCount || 0)}
                     </span>
                   </div>
                 </>
