@@ -117,17 +117,25 @@ export const QuizTakingPage: React.FC = () => {
 
         if (hasCategoryDist || hasGlobalSubset) {
           let chosenIds = userSession.assignedQuestionIds || [];
-          let needsReassignment = !chosenIds || chosenIds.length === 0 || (activeQuiz.questionsToDisplayCount > 0 && chosenIds.length !== activeQuiz.questionsToDisplayCount);
+          const quotaEntries = Object.entries(activeQuiz.categoryDistribution || {})
+            .map(([cat, quota]) => [cat.trim().toLowerCase(), Number(quota)] as const)
+            .filter(([, quota]) => quota > 0);
+          const expectedCategoryCount = quotaEntries.reduce((total, [, quota]) => total + quota, 0);
+          const expectedQuestionCount = hasCategoryDist
+            ? expectedCategoryCount
+            : Number(activeQuiz.questionsToDisplayCount || 0);
+          let needsReassignment = !chosenIds || chosenIds.length === 0 ||
+            (expectedQuestionCount > 0 && chosenIds.length !== expectedQuestionCount);
 
           if (!needsReassignment && hasCategoryDist) {
             const qMap = new Map(displayQuestions.map(q => [q.id, q]));
             const catCounts: Record<string, number> = {};
             for (const id of chosenIds) {
               const qObj = qMap.get(id);
-              const c = (qObj && qObj.category && qObj.category.trim()) || "General";
+              const c = ((qObj && qObj.category && qObj.category.trim()) || "General").toLowerCase();
               catCounts[c] = (catCounts[c] || 0) + 1;
             }
-            for (const [cat, quota] of Object.entries(activeQuiz.categoryDistribution || {})) {
+            for (const [cat, quota] of quotaEntries) {
               const numQuota = Number(quota);
               if (numQuota > 0 && catCounts[cat] !== numQuota) {
                 needsReassignment = true;

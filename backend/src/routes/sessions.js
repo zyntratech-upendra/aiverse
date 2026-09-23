@@ -40,14 +40,18 @@ function selectSeededQuestionIds(questions = [], count = 0, seedStr = '', catego
   if (categoryDistribution && typeof categoryDistribution === 'object' && Object.keys(categoryDistribution).length > 0) {
     const questionsByCategory = {};
     for (const q of questions) {
-      const cat = (q.category && String(q.category).trim()) || 'General';
+      const cat = ((q.category && String(q.category).trim()) || 'General').toLowerCase();
       if (!questionsByCategory[cat]) questionsByCategory[cat] = [];
       questionsByCategory[cat].push(q);
     }
 
     let selectedQuestions = [];
+    const normalizedDistribution = Object.entries(categoryDistribution).reduce((result, [cat, quota]) => {
+      result[String(cat).trim().toLowerCase()] = quota;
+      return result;
+    }, {});
     for (const [cat, catQs] of Object.entries(questionsByCategory)) {
-      const quotaVal = categoryDistribution[cat];
+      const quotaVal = normalizedDistribution[cat.toLowerCase()];
       if (quotaVal !== undefined && quotaVal !== null && quotaVal !== '') {
         const quota = Number(quotaVal);
         if (quota > 0) {
@@ -103,10 +107,10 @@ router.post(
         const qMap = new Map((quiz.questions || []).map(q => [q.id, q]));
         for (const id of existingSession.assignedQuestionIds) {
           const qObj = qMap.get(id);
-          const c = (qObj && qObj.category && qObj.category.trim()) || 'General';
+          const c = ((qObj && qObj.category && qObj.category.trim()) || 'General').toLowerCase();
           catCounts[c] = (catCounts[c] || 0) + 1;
         }
-        for (const [cat, quota] of Object.entries(quiz.categoryDistribution)) {
+        for (const [cat, quota] of Object.entries(quiz.categoryDistribution).map(([key, value]) => [String(key).trim().toLowerCase(), value])) {
           const numQuota = Number(quota);
           if (numQuota > 0 && catCounts[cat] !== numQuota) {
             needsAssignment = true;

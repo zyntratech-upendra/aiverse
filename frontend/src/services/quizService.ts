@@ -416,14 +416,17 @@ export function selectSeededCategorizedQuestions<T extends { id: string; categor
   if (categoryDistribution && typeof categoryDistribution === 'object' && Object.keys(categoryDistribution).length > 0) {
     const questionsByCategory = new Map<string, T[]>();
     for (const q of questions) {
-      const cat = (q.category && String(q.category).trim()) || 'General';
+      const cat = ((q.category && String(q.category).trim()) || 'General').toLowerCase();
       if (!questionsByCategory.has(cat)) questionsByCategory.set(cat, []);
       questionsByCategory.get(cat)!.push(q);
     }
 
     let selectedQuestions: T[] = [];
+    const normalizedDistribution = new Map(
+      Object.entries(categoryDistribution).map(([cat, quota]) => [String(cat).trim().toLowerCase(), quota])
+    );
     for (const [cat, catQs] of questionsByCategory.entries()) {
-      const quotaVal = categoryDistribution[cat];
+      const quotaVal = normalizedDistribution.get(cat);
       if (quotaVal !== undefined && quotaVal !== null && (quotaVal as any) !== '') {
         const quota = Number(quotaVal);
         if (quota > 0) {
