@@ -55,9 +55,8 @@ function selectSeededQuestionIds(questions = [], count = 0, seedStr = '', catego
           selectedQuestions.push(...picked);
         }
         // quota === 0 means 0 questions from this category
-      } else {
-        selectedQuestions.push(...catQs);
       }
+      // If undefined, do NOT push anything. Missing categories should result in 0 questions.
     }
 
     // Keep questions separated category by category (do not mix across categories)

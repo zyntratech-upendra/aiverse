@@ -117,7 +117,7 @@ export const QuizTakingPage: React.FC = () => {
 
         if (hasCategoryDist || hasGlobalSubset) {
           let chosenIds = userSession.assignedQuestionIds || [];
-          let needsReassignment = !chosenIds || chosenIds.length === 0;
+          let needsReassignment = !chosenIds || chosenIds.length === 0 || (activeQuiz.questionsToDisplayCount > 0 && chosenIds.length !== activeQuiz.questionsToDisplayCount);
 
           if (!needsReassignment && hasCategoryDist) {
             const qMap = new Map(displayQuestions.map(q => [q.id, q]));

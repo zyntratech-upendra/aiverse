@@ -3106,7 +3106,7 @@ Answer: A`;
 
               <div className="pt-3 border-t border-slate-100 flex items-center justify-between shrink-0">
                 <span className="text-[11px] font-bold text-slate-400">
-                  Total Marks: <strong className="text-slate-800 font-black">{((editingQuiz.questions?.length || 0) * (editingQuiz.pointsPerQuestion || 2))}</strong>
+                  Total Marks: <strong className="text-slate-800 font-black">{editingQuiz.totalMarks || 0}</strong>
                 </span>
                 <button
                   onClick={() => {
