@@ -96,7 +96,9 @@ router.post(
     // Check if session already exists
     let existingSession = await QuizSession.findById(sessionId).lean();
     if (existingSession) {
-      const hasCategoryDist = quiz?.categoryDistribution && typeof quiz.categoryDistribution === 'object' && Object.values(quiz.categoryDistribution).some(v => Number(v) > 0);
+      const hasCategoryDist = quiz?.categoryDistribution && typeof quiz.categoryDistribution === 'object' &&
+        Object.keys(quiz.categoryDistribution).length > 0 &&
+        Object.values(quiz.categoryDistribution).some(v => Number(v) >= 0);
       const hasGlobalSubset = quiz?.questionsToDisplayCount > 0 && quiz?.questions && quiz.questions.length > quiz.questionsToDisplayCount;
 
       let needsAssignment = !existingSession.assignedQuestionIds || existingSession.assignedQuestionIds.length === 0;
@@ -121,10 +123,8 @@ router.post(
 
       if ((hasCategoryDist || hasGlobalSubset) && needsAssignment) {
         const assignedIds = selectSeededQuestionIds(quiz.questions || [], quiz.questionsToDisplayCount, sessionId, quiz.categoryDistribution);
-        if (assignedIds.length > 0) {
-          await QuizSession.updateOne({ _id: sessionId }, { $set: { assignedQuestionIds: assignedIds } });
-          existingSession.assignedQuestionIds = assignedIds;
-        }
+        await QuizSession.updateOne({ _id: sessionId }, { $set: { assignedQuestionIds: assignedIds } });
+        existingSession.assignedQuestionIds = assignedIds;
       }
       return res.json({ ...existingSession, id: existingSession._id });
     }
@@ -139,7 +139,9 @@ router.post(
 
     // Select random subset of questions if quiz has categoryDistribution or questionsToDisplayCount configured
     let assignedQuestionIds = [];
-    const hasCategoryDist = quiz && quiz.categoryDistribution && typeof quiz.categoryDistribution === 'object' && Object.values(quiz.categoryDistribution).some(v => Number(v) > 0);
+    const hasCategoryDist = quiz && quiz.categoryDistribution && typeof quiz.categoryDistribution === 'object' &&
+      Object.keys(quiz.categoryDistribution).length > 0 &&
+      Object.values(quiz.categoryDistribution).some(v => Number(v) >= 0);
     const hasGlobalSubset = quiz && quiz.questionsToDisplayCount > 0 && quiz.questions && quiz.questions.length > quiz.questionsToDisplayCount;
 
     if (hasCategoryDist || hasGlobalSubset) {
