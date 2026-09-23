@@ -1,9 +1,10 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import { useParams, useLocation, Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import type { Quiz, QuizSubmission } from "../../types/quiz";
 import { getDeterministicSessionId, evaluateQuizAnswers, getQuizById } from "../../services/quizService";
-import { fetchSubmission } from "../../services/apiClient";
+import { fetchSubmission, fetchRegistrations, fetchRegistrationById } from "../../services/apiClient";
+import { dataCache } from "../../utils/dataCache";
 import SEO from "../../components/layout/SEO";
 import { 
   CheckCircle2, 
@@ -33,6 +34,57 @@ export const QuizCompletionPage: React.FC = () => {
   const [quiz, setQuiz] = useState<Quiz | null>(null);
   const [showReview, setShowReview] = useState<boolean>(true);
 
+  // Participant Registration lookup for accurate team lead & team display
+  const [participantReg, setParticipantReg] = useState<any>(() => {
+    const cleanEmail = user?.email?.toLowerCase().trim() || "";
+    return dataCache.get<any>(`participant_reg_${cleanEmail || user?.uid || "guest"}`) || null;
+  });
+
+  useEffect(() => {
+    if (participantReg || !user) return;
+    let isMounted = true;
+    const loadReg = async () => {
+      try {
+        const cleanEmail = user.email?.toLowerCase().trim() || "";
+        const cached = dataCache.get<any>(`participant_reg_${cleanEmail || user.uid || "guest"}`);
+        if (cached) {
+          if (isMounted) setParticipantReg(cached);
+          return;
+        }
+        if (user.registrationId) {
+          const reg = await fetchRegistrationById(user.registrationId).catch(() => null);
+          if (reg && isMounted) {
+            setParticipantReg(reg);
+            dataCache.set(`participant_reg_${cleanEmail || user.uid || "guest"}`, reg);
+            return;
+          }
+        }
+        const regs = await fetchRegistrations().catch(() => []);
+        if (Array.isArray(regs) && isMounted) {
+          const match = regs.find((r: any) => {
+            if (user.registrationId && (r.id === user.registrationId || r._id === user.registrationId)) return true;
+            if (cleanEmail && (
+              r.email?.toLowerCase().trim() === cleanEmail ||
+              r.teamEmail?.toLowerCase().trim() === cleanEmail ||
+              r.teamLeadEmail?.toLowerCase().trim() === cleanEmail ||
+              r.userEmail?.toLowerCase().trim() === cleanEmail ||
+              (Array.isArray(r.members) && r.members.some((m: any) => m.email?.toLowerCase().trim() === cleanEmail))
+            )) return true;
+            return false;
+          });
+          if (match) {
+            setParticipantReg(match);
+            dataCache.set(`participant_reg_${cleanEmail || user.uid || "guest"}`, match);
+          }
+        }
+      } catch (e) {
+        console.warn("Could not load registration in QuizCompletionPage:", e);
+      }
+    };
+    loadReg();
+    return () => { isMounted = false; };
+  }, [user, participantReg]);
+
   // Fetch Quiz & Submission details with automatic score backfill
   useEffect(() => {
     if (!quizId) return;
@@ -57,7 +109,7 @@ export const QuizCompletionPage: React.FC = () => {
 
         // 3. Auto-evaluate score if missing
         if (currentSub && (currentSub.score === undefined || currentSub.score === null) && loadedQuiz) {
-          const evalData = evaluateQuizAnswers(loadedQuiz, currentSub.answers || {});
+          const evalData = evaluateQuizAnswers(loadedQuiz, currentSub.answers || {}, currentSub.assignedQuestionIds);
           const updatedSub: QuizSubmission = {
             ...currentSub,
             ...evalData,
@@ -115,8 +167,43 @@ export const QuizCompletionPage: React.FC = () => {
   const correctCount = overriddenData?.correctCount ?? submission?.correctCount;
   const incorrectCount = overriddenData?.incorrectCount ?? submission?.incorrectCount;
   
-  const questions = quiz?.questions || [];
+  const allQuestions = quiz?.questions || [];
+  const assignedIds = submission?.assignedQuestionIds || [];
+  const questions = useMemo(() => {
+    if (assignedIds.length > 0) {
+      const idSet = new Set(assignedIds);
+      const filtered = allQuestions.filter(q => idSet.has(q.id));
+      if (filtered.length > 0) return filtered;
+    }
+    if (quiz?.questionsToDisplayCount && quiz.questionsToDisplayCount > 0 && quiz.questionsToDisplayCount < allQuestions.length) {
+      const answeredKeys = Object.keys(overriddenData?.answers || submission?.answers || {});
+      if (answeredKeys.length > 0) {
+        const answeredSet = new Set(answeredKeys);
+        const filtered = allQuestions.filter(q => answeredSet.has(q.id));
+        if (filtered.length > 0) return filtered;
+      }
+    }
+    return allQuestions;
+  }, [allQuestions, assignedIds, overriddenData?.answers, submission?.answers, quiz?.questionsToDisplayCount]);
   const answers = overriddenData?.answers || submission?.answers || {};
+
+  const displayLeadName =
+    (submission as any)?.teamLeadName ||
+    participantReg?.teamLeadName ||
+    participantReg?.fullName ||
+    participantReg?.userName ||
+    participantReg?.name ||
+    (user?.role === "participant" && user?.name && user.name !== "Dr. P. S. R. Murty" ? user.name : null) ||
+    (submission?.userName && submission.userName !== "Dr. P. S. R. Murty" && submission.userName !== "Participant" ? submission.userName : null) ||
+    "Team Lead";
+
+  const displayTeamName =
+    submission?.teamName ||
+    participantReg?.teamName ||
+    participantReg?.groupName ||
+    participantReg?.team_name ||
+    user?.teamName ||
+    "";
 
   return (
     <div className="min-h-screen bg-[#F4F7FC] flex flex-col font-sans text-slate-800 antialiased selection:bg-blue-500/20 selection:text-blue-600">
@@ -274,9 +361,16 @@ export const QuizCompletionPage: React.FC = () => {
             </div>
 
             <div className="flex items-center justify-between pb-3 border-b border-slate-200/70">
-              <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Participant</span>
-              <span className="font-bold text-[#0F172A]">{submission?.userName || user?.name || user?.email}</span>
+              <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Team Lead</span>
+              <span className="font-bold text-[#0F172A]">{displayLeadName}</span>
             </div>
+
+            {displayTeamName && (
+              <div className="flex items-center justify-between pb-3 border-b border-slate-200/70">
+                <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Team Name</span>
+                <span className="font-bold text-blue-600">{displayTeamName}</span>
+              </div>
+            )}
 
             <div className="flex items-center justify-between pb-3 border-b border-slate-200/70">
               <span className="text-slate-400 font-bold uppercase tracking-wider text-[10px]">Submission ID</span>

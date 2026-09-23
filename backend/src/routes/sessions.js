@@ -5,8 +5,71 @@ const Quiz = require('../models/Quiz');
 const QuizSession = require('../models/QuizSession');
 const QuizSubmission = require('../models/QuizSubmission');
 const QuizAnswer = require('../models/QuizAnswer');
+const Registration = require('../models/Registration');
 const { requireAuth, optionalAuth, ensureSessionOwnership } = require('../middleware/auth');
 const { asyncHandler } = require('../middleware/errorHandler');
+
+// Helper: Mulberry32 seeded shuffle
+function seededShuffle(items = [], seedStr = '') {
+  let seed = 0;
+  const str = String(seedStr || 'aiverse_quiz_seed');
+  for (let i = 0; i < str.length; i++) {
+    seed = (seed * 31 + str.charCodeAt(i)) >>> 0;
+  }
+
+  const random = () => {
+    let t = (seed += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+
+  const shuffled = [...items];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+  return shuffled;
+}
+
+// Helper: Category-aware or global seeded deterministic question picker
+function selectSeededQuestionIds(questions = [], count = 0, seedStr = '', categoryDistribution = null) {
+  if (!Array.isArray(questions) || questions.length === 0) return [];
+
+  // 1. Category-wise quota distribution
+  if (categoryDistribution && typeof categoryDistribution === 'object' && Object.keys(categoryDistribution).length > 0) {
+    const questionsByCategory = {};
+    for (const q of questions) {
+      const cat = (q.category && String(q.category).trim()) || 'General';
+      if (!questionsByCategory[cat]) questionsByCategory[cat] = [];
+      questionsByCategory[cat].push(q);
+    }
+
+    let selectedQuestions = [];
+    for (const [cat, catQs] of Object.entries(questionsByCategory)) {
+      const quotaVal = categoryDistribution[cat];
+      if (quotaVal !== undefined && quotaVal !== null && quotaVal !== '') {
+        const quota = Number(quotaVal);
+        if (quota > 0) {
+          const picked = seededShuffle(catQs, `${seedStr}_cat_${cat}`).slice(0, Math.min(quota, catQs.length));
+          selectedQuestions.push(...picked);
+        }
+        // quota === 0 means 0 questions from this category
+      } else {
+        selectedQuestions.push(...catQs);
+      }
+    }
+
+    // Keep questions separated category by category (do not mix across categories)
+    return selectedQuestions.map((q) => q.id);
+  }
+
+  // 2. Global count fallback
+  if (count <= 0 || count >= questions.length) {
+    return questions.map((q) => q.id);
+  }
+  return seededShuffle(questions, seedStr).slice(0, count).map((q) => q.id);
+}
 
 // POST /api/quizzes/:quizId/sessions -> create or restore authoritative session
 router.post(
@@ -24,20 +87,60 @@ router.post(
     const sessionId = `${quizId.trim()}_${user.uid.trim()}`;
     const now = Date.now();
 
+    // Fetch quiz to determine authoritative duration, end time, and random question pool
+    const quiz = await Quiz.findById(quizId).lean();
+
     // Check if session already exists
     let existingSession = await QuizSession.findById(sessionId).lean();
     if (existingSession) {
+      const hasCategoryDist = quiz?.categoryDistribution && typeof quiz.categoryDistribution === 'object' && Object.values(quiz.categoryDistribution).some(v => Number(v) > 0);
+      const hasGlobalSubset = quiz?.questionsToDisplayCount > 0 && quiz?.questions && quiz.questions.length > quiz.questionsToDisplayCount;
+
+      let needsAssignment = !existingSession.assignedQuestionIds || existingSession.assignedQuestionIds.length === 0;
+
+      // Validate that existing assignments match current category quotas
+      if (!needsAssignment && hasCategoryDist && existingSession.status === 'in_progress') {
+        const catCounts = {};
+        const qMap = new Map((quiz.questions || []).map(q => [q.id, q]));
+        for (const id of existingSession.assignedQuestionIds) {
+          const qObj = qMap.get(id);
+          const c = (qObj && qObj.category && qObj.category.trim()) || 'General';
+          catCounts[c] = (catCounts[c] || 0) + 1;
+        }
+        for (const [cat, quota] of Object.entries(quiz.categoryDistribution)) {
+          const numQuota = Number(quota);
+          if (numQuota > 0 && catCounts[cat] !== numQuota) {
+            needsAssignment = true;
+            break;
+          }
+        }
+      }
+
+      if ((hasCategoryDist || hasGlobalSubset) && needsAssignment) {
+        const assignedIds = selectSeededQuestionIds(quiz.questions || [], quiz.questionsToDisplayCount, sessionId, quiz.categoryDistribution);
+        if (assignedIds.length > 0) {
+          await QuizSession.updateOne({ _id: sessionId }, { $set: { assignedQuestionIds: assignedIds } });
+          existingSession.assignedQuestionIds = assignedIds;
+        }
+      }
       return res.json({ ...existingSession, id: existingSession._id });
     }
 
-    // Fetch quiz to determine authoritative duration and end time
-    const quiz = await Quiz.findById(quizId).lean();
     const durationMinutes = (quiz && quiz.durationMinutes) || 30;
     const durationMs = durationMinutes * 60 * 1000;
     let authoritativeEndTime = now + durationMs;
 
     if (quiz && quiz.scheduledEndTime && quiz.scheduledEndTime > now) {
       authoritativeEndTime = Math.min(authoritativeEndTime, quiz.scheduledEndTime);
+    }
+
+    // Select random subset of questions if quiz has categoryDistribution or questionsToDisplayCount configured
+    let assignedQuestionIds = [];
+    const hasCategoryDist = quiz && quiz.categoryDistribution && typeof quiz.categoryDistribution === 'object' && Object.values(quiz.categoryDistribution).some(v => Number(v) > 0);
+    const hasGlobalSubset = quiz && quiz.questionsToDisplayCount > 0 && quiz.questions && quiz.questions.length > quiz.questionsToDisplayCount;
+
+    if (hasCategoryDist || hasGlobalSubset) {
+      assignedQuestionIds = selectSeededQuestionIds(quiz.questions || [], quiz.questionsToDisplayCount, sessionId, quiz.categoryDistribution);
     }
 
     const sessionPayload = {
@@ -56,6 +159,7 @@ router.post(
       lastAutosavedAt: now,
       violationsCount: 0,
       violationLogs: [],
+      assignedQuestionIds,
       createdAt: now,
       updatedAt: now,
     };
@@ -128,9 +232,24 @@ router.post(
 );
 
 // Evaluation helper function
-function evaluateQuiz(quiz, answers = {}) {
-  const questions = (quiz && quiz.questions) || [];
+function evaluateQuiz(quiz, answers = {}, assignedQuestionIds = null) {
+  let questions = (quiz && quiz.questions) || [];
   const defaultPts = Number(quiz && quiz.pointsPerQuestion) || 2;
+
+  if (Array.isArray(assignedQuestionIds) && assignedQuestionIds.length > 0) {
+    const idSet = new Set(assignedQuestionIds);
+    questions = questions.filter((q) => idSet.has(q.id));
+  } else if (quiz && quiz.questionsToDisplayCount > 0 && quiz.questionsToDisplayCount < questions.length) {
+    const answeredKeys = Object.keys(answers || {});
+    if (answeredKeys.length > 0) {
+      const answeredSet = new Set(answeredKeys);
+      const answeredQuestions = questions.filter((q) => answeredSet.has(q.id));
+      if (answeredQuestions.length > 0) {
+        questions = answeredQuestions;
+      }
+    }
+  }
+
   let score = 0;
   let maxScore = 0;
   let correctCount = 0;
@@ -139,7 +258,7 @@ function evaluateQuiz(quiz, answers = {}) {
 
   if (questions.length === 0) {
     const answered = Object.keys(answers).filter((k) => !!answers[k]).length;
-    const totalQ = (quiz && quiz.questionsCount) || answered;
+    const totalQ = (quiz && (quiz.questionsToDisplayCount || quiz.questionsCount)) || answered;
     const max = (quiz && quiz.totalMarks) || totalQ * defaultPts || 50;
     return {
       score: 0,
@@ -214,11 +333,50 @@ router.post(
     const quizId = sess ? sess.quizId : sessionId.split('_')[0];
     const quiz = await Quiz.findById(quizId).lean();
     const now = Date.now();
-    const evalResult = evaluateQuiz(quiz, answers);
+    const evalResult = evaluateQuiz(quiz, answers, sess?.assignedQuestionIds);
 
-    const totalQuestions = (quiz && quiz.questions && quiz.questions.length) || Object.keys(answers).length;
+    const totalQuestions = (sess?.assignedQuestionIds && sess.assignedQuestionIds.length > 0)
+      ? sess.assignedQuestionIds.length
+      : (quiz && quiz.questionsToDisplayCount > 0 && quiz.questionsToDisplayCount < (quiz.questions?.length || 0))
+        ? quiz.questionsToDisplayCount
+        : ((quiz && quiz.questions && quiz.questions.length) || Object.keys(answers).length);
     const answeredCount = Object.keys(answers).filter((k) => !!answers[k]).length;
     const timeSpentSeconds = Math.max(1, Math.floor((now - (sess?.startTime || now)) / 1000));
+
+    // Authoritative lookup for registered participant & team details
+    const cleanEmail = ((sess && sess.userEmail) || (req.user && req.user.email) || '').toLowerCase().trim();
+    let regDoc = null;
+    if (cleanEmail) {
+      regDoc = await Registration.findOne({
+        $or: [
+          { email: cleanEmail },
+          { userEmail: cleanEmail },
+          { teamEmail: cleanEmail },
+          { teamLeadEmail: cleanEmail },
+          { 'members.email': cleanEmail },
+        ],
+      }).lean();
+    }
+
+    const resolvedLeadName =
+      regDoc?.teamLeadName ||
+      regDoc?.fullName ||
+      regDoc?.userName ||
+      regDoc?.name ||
+      (sess && sess.teamLeadName) ||
+      '';
+
+    const resolvedTeamName =
+      regDoc?.teamName ||
+      regDoc?.groupName ||
+      (sess && sess.teamName) ||
+      (resolvedLeadName ? `${resolvedLeadName}'s Team` : '');
+
+    const finalUserName =
+      resolvedLeadName ||
+      (sess && sess.userName && sess.userName !== 'Dr. P. S. R. Murty' ? sess.userName : null) ||
+      (req.user && req.user.role === 'participant' && req.user.name && req.user.name !== 'Dr. P. S. R. Murty' ? req.user.name : null) ||
+      'Participant';
 
     const submissionPayload = {
       _id: sessionId,
@@ -226,10 +384,12 @@ router.post(
       quizId: quizId,
       quizTitle: (sess && sess.quizTitle) || (quiz && quiz.title) || 'Quiz',
       userId: (sess && sess.userId) || sessionId.split('_')[1] || 'participant',
-      userEmail: (sess && sess.userEmail) || '',
-      userName: (sess && sess.userName) || 'Participant',
-      teamId: (sess && sess.teamId) || '',
-      teamName: (sess && sess.teamName) || '',
+      userEmail: (sess && sess.userEmail) || (req.user && req.user.email) || '',
+      userName: finalUserName,
+      teamLeadName: resolvedLeadName,
+      teamId: (sess && sess.teamId) || (regDoc ? String(regDoc._id) : ''),
+      teamName: resolvedTeamName,
+      assignedQuestionIds: sess?.assignedQuestionIds || [],
       answers,
       answeredCount,
       unansweredCount: evalResult.unansweredCount,
@@ -273,10 +433,32 @@ router.get(
   optionalAuth,
   asyncHandler(async (req, res) => {
     const { sessionId } = req.params;
-    const submission = await QuizSubmission.findById(sessionId).lean();
+    let submission = await QuizSubmission.findById(sessionId).lean();
     if (!submission) {
       return res.json(null); // Prevent 404 console error on frontend
     }
+
+    // Ensure teamLeadName and teamName are accurately populated from registration
+    const email = (submission.userEmail || (req.user && req.user.email) || '').toLowerCase().trim();
+    if (email) {
+      const reg = await Registration.findOne({
+        $or: [
+          { email },
+          { userEmail: email },
+          { teamEmail: email },
+          { teamLeadEmail: email },
+          { 'members.email': email },
+        ],
+      }).lean();
+      if (reg) {
+        submission.teamLeadName = reg.teamLeadName || reg.fullName || reg.userName || reg.name || submission.teamLeadName || '';
+        submission.teamName = reg.teamName || reg.groupName || submission.teamName || '';
+        if (submission.teamLeadName && (submission.userName === 'Dr. P. S. R. Murty' || submission.userName === 'Participant')) {
+          submission.userName = submission.teamLeadName;
+        }
+      }
+    }
+
     res.json({ ...submission, id: submission._id });
   })
 );

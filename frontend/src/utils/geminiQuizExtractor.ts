@@ -1,5 +1,5 @@
 import type { QuizQuestion } from "../types/quiz";
-import { parseQuestionsFromText } from "./pdfExtractor";
+import { parseQuestionsFromText, formatPseudocodeText } from "./pdfExtractor";
 
 const GEMINI_API_KEY = import.meta.env.VITE_GEMINI_API_KEY || "";
 
@@ -53,7 +53,7 @@ TASK:
 1. Extract ALL multiple choice questions (MCQs) present in the text without skipping any.
 2. For each question, extract:
    - "questionNumber": sequential integer starting from 1
-   - "text": the complete question text (without the leading number)
+   - "text": the complete question text (without the leading number). CRITICAL: If the question contains code, pseudocode, or algorithms, preserve all code line breaks (\\n) and proper code indentation! Do not squash code onto a single line.
    - "points": points for this question (default 2 if not stated)
    - "category": "${targetCategory}"
    - "options": exactly 4 option objects with IDs "opt_a", "opt_b", "opt_c", "opt_d" and their respective text
@@ -154,7 +154,7 @@ ${rawText}
           return {
             id: `q_${Date.now()}_${qNum}_${Math.random().toString(36).substr(2, 4)}`,
             questionNumber: qNum,
-            text: (item.text || "").trim(),
+            text: formatPseudocodeText((item.text || "").trim()),
             points: item.points || 2,
             category: item.category || targetCategory || "General",
             options: normalizedOptions,

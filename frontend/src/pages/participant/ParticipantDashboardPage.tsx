@@ -111,10 +111,23 @@ export const ParticipantDashboardPage: React.FC = () => {
 
     const currentEventTitle = targetReg.eventTitle || "Hackathon";
     setTargetRegId(targetReg.id || "");
-    setTeamName(targetReg.groupName || user?.teamName || (isQuiz ? "Individual Registration" : "My Team"));
+    const resolvedTeam = 
+      targetReg.teamName || 
+      targetReg.groupName || 
+      targetReg.team_name || 
+      user?.teamName || 
+      (isQuiz ? "Individual Registration" : "My Team");
+    setTeamName(resolvedTeam);
     setEventTitle(currentEventTitle);
     setTeamId(targetReg.id ? `AI-${targetReg.id.substring(0, 4).toUpperCase()}-${targetReg.id.substring(4, 7).toUpperCase()}` : "AI-REG-001");
-    setLeaderName(targetReg.teamLeadName || targetReg.fullName || targetReg.name || user?.name || "Participant");
+    const resolvedLeader = 
+      targetReg.teamLeadName || 
+      targetReg.fullName || 
+      targetReg.userName || 
+      targetReg.name || 
+      (user?.role === "participant" ? user?.name : "") || 
+      "Participant";
+    setLeaderName(resolvedLeader);
 
     // Members
     const regMembers = Array.isArray(targetReg.members) ? targetReg.members : [];
@@ -416,10 +429,11 @@ export const ParticipantDashboardPage: React.FC = () => {
             setIsQuizParticipant(true);
             setActiveTab("quizzes");
           }
-          setTeamName(user?.teamName || (user?.name ? `${user.name}'s Team` : "My Team"));
+          const fallbackTeam = user?.teamName || (user?.role === "participant" && user?.name ? `${user.name}'s Team` : "My Team");
+          setTeamName(fallbackTeam);
           setEventTitle("General Track");
           setTeamId(user?.uid ? `AI-${user.uid.substring(0, 4).toUpperCase()}-${user.uid.substring(4, 7).toUpperCase()}` : "AI-REG");
-          setLeaderName(user?.name || "Participant");
+          setLeaderName((user?.role === "participant" ? user?.name : "") || "Participant");
         }
       } catch (err) {
         console.error("Error fetching participant dashboard data:", err);
@@ -646,12 +660,16 @@ export const ParticipantDashboardPage: React.FC = () => {
           {/* User Profile Card */}
           <div className="flex items-center gap-3 px-3 py-2.5 bg-slate-50/90 border border-slate-200/80 rounded-2xl shadow-2xs">
             <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-600 to-indigo-600 text-white font-bold flex items-center justify-center text-xs shadow-sm shadow-blue-500/20 ring-1 ring-white">
-              {getInitials(leaderName || user?.name || "P")}
+              {getInitials(teamName || user?.teamName || leaderName || "T")}
             </div>
             <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-slate-900 truncate">{leaderName || user?.name || "Participant"}</p>
+              <p className="text-sm font-bold text-slate-900 truncate" title={teamName || user?.teamName || "My Team"}>
+                {teamName || user?.teamName || (leaderName && leaderName !== "Participant" ? `${leaderName}'s Team` : "My Team")}
+              </p>
               <p className="text-[11px] text-slate-500 font-medium truncate">
-                {isQuizParticipant ? "Quiz Participant" : "Team Participant"}
+                {leaderName && leaderName !== "Participant" && leaderName !== teamName
+                  ? `Lead: ${leaderName}`
+                  : (isQuizParticipant ? "Quiz Participant" : "Team Participant")}
               </p>
             </div>
           </div>
@@ -752,7 +770,7 @@ export const ParticipantDashboardPage: React.FC = () => {
                   </div>
 
                   <h1 className="text-2xl sm:text-3xl font-black text-[#0F172A] tracking-tight">
-                    Welcome back, {teamName || user?.teamName || leaderName || user?.name || "Participant"}! 👋
+                    Welcome back, {teamName || user?.teamName || (leaderName && leaderName !== "Participant" ? `${leaderName}'s Team` : "Participant")}! 👋
                   </h1>
                   <p className="text-xs sm:text-sm text-slate-500 font-medium max-w-xl">
                     Here is your live competition status, assigned assessments, and project deliverables for <span className="font-bold text-slate-700">{eventTitle}</span>.
@@ -1272,7 +1290,7 @@ export const ParticipantDashboardPage: React.FC = () => {
                       )}
                     </div>
                     <h1 className="text-xl sm:text-2xl font-black text-[#0F172A] tracking-tight">
-                      Welcome, {leaderName || user?.name || "Participant"}! 👋
+                      Welcome, {teamName || user?.teamName || (leaderName && leaderName !== "Participant" ? `${leaderName}'s Team` : "Participant")}! 👋
                     </h1>
                     <p className="text-xs sm:text-sm text-slate-500 font-medium">
                       All quizzes and assessments assigned to you are listed below. Click Start / Take Exam when the test goes live.

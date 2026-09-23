@@ -1,39 +1,58 @@
+export const PROD_API_BASE = 'https://aiversevitb.in/api';
+
 export const getApiBase = (): string => {
-  if (import.meta.env.VITE_API_BASE) {
-    return (import.meta.env.VITE_API_BASE as string).replace(/\/+$/, '');
-  }
   if (typeof window !== 'undefined') {
-    if (window.location.hostname !== 'localhost' && window.location.hostname !== '127.0.0.1') {
+    const host = window.location.hostname;
+    if (host !== 'localhost' && host !== '127.0.0.1') {
       return `${window.location.origin}/api`;
     }
   }
+
+  if (import.meta.env.VITE_API_BASE) {
+    const envBase = (import.meta.env.VITE_API_BASE as string).replace(/\/+$/, '');
+    if (typeof window === 'undefined' || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || !envBase.includes('localhost')) {
+      return envBase;
+    }
+  }
+
   return 'http://localhost:4000/api';
 };
 
 export const API_BASE = getApiBase();
 
-// Retry helper for transient network/backend failures
+// Retry helper for transient network/backend failures with automatic cloud failover
 async function fetchWithRetry(url: string, options: RequestInit, retries = 2, delayMs = 1000): Promise<Response> {
+  let currentUrl = url;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
-      const res = await fetch(url, options);
+      const res = await fetch(currentUrl, options);
       if (res.ok || res.status < 500) return res; // Don't retry client errors (4xx)
       if (attempt < retries) {
-        console.warn(`[apiClient] Server error ${res.status} on ${url}, retrying (${attempt + 1}/${retries})...`);
+        console.warn(`[apiClient] Server error ${res.status} on ${currentUrl}, retrying (${attempt + 1}/${retries})...`);
         await new Promise(r => setTimeout(r, delayMs * (attempt + 1)));
       } else {
         return res;
       }
     } catch (err) {
+      // If local server is not running or network failed, failover to live production backend
+      if (currentUrl.includes('localhost:4000/api')) {
+        currentUrl = currentUrl.replace('http://localhost:4000/api', PROD_API_BASE);
+        console.warn(`[apiClient] Local backend unreachable. Failing over to live production backend: ${currentUrl}`);
+        try {
+          const fallbackRes = await fetch(currentUrl, options);
+          if (fallbackRes.ok || fallbackRes.status < 500) return fallbackRes;
+        } catch {}
+      }
+
       if (attempt < retries) {
-        console.warn(`[apiClient] Network error on ${url}, retrying (${attempt + 1}/${retries})...`, (err as Error).message);
+        console.warn(`[apiClient] Network error on ${currentUrl}, retrying (${attempt + 1}/${retries})...`, (err as Error).message);
         await new Promise(r => setTimeout(r, delayMs * (attempt + 1)));
       } else {
         throw err;
       }
     }
   }
-  throw new Error(`Failed after ${retries} retries: ${url}`);
+  throw new Error(`Failed after ${retries} retries: ${currentUrl}`);
 }
 // In-memory client cache with TTL to eliminate redundant network fetches and accelerate page rendering
 const apiMemoryCache = new Map<string, { data: any; expiresAt: number }>();

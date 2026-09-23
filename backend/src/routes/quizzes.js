@@ -9,18 +9,35 @@ const { optionalAuth, requireAuth, requireAdmin } = require('../middleware/auth'
 const { asyncHandler } = require('../middleware/errorHandler');
 const { pick } = require('../utils/sanitize');
 
+// In-memory cache for ultra-fast quiz listing (0ms responses)
+const quizListCache = new Map();
+const QUIZ_CACHE_TTL = 15000; // 15 seconds
+
+function clearQuizCache() {
+  quizListCache.clear();
+}
+
 // GET /api/quizzes - List quizzes
 router.get(
   '/',
   asyncHandler(async (req, res) => {
     const { eventId, status, track } = req.query;
+    const cacheKey = `${eventId || ''}_${status || ''}_${track || ''}`;
+    const cached = quizListCache.get(cacheKey);
+    const now = Date.now();
+    if (cached && now - cached.timestamp < QUIZ_CACHE_TTL) {
+      return res.json(cached.data);
+    }
+
     const filter = {};
     if (eventId) filter.eventId = eventId;
     if (status) filter.status = status;
     if (track) filter.track = track;
 
     const quizzes = await Quiz.find(filter).sort({ createdAt: -1 }).lean();
-    res.json(quizzes.map((q) => ({ ...q, id: q._id })));
+    const result = quizzes.map((q) => ({ ...q, id: q._id }));
+    quizListCache.set(cacheKey, { timestamp: now, data: result });
+    res.json(result);
   })
 );
 
@@ -180,6 +197,8 @@ router.post(
       'passingPercentage',
       'resultsPublished',
       'questionsCount',
+      'questionsToDisplayCount',
+      'categoryDistribution',
       'shuffleQuestions',
       'shuffleOptions',
       'randomizeQuestions',
@@ -207,6 +226,7 @@ router.post(
     });
 
     const saved = await newQuiz.save();
+    clearQuizCache();
     res.status(201).json({ success: true, quiz: { ...saved.toObject(), id: saved._id } });
   })
 );
@@ -239,6 +259,8 @@ router.put(
       'passingPercentage',
       'resultsPublished',
       'questionsCount',
+      'questionsToDisplayCount',
+      'categoryDistribution',
       'shuffleQuestions',
       'shuffleOptions',
       'randomizeQuestions',
@@ -261,6 +283,7 @@ router.put(
       return res.status(404).json({ success: false, error: 'Quiz not found' });
     }
 
+    clearQuizCache();
     res.json({ success: true, quiz: { ...updated, id: updated._id } });
   })
 );
@@ -277,6 +300,7 @@ router.delete(
     await QuizAnswer.deleteMany({ quizId });
     await QuizSubmission.deleteMany({ quizId });
 
+    clearQuizCache();
     res.json({ success: true, message: `Quiz ${quizId} and related data deleted successfully` });
   })
 );

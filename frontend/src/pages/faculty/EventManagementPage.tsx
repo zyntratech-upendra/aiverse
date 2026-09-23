@@ -2559,15 +2559,8 @@ const EventManagementPage: React.FC = () => {
           isPsLocked: false
         };
 
-        // 1. Primary MongoDB update
+        // Primary MongoDB update
         await updateRegistration(regId, updatePayload);
-
-        // 2. Dual Firestore sync for realtime listeners
-        try {
-          await setDoc(doc(db, "registrations", regId), updatePayload, { merge: true });
-        } catch (e) {
-          console.warn("Firestore sync missed for regId:", regId, e);
-        }
       });
 
       // Handle unselected elimination if checked
@@ -2584,9 +2577,6 @@ const EventManagementPage: React.FC = () => {
             updatedAt: now
           };
           await updateRegistration(t.id, elimPayload);
-          try {
-            await setDoc(doc(db, "registrations", t.id), elimPayload, { merge: true });
-          } catch (e) {}
         });
       }
 
@@ -2892,50 +2882,20 @@ const EventManagementPage: React.FC = () => {
 
     try {
       const allIds: string[] = [];
-      const firestoreRegUpdates: Array<{ id: string; data: any }> = [];
       const now = Date.now();
-
       // 1. Prepare all confirmed records synchronously in memory
       for (const reg of confirmedTeams) {
         allIds.push(reg.id);
-
-        // Registration doc update in Firestore
-        firestoreRegUpdates.push({
-          id: reg.id,
-          data: {
-            accessGranted: true,
-            loginAccessGranted: true,
-            accessProvisionedAt: now,
-          }
-        });
       }
 
-      // 2. High-speed Firestore Batch Commits (400 items per batch)
-      const commitBatches = async (collectionName: string, items: Array<{ id: string; data: any }>) => {
-        for (let i = 0; i < items.length; i += 400) {
-          const chunk = items.slice(i, i + 400);
-          try {
-            const batch = writeBatch(db);
-            for (const item of chunk) {
-              const docRef = doc(db, collectionName, item.id);
-              batch.set(docRef, item.data, { merge: true });
-            }
-            await batch.commit();
-          } catch {
-            // Gracefully continue without throwing permission alerts
-          }
-        }
-      };
-
-      // Execute all Firestore batch writes concurrently
-      await Promise.allSettled([
-        commitBatches("registrations", firestoreRegUpdates),
-        ...confirmedTeams.map(reg => updateRegistration(reg.id, {
+      // Execute all registration updates concurrently
+      await Promise.allSettled(
+        confirmedTeams.map(reg => updateRegistration(reg.id, {
           accessGranted: true,
           loginAccessGranted: true,
           accessProvisionedAt: now
         }).catch(() => null))
-      ]);
+      );
 
       if (eventAccessEvent?.id) {
         try {
@@ -2981,7 +2941,6 @@ const EventManagementPage: React.FC = () => {
     setIsProvisioningLoginAccess(true);
     try {
       const now = Date.now();
-      const firestoreRegUpdates: Array<{ id: string; data: any }> = [];
       const supaEmailsToDelete: string[] = [];
 
       const isQuiz = Boolean(
@@ -2991,46 +2950,19 @@ const EventManagementPage: React.FC = () => {
       );
 
       for (const reg of eventAccessRegistrations) {
-        firestoreRegUpdates.push({
-          id: reg.id,
-          data: {
-            accessGranted: false,
-            loginAccessGranted: false,
-            accessRevokedAt: now,
-          }
-        });
-
         const supaEmails = isQuiz
           ? [reg.personalEmail, reg.email, reg.collegeEmail].filter(Boolean)
           : [reg.teamEmail || generateTeamEmail(reg)].filter(Boolean);
         supaEmailsToDelete.push(...supaEmails);
       }
 
-      // High-speed Batched Firestore Commits
-      const commitBatches = async (collectionName: string, items: Array<{ id: string; data: any }>) => {
-        for (let i = 0; i < items.length; i += 400) {
-          const chunk = items.slice(i, i + 400);
-          try {
-            const batch = writeBatch(db);
-            for (const item of chunk) {
-              const docRef = doc(db, collectionName, item.id);
-              batch.set(docRef, item.data, { merge: true });
-            }
-            await batch.commit();
-          } catch {
-            // Gracefully handle permission notices
-          }
-        }
-      };
-
-      await Promise.allSettled([
-        commitBatches("registrations", firestoreRegUpdates),
-        ...eventAccessRegistrations.map(reg => updateRegistration(reg.id, {
+      await Promise.allSettled(
+        eventAccessRegistrations.map(reg => updateRegistration(reg.id, {
           accessGranted: false,
           loginAccessGranted: false,
           accessRevokedAt: now
         }).catch(() => null))
-      ]);
+      );
 
       // Concurrent delete in Supabase
       const uniqueSupaEmails = Array.from(new Set(supaEmailsToDelete));
@@ -3168,11 +3100,6 @@ const EventManagementPage: React.FC = () => {
         const backendEvent = await fetchEventById(eventObj.id).catch(() => null);
         if (backendEvent) {
           fullEvent = { ...eventObj, ...backendEvent, id: backendEvent.id || backendEvent._id || eventObj.id };
-        } else {
-          const evDoc = await getDoc(doc(db, "events", eventObj.id)).catch(() => null);
-          if (evDoc && evDoc.exists()) {
-            fullEvent = { id: evDoc.id, ...evDoc.data() };
-          }
         }
       } catch (err) {
         console.warn("Could not fetch full event document:", err);
@@ -3189,15 +3116,7 @@ const EventManagementPage: React.FC = () => {
     }
     try {
       const rawRegs = await fetchRegistrations().catch(() => []);
-      let snapshot = Array.isArray(rawRegs) ? rawRegs : (rawRegs?.registrations || rawRegs?.data || []);
-      if (snapshot.length === 0) {
-        const querySnapshot = await getDocs(collection(db, "registrations")).catch(() => null);
-        if (querySnapshot && querySnapshot.forEach) {
-          const fbList: any[] = [];
-          querySnapshot.forEach((docSnap: any) => fbList.push({ id: docSnap.id, ...docSnap.data() }));
-          snapshot = fbList;
-        }
-      }
+      const snapshot = Array.isArray(rawRegs) ? rawRegs : (rawRegs?.registrations || rawRegs?.data || []);
 
       const list: any[] = [];
       const grantedIds: string[] = [];
@@ -3467,10 +3386,9 @@ const EventManagementPage: React.FC = () => {
     setLoadingDetails(true);
     setCopiedWhatsLink(false);
     try {
-      const docRef = doc(db, "events", eventId);
-      const docSnap = await getDoc(docRef);
-      if (docSnap.exists()) {
-        setSelectedEventDetails({ id: docSnap.id, ...docSnap.data() });
+      const fullEvt = await fetchEventById(eventId);
+      if (fullEvt) {
+        setSelectedEventDetails({ ...fullEvt, id: fullEvt.id || fullEvt._id || eventId });
       } else {
         const fallback = events.find(e => e.id === eventId);
         setSelectedEventDetails(fallback || null);
@@ -4132,12 +4050,6 @@ const EventManagementPage: React.FC = () => {
         console.warn("[EventManagement] Backend deleteEvent notice:", apiErr);
       }
 
-      // 3. Delete from Firestore if present
-      try {
-        const docRef = doc(db, "events", id);
-        await deleteDoc(docRef);
-      } catch (e) {}
-
       setEvents(prev => prev.filter(e => e.id !== id));
       await showAlert({
         title: "Event Deleted",
@@ -4173,15 +4085,6 @@ const EventManagementPage: React.FC = () => {
         }
       } catch (e) {
         console.warn("[EventManagementPage] Notice fetching full event:", e);
-      }
-
-      // 3. Fallback to Firestore
-      if (!data) {
-        try {
-          const docRef = doc(db, "events", id);
-          const docSnap = await getDoc(docRef);
-          if (docSnap.exists()) data = docSnap.data();
-        } catch (e) {}
       }
 
       if (data) {
@@ -4329,8 +4232,7 @@ const EventManagementPage: React.FC = () => {
 
   const handleStatusChange = async (id: string, newStatus: "Draft" | "Active" | "Opened" | "Completed") => {
     try {
-      const docRef = doc(db, "events", id);
-      await setDoc(docRef, { status: newStatus }, { merge: true });
+      await updateEvent(id, { status: newStatus });
       setEvents(prev => prev.map(e => e.id === id ? { ...e, status: newStatus } : e));
     } catch (err) {
       console.error("Error updating status:", err);

@@ -4,12 +4,14 @@ import { useAuth } from "../../context/AuthContext";
 import { 
   getQuizById, 
   getOrCreateQuizSession, 
-  submitQuizFinal 
+  submitQuizFinal,
+  selectSeededCategorizedQuestions
 } from "../../services/quizService";
 import type { Quiz, QuizSession, QuizQuestion, QuizViolationLog } from "../../types/quiz";
 import { useQuizTimer } from "../../hooks/useQuizTimer";
 import { useQuizSession } from "../../hooks/useQuizSession";
 import { quizLoadBalancer } from "../../utils/quizLoadBalancer";
+import { formatPseudocodeText } from "../../utils/pdfExtractor";
 import SEO from "../../components/layout/SEO";
 import { 
   Clock, 
@@ -23,6 +25,7 @@ import {
   X,
   Lightbulb,
   Network,
+  Layers,
   ChevronDown,
   Maximize2,
   AlertTriangle,
@@ -47,7 +50,6 @@ export const QuizTakingPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [showSubmitModal, setShowSubmitModal] = useState<boolean>(false);
   const [showTimeoutModal, setShowTimeoutModal] = useState<boolean>(false);
-  const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState<boolean>(false);
 
   // Fullscreen and Proctoring State
   const [showFullscreenPrompt, setShowFullscreenPrompt] = useState<boolean>(true);
@@ -100,8 +102,111 @@ export const QuizTakingPage: React.FC = () => {
           return;
         }
 
+        let activeQuiz = { ...quizData };
+        let displayQuestions = activeQuiz.questions || [];
+
+        // If quiz is configured with categoryDistribution or questionsToDisplayCount subset
+        const hasCategoryDist = activeQuiz.categoryDistribution &&
+          typeof activeQuiz.categoryDistribution === 'object' &&
+          Object.values(activeQuiz.categoryDistribution).some(v => Number(v) > 0);
+
+        const hasGlobalSubset = Boolean(
+          activeQuiz.questionsToDisplayCount &&
+          activeQuiz.questionsToDisplayCount > 0 &&
+          activeQuiz.questionsToDisplayCount < displayQuestions.length
+        );
+
+        if (hasCategoryDist || hasGlobalSubset) {
+          let chosenIds = userSession.assignedQuestionIds || [];
+          let needsReassignment = !chosenIds || chosenIds.length === 0;
+
+          if (!needsReassignment && hasCategoryDist) {
+            const qMap = new Map(displayQuestions.map(q => [q.id, q]));
+            const catCounts: Record<string, number> = {};
+            for (const id of chosenIds) {
+              const qObj = qMap.get(id);
+              const c = (qObj && qObj.category && qObj.category.trim()) || "General";
+              catCounts[c] = (catCounts[c] || 0) + 1;
+            }
+            for (const [cat, quota] of Object.entries(activeQuiz.categoryDistribution || {})) {
+              const numQuota = Number(quota);
+              if (numQuota > 0 && catCounts[cat] !== numQuota) {
+                needsReassignment = true;
+                break;
+              }
+            }
+          }
+
+          if (needsReassignment) {
+            const randomSubset = selectSeededCategorizedQuestions(
+              displayQuestions,
+              activeQuiz.categoryDistribution,
+              activeQuiz.questionsToDisplayCount,
+              userSession.id
+            );
+            chosenIds = randomSubset.map(q => q.id);
+            userSession.assignedQuestionIds = chosenIds;
+          }
+
+          const questionMap = new Map(displayQuestions.map(q => [q.id, q]));
+          const assignedList: QuizQuestion[] = [];
+          for (const qId of chosenIds) {
+            const found = questionMap.get(qId);
+            if (found) assignedList.push(found);
+          }
+
+          if (assignedList.length > 0) {
+            displayQuestions = assignedList;
+          } else {
+            displayQuestions = selectSeededCategorizedQuestions(
+              displayQuestions,
+              activeQuiz.categoryDistribution,
+              activeQuiz.questionsToDisplayCount,
+              userSession.id
+            );
+          }
+
+          // CRITICAL: Ensure questions are strictly sorted and separated category-by-category!
+          const categoryOrder: string[] = [];
+          const groupedByCat = new Map<string, QuizQuestion[]>();
+          for (const q of displayQuestions) {
+            const cat = (q.category && q.category.trim()) || "General";
+            if (!groupedByCat.has(cat)) {
+              groupedByCat.set(cat, []);
+              categoryOrder.push(cat);
+            }
+            groupedByCat.get(cat)!.push(q);
+          }
+
+          const sortedCategorizedQuestions: QuizQuestion[] = [];
+          for (const cat of categoryOrder) {
+            sortedCategorizedQuestions.push(...groupedByCat.get(cat)!);
+          }
+
+          // Renumber questions sequentially 1..N for clean UI palette and taking experience
+          displayQuestions = sortedCategorizedQuestions.map((q, idx) => ({
+            ...q,
+            questionNumber: idx + 1
+          }));
+
+          // Update assignedQuestionIds in session to reflect the clean category-grouped order
+          userSession.assignedQuestionIds = displayQuestions.map(q => q.id);
+
+          const effectiveTotalMarks = displayQuestions.reduce(
+            (sum, q) => sum + (Number(q.points) || Number(activeQuiz.pointsPerQuestion) || 2),
+            0
+          );
+
+          activeQuiz = {
+            ...activeQuiz,
+            questions: displayQuestions,
+            questionsCount: displayQuestions.length,
+            totalMarks: effectiveTotalMarks
+          };
+        }
+
         if (isMounted) {
-          setQuiz(quizData);
+          setQuiz(activeQuiz);
           setSession(userSession);
           
           // Check if already in fullscreen
@@ -528,12 +633,66 @@ export const QuizTakingPage: React.FC = () => {
   const answeredCount = useMemo(() => Object.keys(answers).filter(k => !!answers[k]).length, [answers]);
   const unansweredCount = Math.max(0, totalQuestions - answeredCount);
 
-  // Compute unique categories
+  // Compute unique categories in the exact order they appear in questionsList
   const categories = useMemo(() => {
     if (!quiz?.questions) return [];
-    const cats = quiz.questions.map(q => q.category).filter(Boolean) as string[];
-    return Array.from(new Set(cats));
+    const orderedCats: string[] = [];
+    quiz.questions.forEach(q => {
+      const c = (q.category && q.category.trim()) || "General";
+      if (!orderedCats.includes(c)) orderedCats.push(c);
+    });
+    return orderedCats;
   }, [quiz]);
+
+  const currentCategory = (currentQuestion?.category && currentQuestion.category.trim()) || "General";
+  const currentCategoryIndex = categories.indexOf(currentCategory);
+
+  // Filter questions for the active/selected category
+  const currentCatQuestionsWithIndices = useMemo(() => {
+    return questionsList
+      .map((q, idx) => ({ q, idx }))
+      .filter(item => ((item.q.category && item.q.category.trim()) || "General") === currentCategory);
+  }, [questionsList, currentCategory]);
+
+  const currentCatQuestions = useMemo(() => {
+    return currentCatQuestionsWithIndices.map(item => item.q);
+  }, [currentCatQuestionsWithIndices]);
+
+  const currentCatAnsweredCount = useMemo(() => {
+    return currentCatQuestionsWithIndices.filter(item => !!answers[item.q.id]).length;
+  }, [currentCatQuestionsWithIndices, answers]);
+
+  const isCurrentCatCompleted = currentCatQuestionsWithIndices.length > 0 && currentCatAnsweredCount === currentCatQuestionsWithIndices.length;
+
+  const localIndexInCat = useMemo(() => {
+    if (!currentQuestion || currentCatQuestions.length === 0) return 1;
+    const idx = currentCatQuestions.findIndex(q => q.id === currentQuestion.id);
+    return idx !== -1 ? idx + 1 : 1;
+  }, [currentCatQuestions, currentQuestion]);
+
+  // Option select with auto-progression to next category when current category is completed
+  const handleOptionSelect = useCallback((questionId: string, optionId: string) => {
+    selectOption(questionId, optionId);
+
+    // Check if answering this question completes all questions in the active category
+    const updatedAnswers = { ...answers, [questionId]: optionId };
+    const allCatCompleted = currentCatQuestionsWithIndices.every(
+      item => !!updatedAnswers[item.q.id]
+    );
+
+    // If all questions in this category are completed and there is a subsequent category, advance smoothly
+    if (allCatCompleted && currentCategoryIndex !== -1 && currentCategoryIndex < categories.length - 1) {
+      const nextCategory = categories[currentCategoryIndex + 1];
+      const nextCategoryFirstIdx = questionsList.findIndex(
+        q => ((q.category && q.category.trim()) || "General") === nextCategory
+      );
+      if (nextCategoryFirstIdx !== -1) {
+        setTimeout(() => {
+          goToQuestion(nextCategoryFirstIdx);
+        }, 550);
+      }
+    }
+  }, [selectOption, answers, currentCatQuestionsWithIndices, currentCategoryIndex, categories, questionsList, goToQuestion]);
 
   if (loading) {
     return (
@@ -684,60 +843,92 @@ export const QuizTakingPage: React.FC = () => {
       <main className="max-w-7xl w-full mx-auto p-4 sm:p-6 lg:p-8 flex-1 grid grid-cols-1 lg:grid-cols-12 gap-8 items-start select-none">
         
         {/* ================= LEFT COLUMN: QUESTION CONTENT (8 COLS) ================= */}
-        <div className="lg:col-span-8 space-y-6">
+        <div className="lg:col-span-8 space-y-5">
           
-          {/* Top Info Pill */}
-          <div className="flex items-center gap-4 relative">
-            <span className="bg-blue-100 text-blue-800 font-bold text-xs px-3 py-1.5 rounded-full">
-              Question {currentQuestionIndex + 1} of {totalQuestions}
-            </span>
-            
-            {/* Category Dropdown */}
-            <div className="relative">
-              <button 
-                onClick={() => setIsCategoryDropdownOpen(!isCategoryDropdownOpen)}
-                className="text-slate-500 hover:text-blue-600 text-xs font-bold flex items-center gap-1.5 cursor-pointer bg-white border border-slate-200 hover:border-blue-300 px-3 py-1.5 rounded-full transition-all"
-              >
-                <Network className="w-3.5 h-3.5" />
-                {currentQuestion.category || quiz.title}
-                {categories.length > 0 && <ChevronDown className="w-3.5 h-3.5 opacity-70" />}
-              </button>
+          {/* Category / Section Select Dropdown (In place of top red box) */}
+          {categories.length > 1 && (
+            <div className="bg-white border border-slate-200/90 rounded-2xl p-3 shadow-2xs flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <span className="text-xs font-black uppercase tracking-wider text-slate-500 flex items-center gap-1.5">
+                  <Layers className="w-4 h-4 text-blue-600" />
+                  <span>Category:</span>
+                </span>
+                <span className="text-xs font-bold text-slate-700 bg-slate-100 px-2 py-0.5 rounded-lg border border-slate-200">
+                  Section {currentCategoryIndex + 1} of {categories.length}
+                </span>
+              </div>
 
-              {isCategoryDropdownOpen && categories.length > 0 && (
-                <>
-                  <div className="fixed inset-0 z-10" onClick={() => setIsCategoryDropdownOpen(false)} />
-                  <div className="absolute top-full left-0 mt-2 w-48 bg-white border border-slate-200 rounded-xl shadow-lg z-20 py-2 overflow-hidden">
-                    <div className="px-3 pb-2 mb-2 border-b border-slate-100 text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-                      Jump to Section
-                    </div>
-                    {categories.map(cat => (
-                      <button
-                        key={cat}
-                        onClick={() => {
-                          const firstQIdx = questionsList.findIndex(q => q.category === cat);
-                          if (firstQIdx !== -1) {
-                            goToQuestion(firstQIdx);
-                          }
-                          setIsCategoryDropdownOpen(false);
-                        }}
-                        className={`w-full text-left px-4 py-2 text-xs font-bold hover:bg-slate-50 transition-colors cursor-pointer ${
-                          currentQuestion.category === cat ? "text-blue-600 bg-blue-50/50" : "text-slate-600"
-                        }`}
-                      >
-                        {cat}
-                      </button>
-                    ))}
-                  </div>
-                </>
+              <div className="relative min-w-[280px] max-w-sm flex-1 sm:flex-initial">
+                <select
+                  value={currentCategory}
+                  onChange={(e) => {
+                    const chosen = e.target.value;
+                    const firstIdx = questionsList.findIndex(q => ((q.category && q.category.trim()) || "General") === chosen);
+                    if (firstIdx !== -1) {
+                      goToQuestion(firstIdx);
+                    }
+                  }}
+                  className="w-full bg-slate-50 hover:bg-slate-100/90 border border-slate-300 focus:border-blue-600 focus:ring-2 focus:ring-blue-100 rounded-xl px-3.5 py-2 text-xs font-bold text-slate-800 transition-all cursor-pointer outline-none appearance-none pr-9 shadow-2xs"
+                >
+                  {categories.map((cat, catIdx) => {
+                    const catQuestions = questionsList.filter(q => ((q.category && q.category.trim()) || "General") === cat);
+                    const catAnswered = catQuestions.filter(q => !!answers[q.id]).length;
+                    return (
+                      <option key={cat} value={cat}>
+                        Section {catIdx + 1}: {cat} ({catAnswered}/{catQuestions.length} Answered)
+                      </option>
+                    );
+                  })}
+                </select>
+                <ChevronDown className="w-4 h-4 text-slate-500 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+              </div>
+            </div>
+          )}
+
+          {/* Top Info Pill */}
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex flex-wrap items-center gap-2.5">
+              <span className="bg-blue-600 text-white font-extrabold text-xs px-3.5 py-1.5 rounded-full shadow-2xs">
+                Question {currentQuestionIndex + 1} of {totalQuestions}
+              </span>
+              
+              {currentQuestion.category && (
+                <span className="bg-white border border-slate-200/90 text-slate-700 text-xs font-bold px-3 py-1.5 rounded-full flex items-center gap-1.5 shadow-2xs">
+                  <Network className="w-3.5 h-3.5 text-blue-600" />
+                  <span>Category: <strong className="text-slate-900">{currentQuestion.category}</strong></span>
+                  <span className="text-blue-600 font-extrabold text-[11px] bg-blue-50 px-2 py-0.5 rounded-full border border-blue-100">
+                    Q{localIndexInCat} of {currentCatQuestions.length}
+                  </span>
+                </span>
               )}
             </div>
           </div>
 
           {/* Question Text */}
           <div className="space-y-4 pt-2">
-            <h2 className="text-2xl sm:text-3xl font-bold text-[#0F172A] leading-tight tracking-tight">
-              {currentQuestion.text}
-            </h2>
+            {(() => {
+              const formatted = formatPseudocodeText(currentQuestion.text);
+              const lines = formatted.split("\n");
+              if (lines.length > 1) {
+                const promptLine = lines[0];
+                const codeLines = lines.slice(1).join("\n");
+                return (
+                  <div className="space-y-3">
+                    <h2 className="text-xl sm:text-2xl font-bold text-[#0F172A] leading-tight">
+                      {promptLine}
+                    </h2>
+                    <div className="bg-slate-900 text-slate-100 rounded-xl p-4 font-mono text-sm sm:text-base leading-relaxed overflow-x-auto border border-slate-800 shadow-sm whitespace-pre">
+                      {codeLines}
+                    </div>
+                  </div>
+                );
+              }
+              return (
+                <h2 className="text-2xl sm:text-3xl font-bold text-[#0F172A] leading-tight tracking-tight whitespace-pre-wrap">
+                  {formatted}
+                </h2>
+              );
+            })()}
 
             {/* Code Snippet Block (if question has code) */}
             {currentQuestion.codeSnippet && (
@@ -756,7 +947,7 @@ export const QuizTakingPage: React.FC = () => {
                 <button
                   key={option.id}
                   type="button"
-                  onClick={() => selectOption(currentQuestion.id, option.id)}
+                  onClick={() => handleOptionSelect(currentQuestion.id, option.id)}
                   className={`w-full text-left p-4 sm:p-5 rounded-2xl border transition-all flex items-center gap-4 cursor-pointer ${
                     isSelected
                       ? "bg-blue-50/50 border-blue-600 shadow-sm ring-1 ring-blue-600"
@@ -794,19 +985,33 @@ export const QuizTakingPage: React.FC = () => {
               <span>Previous</span>
             </button>
 
-            <button
-              onClick={() => {
-                if (currentQuestionIndex === totalQuestions - 1) {
-                  setShowSubmitModal(true);
-                } else {
-                  goToQuestion(currentQuestionIndex + 1);
-                }
-              }}
-              className="bg-blue-700 hover:bg-blue-800 text-white font-bold text-sm px-6 py-3 rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-sm"
-            >
-              <span>{currentQuestionIndex === totalQuestions - 1 ? "Review & Submit" : "Next Question"}</span>
-              {currentQuestionIndex !== totalQuestions - 1 && <ArrowRight className="w-4 h-4" />}
-            </button>
+            {(() => {
+              const nextQ = questionsList[currentQuestionIndex + 1];
+              const isLast = currentQuestionIndex === totalQuestions - 1;
+              const isNextCat = nextQ && (((nextQ.category && nextQ.category.trim()) || "General") !== ((currentQuestion.category && currentQuestion.category.trim()) || "General"));
+
+              return (
+                <button
+                  onClick={() => {
+                    if (isLast) {
+                      setShowSubmitModal(true);
+                    } else {
+                      goToQuestion(currentQuestionIndex + 1);
+                    }
+                  }}
+                  className="bg-blue-700 hover:bg-blue-800 text-white font-bold text-sm px-6 py-3 rounded-xl transition-all flex items-center gap-2 cursor-pointer shadow-sm"
+                >
+                  <span>
+                    {isLast
+                      ? "Review & Submit"
+                      : isNextCat
+                      ? `Next Section: ${nextQ.category || "Next"}`
+                      : "Next Question"}
+                  </span>
+                  {!isLast && <ArrowRight className="w-4 h-4" />}
+                </button>
+              );
+            })()}
           </div>
         </div>
 
@@ -827,28 +1032,36 @@ export const QuizTakingPage: React.FC = () => {
           </div>
           
           {/* Question Grid Card */}
-          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-6">
+          <div className="bg-white border border-slate-200 rounded-3xl p-6 shadow-sm space-y-5">
             <div className="flex items-center justify-between border-b border-slate-100 pb-4">
-              <h3 className="text-base font-bold text-[#0F172A]">
-                Question Grid
-              </h3>
-              <span className="text-xs font-bold text-slate-500">
-                {answeredCount}/{totalQuestions} Answered
+              <div>
+                <h3 className="text-base font-bold text-[#0F172A]">
+                  Question Grid
+                </h3>
+                <span className="text-[11px] text-blue-600 font-extrabold block truncate max-w-[190px]" title={currentCategory}>
+                  {categories.length > 1 ? `Section ${currentCategoryIndex + 1}: ${currentCategory}` : currentCategory}
+                </span>
+              </div>
+              <span className="text-xs font-bold text-slate-600 bg-slate-100 px-2.5 py-1 rounded-full border border-slate-200">
+                {currentCatAnsweredCount}/{currentCatQuestionsWithIndices.length} Answered
               </span>
             </div>
 
-            {/* Question Buttons Matrix */}
+            {/* Questions of Selected Category ONLY */}
             <div className="grid grid-cols-5 gap-2.5">
-              {questionsList.map((q, idx) => {
+              {currentCatQuestionsWithIndices.map(({ q, idx }) => {
                 const isAnswered = !!answers[q.id];
                 const isCurrent = currentQuestionIndex === idx;
 
-                let btnStyle = "bg-slate-100 text-slate-600 hover:bg-slate-200 border border-transparent";
+                let btnStyle = "bg-white text-slate-700 hover:bg-slate-100 border border-slate-200";
                 if (isAnswered) {
-                  btnStyle = "bg-blue-600 text-white font-bold shadow-sm";
+                  btnStyle = "bg-blue-600 text-white font-bold shadow-2xs border-blue-600";
                 }
                 if (isCurrent && !isAnswered) {
-                  btnStyle = "bg-white text-blue-600 border-2 border-blue-600 font-bold";
+                  btnStyle = "bg-white text-blue-600 border-2 border-blue-600 font-black shadow-xs ring-2 ring-blue-400/30";
+                }
+                if (isCurrent && isAnswered) {
+                  btnStyle = "bg-blue-700 text-white font-black shadow-xs ring-2 ring-blue-400 ring-offset-1";
                 }
 
                 return (
@@ -856,7 +1069,8 @@ export const QuizTakingPage: React.FC = () => {
                     key={q.id}
                     type="button"
                     onClick={() => goToQuestion(idx)}
-                    className={`h-11 rounded-lg text-sm transition-all flex items-center justify-center cursor-pointer ${btnStyle}`}
+                    className={`h-11 rounded-xl text-xs font-bold transition-all flex items-center justify-center cursor-pointer ${btnStyle}`}
+                    title={`Question ${idx + 1} (${currentCategory})`}
                   >
                     {idx + 1}
                   </button>
@@ -864,14 +1078,39 @@ export const QuizTakingPage: React.FC = () => {
               })}
             </div>
 
+            {/* If all questions in this category are completed and there is a subsequent category */}
+            {isCurrentCatCompleted && currentCategoryIndex < categories.length - 1 && (
+              <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-3.5 text-center space-y-2">
+                <div className="flex items-center justify-center gap-1.5 text-emerald-800 text-xs font-black">
+                  <Check className="w-4 h-4 text-emerald-600" />
+                  <span>Category Completed!</span>
+                </div>
+                <p className="text-[11px] text-emerald-700 font-medium">
+                  All questions in this section are answered.
+                </p>
+                <button
+                  type="button"
+                  onClick={() => {
+                    const nextCat = categories[currentCategoryIndex + 1];
+                    const nextFirstIdx = questionsList.findIndex(q => ((q.category && q.category.trim()) || "General") === nextCat);
+                    if (nextFirstIdx !== -1) goToQuestion(nextFirstIdx);
+                  }}
+                  className="w-full bg-emerald-600 hover:bg-emerald-700 text-white font-bold text-xs py-2 px-3 rounded-xl transition-colors cursor-pointer flex items-center justify-center gap-1.5 shadow-2xs"
+                >
+                  <span>Go to Section {currentCategoryIndex + 2}: {categories[currentCategoryIndex + 1]}</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            )}
+
             {/* Legend */}
-            <div className="flex items-center justify-center gap-4 pt-2 text-[11px] font-bold text-slate-500">
+            <div className="flex items-center justify-center gap-4 pt-2 text-[11px] font-bold text-slate-500 border-t border-slate-100">
               <div className="flex items-center gap-1.5">
-                <div className="w-2 h-2 rounded-full bg-blue-600" />
+                <div className="w-2.5 h-2.5 rounded-full bg-blue-600" />
                 <span>Answered</span>
               </div>
               <div className="flex items-center gap-1.5">
-                <div className="w-2 h-2 rounded-full bg-slate-200" />
+                <div className="w-2.5 h-2.5 rounded-full bg-slate-200 border border-slate-300" />
                 <span>Unanswered</span>
               </div>
             </div>

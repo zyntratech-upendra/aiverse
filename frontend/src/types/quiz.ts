@@ -34,6 +34,8 @@ export interface Quiz {
   scheduledEndTime?: number; // timestamp in ms
   resultsPublished?: boolean; // Controls participant scorecard & leaderboard visibility
   questionsCount: number;
+  questionsToDisplayCount?: number; // Number of questions randomly served to participant out of total uploaded pool
+  categoryDistribution?: Record<string, number>; // Quota of questions to attempt per category (e.g. { "AI": 5, "Python": 5 })
   shuffleQuestions?: boolean;
   shuffleOptions?: boolean;
   questions?: QuizQuestion[]; // embedded question set for immutable batch loading
@@ -68,6 +70,7 @@ export interface QuizSession {
   userAgent?: string;
   violationsCount?: number;
   violationLogs?: QuizViolationLog[];
+  assignedQuestionIds?: string[];
   createdAt: number;
   updatedAt: number;
 }
@@ -106,6 +109,7 @@ export interface QuizSubmission {
   isFinal: boolean;
   violationsCount?: number;
   violationLogs?: QuizViolationLog[];
+  assignedQuestionIds?: string[];
   score?: number;
   maxScore?: number;
   percentage?: number;

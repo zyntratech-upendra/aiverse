@@ -2,7 +2,8 @@ import React, { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { getOrCreateQuizSession, getDeterministicSessionId, getQuizById } from "../../services/quizService";
-import { fetchSubmission } from "../../services/apiClient";
+import { fetchSubmission, fetchRegistrations, fetchRegistrationById } from "../../services/apiClient";
+import { dataCache } from "../../utils/dataCache";
 import type { Quiz } from "../../types/quiz";
 import { quizLoadBalancer } from "../../utils/quizLoadBalancer";
 import SEO from "../../components/layout/SEO";
@@ -33,6 +34,57 @@ export const QuizLobbyPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [acknowledged, setAcknowledged] = useState<boolean>(false);
   const [currentTime, setCurrentTime] = useState<number>(Date.now());
+
+  // Participant Registration lookup for accurate team & participant display
+  const [participantReg, setParticipantReg] = useState<any>(() => {
+    const cleanEmail = user?.email?.toLowerCase().trim() || "";
+    return dataCache.get<any>(`participant_reg_${cleanEmail || user?.uid || "guest"}`) || null;
+  });
+
+  useEffect(() => {
+    if (participantReg || !user) return;
+    let isMounted = true;
+    const loadReg = async () => {
+      try {
+        const cleanEmail = user.email?.toLowerCase().trim() || "";
+        const cached = dataCache.get<any>(`participant_reg_${cleanEmail || user.uid || "guest"}`);
+        if (cached) {
+          if (isMounted) setParticipantReg(cached);
+          return;
+        }
+        if (user.registrationId) {
+          const reg = await fetchRegistrationById(user.registrationId).catch(() => null);
+          if (reg && isMounted) {
+            setParticipantReg(reg);
+            dataCache.set(`participant_reg_${cleanEmail || user.uid || "guest"}`, reg);
+            return;
+          }
+        }
+        const regs = await fetchRegistrations().catch(() => []);
+        if (Array.isArray(regs) && isMounted) {
+          const match = regs.find((r: any) => {
+            if (user.registrationId && (r.id === user.registrationId || r._id === user.registrationId)) return true;
+            if (cleanEmail && (
+              r.email?.toLowerCase().trim() === cleanEmail ||
+              r.teamEmail?.toLowerCase().trim() === cleanEmail ||
+              r.teamLeadEmail?.toLowerCase().trim() === cleanEmail ||
+              r.userEmail?.toLowerCase().trim() === cleanEmail ||
+              (Array.isArray(r.members) && r.members.some((m: any) => m.email?.toLowerCase().trim() === cleanEmail))
+            )) return true;
+            return false;
+          });
+          if (match) {
+            setParticipantReg(match);
+            dataCache.set(`participant_reg_${cleanEmail || user.uid || "guest"}`, match);
+          }
+        }
+      } catch (e) {
+        console.warn("Could not load registration in QuizLobbyPage:", e);
+      }
+    };
+    loadReg();
+    return () => { isMounted = false; };
+  }, [user, participantReg]);
 
   // Clock tick to keep countdown / schedule comparisons live
   useEffect(() => {
@@ -149,6 +201,22 @@ export const QuizLobbyPage: React.FC = () => {
     return `${mins}m ${String(secs).padStart(2, "0")}s`;
   };
 
+  const resolvedTeamName =
+    participantReg?.teamName ||
+    participantReg?.groupName ||
+    participantReg?.team_name ||
+    user?.teamName ||
+    (participantReg?.teamLeadName ? `${participantReg.teamLeadName}'s Team` : null) ||
+    (user?.role === "participant" && user?.name ? `${user.name}'s Team` : null) ||
+    "Participant Team";
+
+  const resolvedLeadName =
+    participantReg?.teamLeadName ||
+    participantReg?.fullName ||
+    participantReg?.userName ||
+    participantReg?.name ||
+    (user?.role === "participant" ? user?.name : null);
+
   const handleStartQuiz = async () => {
     if (!quiz || !user || starting || !acknowledged || !isLive) return;
 
@@ -167,9 +235,9 @@ export const QuizLobbyPage: React.FC = () => {
         getOrCreateQuizSession(quiz, {
           uid: user.uid,
           email: user.email,
-          displayName: user.name || user.email
+          displayName: resolvedLeadName || user.name || user.email
         }, {
-          name: user.teamName
+          name: resolvedTeamName || user.teamName
         }),
         "high"
       );
@@ -354,7 +422,16 @@ export const QuizLobbyPage: React.FC = () => {
             <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 text-center">
               <HelpCircle className="w-5 h-5 text-indigo-600 mx-auto mb-1.5" />
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Questions</span>
-              <span className="text-lg font-black text-[#0F172A]">{quiz.questions?.length || quiz.questionsCount || 0} MCQs</span>
+              <span className="text-lg font-black text-[#0F172A]">
+                {quiz.questionsToDisplayCount && quiz.questionsToDisplayCount > 0 && quiz.questionsToDisplayCount < (quiz.questions?.length || quiz.questionsCount || 0)
+                  ? `${quiz.questionsToDisplayCount} MCQs`
+                  : `${quiz.questions?.length || quiz.questionsCount || 0} MCQs`}
+              </span>
+              {Boolean(quiz.questionsToDisplayCount && quiz.questionsToDisplayCount > 0 && quiz.questionsToDisplayCount < (quiz.questions?.length || quiz.questionsCount || 0)) && (
+                <span className="text-[9px] text-indigo-600 font-bold block mt-0.5">
+                  (Random from {quiz.questions?.length || quiz.questionsCount || 0} pool)
+                </span>
+              )}
             </div>
 
             <div className="bg-slate-50 border border-slate-200/80 rounded-2xl p-4 text-center">
@@ -396,9 +473,18 @@ export const QuizLobbyPage: React.FC = () => {
             <ShieldCheck className="w-6 h-6 text-emerald-600 shrink-0" />
             <div>
               <h3 className="text-base font-extrabold text-[#0F172A]">Participant Verification</h3>
-              <p className="text-xs text-slate-500 font-medium">
-                Logged in as <strong className="text-[#0F172A]">{user?.name || user?.email}</strong>
-                {user?.teamName && <> (Team: <strong className="text-blue-600">{user.teamName}</strong>)</>}
+              <p className="text-xs text-slate-500 font-medium flex items-center gap-2 flex-wrap">
+                <span>Team: <strong className="text-[#0F172A] font-extrabold text-sm">{resolvedTeamName}</strong></span>
+                {resolvedLeadName && resolvedLeadName !== resolvedTeamName && (
+                  <span className="text-slate-500 font-medium">
+                    (Lead: <strong className="text-slate-700 font-bold">{resolvedLeadName}</strong>)
+                  </span>
+                )}
+                {user?.email && (
+                  <span className="text-slate-400 font-normal text-[11px]">
+                    • <span className="font-mono text-slate-500">{user.email}</span>
+                  </span>
+                )}
               </p>
             </div>
           </div>

@@ -73,6 +73,53 @@ async function fallbackExtractRaw(file: File): Promise<string> {
 }
 
 /**
+ * Automatically formats squashed pseudocode, algorithm, or code snippets into clean multiline text.
+ * e.g. "What is the output of this pseudocode? SET a = 3 SET b = a * 2 PRINT b"
+ * becomes:
+ * "What is the output of this pseudocode?
+ * SET a = 3
+ * SET b = a * 2
+ * PRINT b"
+ */
+export function formatPseudocodeText(raw: string): string {
+  if (!raw || typeof raw !== "string") return raw;
+  let text = raw.trim();
+
+  // If already formatted with multiple lines, preserve as-is
+  if (text.includes("\n")) {
+    return text;
+  }
+
+  // 1. If text contains '?' or ':', split into intro prompt and code section
+  const qMarkIdx = text.indexOf("?");
+  const colonIdx = text.indexOf(":");
+  let splitIdx = -1;
+  if (qMarkIdx !== -1) {
+    splitIdx = qMarkIdx;
+  } else if (colonIdx !== -1) {
+    splitIdx = colonIdx;
+  }
+
+  const keywordRegex = /\s+(?=(?:SET\s+[a-zA-Z0-9_]+|PRINT\b|READ\s+[a-zA-Z0-9_]+|INPUT\s+[a-zA-Z0-9_]+|OUTPUT\s+[a-zA-Z0-9_\"\'\(]|DISPLAY\b|WRITE\b|FOR\s+[a-zA-Z0-9_]+\s*=|ENDFOR\b|END\s*FOR\b|WHILE\b|ENDWHILE\b|END\s*WHILE\b|IF\b|THEN\b|ELSE\b|ELSEIF\b|ENDIF\b|END\s*IF\b|RETURN\b|DECLARE\s+[a-zA-Z0-9_]+))/gi;
+
+  if (splitIdx !== -1 && splitIdx < text.length - 1) {
+    const prompt = text.substring(0, splitIdx + 1).trim();
+    let codePart = text.substring(splitIdx + 1).trim();
+
+    // Split before keywords that start a new statement
+    codePart = codePart.replace(keywordRegex, "\n");
+
+    // Also split assignments if not preceded by SET or DECLARE
+    codePart = codePart.replace(/(?<!\bSET|\bDECLARE)\s+(?=[a-zA-Z_]\w*\s*(?:=|<--|<-|:=)\s*[^=\n]+)/gi, "\n");
+
+    return prompt + "\n" + codePart;
+  } else {
+    text = text.replace(keywordRegex, "\n");
+    return text;
+  }
+}
+
+/**
  * High-accuracy MCQ Question Parser
  * Fully supports:
  * - Standard numbered: 1. Question / Q1. Question / 1) Question / Question 1:
@@ -157,7 +204,7 @@ export function parseQuestionsFromText(rawText: string, defaultCategory: string)
     questions.push({
       id: `q_${Date.now()}_${qNum}_${Math.random().toString(36).substr(2, 4)}`,
       questionNumber: qNum,
-      text: currentQ.text.replace(/^[\d\.\)\:\s\-]+/, "").trim(),
+      text: formatPseudocodeText(currentQ.text.replace(/^[\d\.\)\:\s\-]+/, "").trim()),
       points: currentQ.points || 2,
       category: currentQ.category || defaultCategory || "General",
       options: formattedOptions.slice(0, 4),
@@ -251,7 +298,19 @@ export function parseQuestionsFromText(rawText: string, defaultCategory: string)
     }
 
     if (currentQ && currentQ.options.length === 0) {
-      currentQ.text += " " + line;
+      const prev = currentQ.text.trim();
+      const trimmedLine = line.trim();
+      
+      const isCodeKeyword = /^(?:SET|PRINT|READ|INPUT|OUTPUT|DISPLAY|WRITE|FOR|ENDFOR|WHILE|ENDWHILE|DO|IF|THEN|ELSE|ELSEIF|ENDIF|FUNCTION|ENDFUNCTION|RETURN|DECLARE|INTEGER|STRING|FLOAT|BOOLEAN|DEF|VAR|LET|CONST|BEGIN|END)\b/i.test(trimmedLine);
+      const isCodeAssignment = /^[A-Za-z0-9_]+\s*(=|<-|:=|\+=|-=|\*=|\/=|==)/.test(trimmedLine);
+      const prevEndsWithPunctuation = /[\?\:\;]$/.test(prev);
+      const isIndented = line.startsWith("  ") || line.startsWith("\t");
+
+      if (isCodeKeyword || isCodeAssignment || prevEndsWithPunctuation || isIndented) {
+        currentQ.text += "\n" + trimmedLine;
+      } else {
+        currentQ.text += " " + trimmedLine;
+      }
     } else if (currentQ && currentQ.options.length > 0) {
       const lastOpt = currentQ.options[currentQ.options.length - 1];
       if (lastOpt) {

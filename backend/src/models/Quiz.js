@@ -25,6 +25,8 @@ const QuizSchema = new Schema(
     scheduledEndTime: { type: Number },
     resultsPublished: { type: Boolean, default: false },
     questionsCount: { type: Number, default: 0 },
+    questionsToDisplayCount: { type: Number, default: 0 },
+    categoryDistribution: { type: Schema.Types.Mixed, default: {} },
     shuffleQuestions: { type: Boolean, default: false },
     shuffleOptions: { type: Boolean, default: false },
     questions: { type: Schema.Types.Mixed, default: [] },
@@ -40,6 +42,10 @@ const QuizSchema = new Schema(
     toObject: { virtuals: true },
   }
 );
+
+QuizSchema.index({ createdAt: -1 });
+QuizSchema.index({ eventId: 1, createdAt: -1 });
+QuizSchema.index({ status: 1, createdAt: -1 });
 
 QuizSchema.virtual('id').get(function () {
   return this._id;

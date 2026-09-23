@@ -1,12 +1,11 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useNavigate, Link, useSearchParams } from "react-router-dom";
 import { useAuth } from "../../context/AuthContext";
 import { useModal } from "../../context/ModalContext";
 import * as api from "../../services/apiClient";
 import type { Quiz, QuizQuestion, QuizSubmission, QuizSession } from "../../types/quiz";
 import { resetParticipantQuizSession, resetAllQuizSubmissions, deleteQuizCascading, evaluateQuizAnswers } from "../../services/quizService";
-import { userService } from "../../services/userService";
-import { extractTextFromPdf, parseQuestionsFromText } from "../../utils/pdfExtractor";
+import { extractTextFromPdf, parseQuestionsFromText, formatPseudocodeText } from "../../utils/pdfExtractor";
 import { extractQuizQuestionsWithGemini } from "../../utils/geminiQuizExtractor";
 import SEO from "../../components/layout/SEO";
 import DatePicker from "../../components/ui/DatePicker";
@@ -49,7 +48,10 @@ import {
   RefreshCw,
   Building2,
   MapPin,
-  FileSpreadsheet
+  FileSpreadsheet,
+  Shuffle,
+  Layers,
+  ChevronDown
 } from "lucide-react";
 
 interface EventOption {
@@ -140,6 +142,24 @@ export const QuizManagementPage: React.FC = () => {
   const [showCategoryModal, setShowCategoryModal] = useState<boolean>(false);
   const [newCategoryName, setNewCategoryName] = useState<string>("");
   const [selectedCategoryView, setSelectedCategoryView] = useState<string>("");
+  const [isCategoryDropdownOpen, setIsCategoryDropdownOpen] = useState<boolean>(false);
+  const [categoryToDelete, setCategoryToDelete] = useState<{ name: string; count: number } | null>(null);
+  const categoryDropdownRef = useRef<HTMLDivElement>(null);
+
+  // Click-outside listener for custom category dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (categoryDropdownRef.current && !categoryDropdownRef.current.contains(event.target as Node)) {
+        setIsCategoryDropdownOpen(false);
+      }
+    };
+    if (isCategoryDropdownOpen) {
+      document.addEventListener("mousedown", handleClickOutside);
+    }
+    return () => {
+      document.removeEventListener("mousedown", handleClickOutside);
+    };
+  }, [isCategoryDropdownOpen]);
 
   // Bulk PDF Import States
   const [showPdfBulkModal, setShowPdfBulkModal] = useState<boolean>(false);
@@ -276,127 +296,141 @@ interface ExcelScoreRow {
     [registrantMap, userProfileMap]
   );
 
-  // Load Quizzes, Events, Registrations, and User Profiles
+  // Fast Stale-While-Revalidate load for Quizzes & Events
   useEffect(() => {
+    let isMounted = true;
+
+    // 0ms Cache Hydration: If cached quizzes & events exist in session, render immediately!
+    try {
+      const cachedQuizzes = sessionStorage.getItem("aiverse_cached_quizzes");
+      const cachedEvents = sessionStorage.getItem("aiverse_cached_events");
+      if (cachedQuizzes && cachedEvents) {
+        const parsedQ = JSON.parse(cachedQuizzes);
+        const parsedE = JSON.parse(cachedEvents);
+        if (Array.isArray(parsedQ) && parsedQ.length > 0) {
+          setQuizzes(parsedQ);
+          setEvents(parsedE);
+          setLoading(false);
+        }
+      }
+    } catch {}
+
     const fetchData = async () => {
       try {
-        setLoading(true);
+        // Fast Parallel Fetch: Quizzes + Events
+        const [qList, evData] = await Promise.all([
+          api.fetchAllQuizzes(),
+          api.fetchEvents()
+        ]);
 
-        // 1. Fetch Quizzes
-        const qList = await api.fetchAllQuizzes();
-        setQuizzes(qList || []);
+        if (isMounted) {
+          const freshQuizzes = qList || [];
+          const evList: EventOption[] = (evData || []).map((e: any) => ({
+            id: e.id || e._id,
+            title: e.title || "Untitled Event",
+            category: e.category || "General"
+          }));
 
-        // 2. Fetch Events for dropdown selection
-        const evData = await api.fetchEvents();
-        const evList: EventOption[] = (evData || []).map((e: any) => ({
-          id: e.id || e._id,
-          title: e.title || "Untitled Event",
-          category: e.category || "General"
-        }));
-        setEvents(evList);
+          setQuizzes(freshQuizzes);
+          setEvents(evList);
+          // UNBLOCK UI IMMEDIATELY
+          setLoading(false);
 
-        // 3. Fetch Registrations to map Team Names, College Names & Places
-        try {
-          const regData = await api.fetchRegistrations();
-          const regMap = new Map<string, { name: string; rollNo?: string; phone?: string; teamName?: string; collegeName?: string; collegePlace?: string }>();
-          (regData || []).forEach((data: any) => {
-            const primaryName = (data.fullName || data.teamLeadName || data.name || "").trim();
-            const roll = data.rollNo || data.studentId || data.teamLeadStudentId || "";
-            const phone = data.phone || data.phoneNumber || data.teamLeadPhone || "";
-            const collegeEm = (data.collegeEmail || data.teamLeadCollegeEmail || "").toLowerCase().trim();
-            const personalEm = (data.personalEmail || data.teamLeadPersonalEmail || "").toLowerCase().trim();
-            const teamEm = (data.teamEmail || data.teamLeadEmail || data.email || "").toLowerCase().trim();
-            const group = (data.groupName || data.teamName || "").trim();
-            const college = (data.collegeName || data.college || data.institute || data.institution || "").trim();
-            const place = (data.collegePlace || data.place || data.city || data.location || "").trim();
-
-            const regInfo = {
-              name: primaryName,
-              rollNo: roll,
-              phone,
-              teamName: group,
-              collegeName: college,
-              collegePlace: place
-            };
-
-            if (teamEm) regMap.set(teamEm, regInfo);
-            if (personalEm) regMap.set(personalEm, regInfo);
-            if (collegeEm) regMap.set(collegeEm, regInfo);
-            if (data.email) regMap.set(data.email.toLowerCase().trim(), regInfo);
-            if (data.userId) regMap.set(data.userId, regInfo);
-
-            // Map team members if any
-            if (Array.isArray(data.members)) {
-              data.members.forEach((m: any) => {
-                const mName = (m.name || m.fullName || "").trim();
-                const mEmail = (m.email || m.personalEmail || m.collegeEmail || "").toLowerCase().trim();
-                const mRoll = m.rollNo || m.studentId || "";
-                const mCollege = (m.college || m.collegeName || college).trim();
-                const mPlace = (m.collegePlace || m.place || place).trim();
-                if (mEmail) {
-                  regMap.set(mEmail, {
-                    name: mName || primaryName,
-                    rollNo: mRoll || roll,
-                    phone: m.phone || phone,
-                    teamName: group,
-                    collegeName: mCollege,
-                    collegePlace: mPlace
-                  });
-                }
-              });
-            }
-          });
-          setRegistrantMap(regMap);
-        } catch (regErr) {
-          console.warn("Notice fetching registrations:", regErr);
-        }
-
-        // 4. Fetch Users
-        try {
-          const uMap = new Map<string, { name: string; rollNo?: string; collegeName?: string; collegePlace?: string }>();
-          const usersData = await api.fetchUsers();
-          (usersData || []).forEach((data: any) => {
-            const rawName = (data.displayName || data.name || data.teamLeadName || "").trim();
-            const cleanEmail = (data.email || "").toLowerCase().trim();
-            const pEmail = (data.personalEmail || data.personal_email || "").toLowerCase().trim();
-            const roll = data.rollNo || data.studentId || "";
-            const col = (data.college || data.collegeName || "").trim();
-            const plc = (data.collegePlace || data.place || data.city || data.location || "").trim();
-            const uid = data.id || data._id;
-            const uInfo = { name: rawName, rollNo: roll, collegeName: col, collegePlace: plc };
-            if (uid) uMap.set(uid, uInfo);
-            if (cleanEmail) uMap.set(cleanEmail, uInfo);
-            if (pEmail) uMap.set(pEmail, uInfo);
-          });
-
-          // Supabase fallback
+          // Update cache for subsequent instant loads
           try {
-            const supaUsers = await userService.getUsers();
-            supaUsers.forEach((su) => {
-              const suName = (su.display_name || su.name || "").trim();
-              const suEmail = (su.email || "").toLowerCase().trim();
-              const suPEmail = (su.personal_email || "").toLowerCase().trim();
-              const suInfo = { name: suName, rollNo: su.year || "", collegeName: "", collegePlace: "" };
-              if (su.id) uMap.set(su.id, suInfo);
-              if (su.auth_id) uMap.set(su.auth_id, suInfo);
-              if (suEmail) uMap.set(suEmail, suInfo);
-              if (suPEmail) uMap.set(suPEmail, suInfo);
-            });
+            sessionStorage.setItem("aiverse_cached_quizzes", JSON.stringify(freshQuizzes));
+            sessionStorage.setItem("aiverse_cached_events", JSON.stringify(evList));
           } catch {}
-
-          setUserProfileMap(uMap);
-        } catch (uErr) {
-          console.warn("Notice fetching users:", uErr);
         }
+
+        // Background non-blocking fetch for Submissions/Results tab lookup maps
+        (async () => {
+          try {
+            const [regData, usersData] = await Promise.all([
+              api.fetchRegistrations().catch(() => []),
+              api.fetchUsers().catch(() => [])
+            ]);
+
+            if (!isMounted) return;
+
+            const regMap = new Map<string, { name: string; rollNo?: string; phone?: string; teamName?: string; collegeName?: string; collegePlace?: string }>();
+            (regData || []).forEach((data: any) => {
+              const primaryName = (data.fullName || data.teamLeadName || data.name || "").trim();
+              const roll = data.rollNo || data.studentId || data.teamLeadStudentId || "";
+              const phone = data.phone || data.phoneNumber || data.teamLeadPhone || "";
+              const collegeEm = (data.collegeEmail || data.teamLeadCollegeEmail || "").toLowerCase().trim();
+              const personalEm = (data.personalEmail || data.teamLeadPersonalEmail || "").toLowerCase().trim();
+              const teamEm = (data.teamEmail || data.teamLeadEmail || data.email || "").toLowerCase().trim();
+              const group = (data.groupName || data.teamName || "").trim();
+              const college = (data.collegeName || data.college || data.institute || data.institution || "").trim();
+              const place = (data.collegePlace || data.place || data.city || data.location || "").trim();
+
+              const regInfo = {
+                name: primaryName,
+                rollNo: roll,
+                phone,
+                teamName: group,
+                collegeName: college,
+                collegePlace: place
+              };
+
+              if (teamEm) regMap.set(teamEm, regInfo);
+              if (personalEm) regMap.set(personalEm, regInfo);
+              if (collegeEm) regMap.set(collegeEm, regInfo);
+              if (data.email) regMap.set(data.email.toLowerCase().trim(), regInfo);
+              if (data.userId) regMap.set(data.userId, regInfo);
+
+              if (Array.isArray(data.members)) {
+                data.members.forEach((m: any) => {
+                  const mName = (m.name || m.fullName || "").trim();
+                  const mEmail = (m.email || m.personalEmail || m.collegeEmail || "").toLowerCase().trim();
+                  const mRoll = m.rollNo || m.studentId || "";
+                  const mCollege = (m.college || m.collegeName || college).trim();
+                  const mPlace = (m.collegePlace || m.place || place).trim();
+                  if (mEmail) {
+                    regMap.set(mEmail, {
+                      name: mName || primaryName,
+                      rollNo: mRoll || roll,
+                      phone: m.phone || phone,
+                      teamName: group,
+                      collegeName: mCollege,
+                      collegePlace: mPlace
+                    });
+                  }
+                });
+              }
+            });
+            setRegistrantMap(regMap);
+
+            const uMap = new Map<string, { name: string; rollNo?: string; collegeName?: string; collegePlace?: string }>();
+            (usersData || []).forEach((data: any) => {
+              const rawName = (data.displayName || data.name || data.teamLeadName || "").trim();
+              const cleanEmail = (data.email || "").toLowerCase().trim();
+              const pEmail = (data.personalEmail || data.personal_email || "").toLowerCase().trim();
+              const roll = data.rollNo || data.studentId || "";
+              const col = (data.college || data.collegeName || "").trim();
+              const plc = (data.collegePlace || data.place || data.city || data.location || "").trim();
+              const uid = data.id || data._id;
+              const uInfo = { name: rawName, rollNo: roll, collegeName: col, collegePlace: plc };
+              if (uid) uMap.set(uid, uInfo);
+              if (cleanEmail) uMap.set(cleanEmail, uInfo);
+              if (pEmail) uMap.set(pEmail, uInfo);
+            });
+            setUserProfileMap(uMap);
+          } catch (bgErr) {
+            console.warn("Background user map fetch notice:", bgErr);
+          }
+        })();
 
       } catch (err) {
         console.error("Error fetching quizzes or events:", err);
       } finally {
-        setLoading(false);
+        if (isMounted) setLoading(false);
       }
     };
 
     fetchData();
+    return () => { isMounted = false; };
   }, []);
 
   // Fetch sessions & submissions on-demand when quiz is selected
@@ -410,6 +444,9 @@ interface ExcelScoreRow {
       const freshQuizzes = await api.fetchAllQuizzes();
       if (freshQuizzes) {
         setQuizzes(freshQuizzes);
+        try {
+          sessionStorage.setItem("aiverse_cached_quizzes", JSON.stringify(freshQuizzes));
+        } catch {}
       }
       // 2. Trigger fetch of submissions & sessions for selected quiz
       setRefreshKey((k) => k + 1);
@@ -482,6 +519,8 @@ interface ExcelScoreRow {
       track: targetEvent?.category ? `${targetEvent.category} Track` : "General Track",
       durationMinutes: 30,
       pointsPerQuestion: 2,
+      questionsToDisplayCount: 0,
+      categoryDistribution: {},
       totalMarks: 0,
       passingMarks: 0,
       scheduledStartTime: undefined,
@@ -502,10 +541,20 @@ interface ExcelScoreRow {
   const handleOpenEditModal = (quiz: Quiz) => {
     const derivedPoints = Number(quiz.pointsPerQuestion) || (quiz.questions?.[0]?.points) || 2;
     const qCount = quiz.questions?.length || quiz.questionsCount || 0;
-    const calcTotal = Number(quiz.totalMarks) || (qCount * derivedPoints);
+    const displayCount = Number(quiz.questionsToDisplayCount) || 0;
+    const rawCategoryDist = (quiz as any).categoryDistribution || {};
+    const effectiveQCount = (displayCount > 0 && displayCount < qCount) ? displayCount : qCount;
+    const calcTotal = Number(quiz.totalMarks) || (effectiveQCount * derivedPoints);
+    const cleanQuestions = (quiz.questions || []).map(q => ({
+      ...q,
+      text: formatPseudocodeText(q.text)
+    }));
     setEditingQuiz({
       ...JSON.parse(JSON.stringify(quiz)),
+      questions: cleanQuestions,
       pointsPerQuestion: derivedPoints,
+      questionsToDisplayCount: displayCount,
+      categoryDistribution: rawCategoryDist,
       totalMarks: calcTotal
     });
     const cats = Array.from(new Set(quiz.questions?.map(q => q.category).filter(Boolean) as string[]));
@@ -551,7 +600,33 @@ interface ExcelScoreRow {
 
       const ptsPerQ = Number(editingQuiz.pointsPerQuestion) || 2;
       const qCount = editingQuiz.questions?.length || 0;
-      const calcTotalMarks = qCount * ptsPerQ;
+      const rawCategoryDist = editingQuiz.categoryDistribution || {};
+
+      const catCounts: Record<string, number> = {};
+      for (const q of editingQuiz.questions || []) {
+        const c = (q.category && q.category.trim()) || "General";
+        catCounts[c] = (catCounts[c] || 0) + 1;
+      }
+
+      const hasCategoryQuotas = Object.keys(rawCategoryDist).length > 0;
+      let categoryBasedAttemptCount = 0;
+      if (hasCategoryQuotas) {
+        for (const [c, total] of Object.entries(catCounts)) {
+          const val = rawCategoryDist[c];
+          if (val !== undefined && val !== null && (val as any) !== '') {
+            const n = Number(val);
+            categoryBasedAttemptCount += (n > 0 ? Math.min(n, total) : 0);
+          } else {
+            categoryBasedAttemptCount += total;
+          }
+        }
+      }
+
+      const displayCount = hasCategoryQuotas
+        ? categoryBasedAttemptCount
+        : Math.max(0, Number(editingQuiz.questionsToDisplayCount) || 0);
+      const effectiveQCount = (displayCount > 0 && displayCount < qCount) ? displayCount : qCount;
+      const calcTotalMarks = effectiveQCount * ptsPerQ;
 
       const payload: Quiz = {
         id: quizId,
@@ -562,6 +637,8 @@ interface ExcelScoreRow {
         track: editingQuiz.track || (targetEvent?.category ? `${targetEvent.category} Track` : "General Track"),
         durationMinutes: (Number(editingQuiz.durationMinutes) || 30),
         pointsPerQuestion: ptsPerQ,
+        questionsToDisplayCount: displayCount,
+        categoryDistribution: rawCategoryDist,
         totalMarks: calcTotalMarks,
         passingMarks: Number(editingQuiz.passingMarks) || Math.round(calcTotalMarks * 0.4),
         instructions: editingQuiz.instructions || [],
@@ -1592,9 +1669,96 @@ interface ExcelScoreRow {
       }
       setSelectedCategoryView(trimmed);
       setCurrentQuestionIndex(-1); // Switch to the empty category view
-      setShowCategoryModal(false);
       setNewCategoryName("");
     };
+    const executeDeleteCategory = (catName: string, deleteQuestions: boolean) => {
+      if (!catName) return;
+
+      const nextCustom = customCategories.filter(c => c !== catName);
+      setCustomCategories(nextCustom);
+
+      const nextDist = { ...(editingQuiz?.categoryDistribution || {}) };
+      delete nextDist[catName];
+
+      const pts = Number(editingQuiz?.pointsPerQuestion) || 2;
+      let updatedQuestions: QuizQuestion[] = [];
+
+      if (deleteQuestions) {
+        const remaining = (editingQuiz?.questions || []).filter(q => q.category !== catName);
+        updatedQuestions = remaining.map((q, idx) => ({
+          ...q,
+          questionNumber: idx + 1
+        }));
+      } else {
+        updatedQuestions = (editingQuiz?.questions || []).map(q => {
+          if (q.category === catName) {
+            return { ...q, category: "General" };
+          }
+          return q;
+        });
+        if (updatedQuestions.some(q => q.category === "General") && !nextCustom.includes("General")) {
+          nextCustom.push("General");
+          setCustomCategories([...nextCustom]);
+        }
+      }
+
+      let nextSelected = "";
+      if (selectedCategoryView === catName) {
+        if (!deleteQuestions && updatedQuestions.some(q => q.category === "General")) {
+          nextSelected = "General";
+        } else if (nextCustom.length > 0) {
+          nextSelected = nextCustom[0];
+        } else {
+          nextSelected = "";
+        }
+      } else {
+        nextSelected = selectedCategoryView;
+      }
+      setSelectedCategoryView(nextSelected);
+
+      if (nextSelected) {
+        const firstIdx = updatedQuestions.findIndex(q => q.category === nextSelected);
+        setCurrentQuestionIndex(firstIdx !== -1 ? firstIdx : -1);
+      } else {
+        setCurrentQuestionIndex(updatedQuestions.length > 0 ? 0 : -1);
+      }
+
+      let effectiveCount = 0;
+      const hasCategoryDist = Object.keys(nextDist).length > 0;
+      if (hasCategoryDist) {
+        const catCounts: Record<string, number> = {};
+        for (const q of updatedQuestions) {
+          const c = (q.category && q.category.trim()) || "General";
+          catCounts[c] = (catCounts[c] || 0) + 1;
+        }
+        for (const [c, pool] of Object.entries(catCounts)) {
+          const qVal = nextDist[c];
+          if (qVal !== undefined && qVal !== null && (qVal as any) !== '') {
+            const n = Number(qVal);
+            effectiveCount += (n > 0 ? Math.min(n, pool) : 0);
+          } else {
+            effectiveCount += pool;
+          }
+        }
+      } else {
+        effectiveCount = updatedQuestions.length;
+      }
+
+      setEditingQuiz({
+        ...editingQuiz!,
+        questions: updatedQuestions,
+        categoryDistribution: nextDist,
+        questionsToDisplayCount: hasCategoryDist ? effectiveCount : 0,
+        totalMarks: effectiveCount * pts
+      });
+    };
+
+    const openDeleteCategoryModal = (catName: string) => {
+      if (!catName) return;
+      const count = (editingQuiz?.questions || []).filter(q => q.category === catName).length;
+      setCategoryToDelete({ name: catName, count });
+    };
+
 
     const updateCurrentQuestion = (updates: Partial<QuizQuestion>) => {
       if (!currentQuestion) return;
@@ -1908,12 +2072,49 @@ Answer: A`;
                   <>
                     {/* Question Text */}
                     <div className="space-y-1.5">
-                      <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Question Text</label>
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Question Text</label>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (currentQuestion?.text) {
+                                const formatted = formatPseudocodeText(currentQuestion.text);
+                                updateCurrentQuestion({ text: formatted });
+                              }
+                            }}
+                            className="inline-flex items-center gap-1 px-2.5 py-1 text-[11px] font-bold text-indigo-700 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition-colors cursor-pointer"
+                            title="Format pseudocode statements into clean multiple lines"
+                          >
+                            <Sparkles className="w-3 h-3 text-indigo-600" />
+                            Format Pseudocode
+                          </button>
+                          {selectedCategoryView && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                if (!editingQuiz?.questions) return;
+                                const updated = editingQuiz.questions.map((q) => {
+                                  if (q.category === selectedCategoryView) {
+                                    return { ...q, text: formatPseudocodeText(q.text) };
+                                  }
+                                  return q;
+                                });
+                                setEditingQuiz({ ...editingQuiz, questions: updated });
+                              }}
+                              className="inline-flex items-center gap-1 px-2 py-1 text-[11px] font-bold text-slate-600 bg-slate-100 hover:bg-slate-200 border border-slate-200 rounded-lg transition-colors cursor-pointer"
+                              title={`Format all pseudocode questions in category '${selectedCategoryView}'`}
+                            >
+                              Format All in Category
+                            </button>
+                          )}
+                        </div>
+                      </div>
                       <textarea
                         value={currentQuestion.text}
                         onChange={(e) => updateCurrentQuestion({ text: e.target.value })}
-                        rows={2}
-                        className="w-full text-base sm:text-lg font-bold text-[#0F172A] leading-relaxed p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500"
+                        rows={4}
+                        className="w-full text-base sm:text-lg font-bold text-[#0F172A] leading-relaxed p-4 bg-slate-50 border border-slate-200 rounded-2xl outline-none focus:ring-2 focus:ring-blue-500 whitespace-pre-wrap font-mono"
                         placeholder="Enter your question here..."
                       />
                     </div>
@@ -2025,33 +2226,175 @@ Answer: A`;
                 <div className="space-y-1.5 pb-2">
                   <div className="flex items-center justify-between">
                     <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Category View</label>
-                    <button
-                      onClick={handleAddCategory}
-                      className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
-                      title="Add new category"
-                    >
-                      <Plus className="w-3.5 h-3.5" />
-                    </button>
+                    <div className="flex items-center gap-1.5">
+                      {selectedCategoryView && (
+                        <button
+                          type="button"
+                          onClick={() => openDeleteCategoryModal(selectedCategoryView)}
+                          className="px-2 py-0.5 text-[10px] font-bold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer flex items-center gap-1 border border-rose-200 shadow-2xs"
+                          title={`Delete category "${selectedCategoryView}"`}
+                        >
+                          <Trash2 className="w-3 h-3 text-rose-500" />
+                          <span>Delete</span>
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={handleAddCategory}
+                        className="p-1 text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-colors cursor-pointer"
+                        title="Manage / Add categories"
+                      >
+                        <Plus className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
                   </div>
-                  <select
-                    value={selectedCategoryView}
-                    onChange={(e) => {
-                      const newCat = e.target.value;
-                      setSelectedCategoryView(newCat);
-                      if (newCat) {
-                        const firstIdx = questionsList.findIndex(q => q.category === newCat);
-                        setCurrentQuestionIndex(firstIdx !== -1 ? firstIdx : -1);
-                      } else {
-                        setCurrentQuestionIndex(-1);
-                      }
-                    }}
-                    className="w-full text-xs font-bold text-[#0F172A] p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 appearance-none cursor-pointer"
-                  >
-                    <option value="">Select Category</option>
-                    {customCategories.map(cat => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
+
+                  {/* Custom Category Dropdown with In-line Delete Option */}
+                  <div className="relative" ref={categoryDropdownRef}>
+                    <button
+                      type="button"
+                      onClick={() => setIsCategoryDropdownOpen(prev => !prev)}
+                      className="w-full text-xs font-bold text-[#0F172A] p-3 bg-slate-50 hover:bg-slate-100/90 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500 flex items-center justify-between transition-all cursor-pointer shadow-2xs"
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <Layers className="w-3.5 h-3.5 text-blue-600 shrink-0" />
+                        <span className="truncate">
+                          {selectedCategoryView || "Select Category"}
+                        </span>
+                        {selectedCategoryView && (
+                          <span className="text-[10px] font-bold bg-blue-100 text-blue-800 px-1.5 py-0.5 rounded-md shrink-0">
+                            {questionsList.filter(q => q.category === selectedCategoryView).length} Qs
+                          </span>
+                        )}
+                      </div>
+                      <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform duration-200 shrink-0 ${isCategoryDropdownOpen ? "rotate-180 text-blue-600" : ""}`} />
+                    </button>
+
+                    {/* Dropdown Menu */}
+                    {isCategoryDropdownOpen && (
+                      <div className="absolute left-0 right-0 top-full mt-1.5 z-40 bg-white border border-slate-200 rounded-2xl shadow-xl overflow-hidden animate-in fade-in-50 zoom-in-95 duration-150">
+                        <div className="p-2 border-b border-slate-100 bg-slate-50/80 flex items-center justify-between text-[11px] font-bold text-slate-600">
+                          <span>Categories ({customCategories.length})</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsCategoryDropdownOpen(false);
+                              handleAddCategory();
+                            }}
+                            className="text-blue-600 hover:text-blue-700 hover:underline cursor-pointer flex items-center gap-1 font-bold text-[10px]"
+                          >
+                            <Plus className="w-3 h-3" />
+                            <span>New Category</span>
+                          </button>
+                        </div>
+
+                        <div className="max-h-60 overflow-y-auto p-1.5 space-y-1">
+                          {/* Option: Select Category (All Questions) */}
+                          <div
+                            onClick={() => {
+                              setSelectedCategoryView("");
+                              setCurrentQuestionIndex(-1);
+                              setIsCategoryDropdownOpen(false);
+                            }}
+                            className={`flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold cursor-pointer transition-colors ${
+                              !selectedCategoryView ? "bg-blue-50 text-blue-700" : "text-slate-700 hover:bg-slate-50"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span className="w-2 h-2 rounded-full bg-slate-300"></span>
+                              <span>Select Category (View All)</span>
+                            </div>
+                            <span className="text-[10px] text-slate-400 font-semibold">{totalQuestions} total</span>
+                          </div>
+
+                          {customCategories.length === 0 ? (
+                            <div className="px-3 py-4 text-center text-xs text-slate-400 font-medium">
+                              No categories created yet
+                            </div>
+                          ) : (
+                            customCategories.map((cat) => {
+                              const isSelected = selectedCategoryView === cat;
+                              const qInCat = questionsList.filter(q => q.category === cat).length;
+                              return (
+                                <div
+                                  key={cat}
+                                  className={`group flex items-center justify-between px-3 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                                    isSelected ? "bg-blue-50/90 text-blue-700" : "text-slate-700 hover:bg-slate-100"
+                                  }`}
+                                  onClick={() => {
+                                    setSelectedCategoryView(cat);
+                                    const firstIdx = questionsList.findIndex(q => q.category === cat);
+                                    setCurrentQuestionIndex(firstIdx !== -1 ? firstIdx : -1);
+                                    setIsCategoryDropdownOpen(false);
+                                  }}
+                                >
+                                  <div className="flex items-center gap-2 min-w-0 pr-2">
+                                    <span className={`w-2 h-2 rounded-full shrink-0 ${isSelected ? "bg-blue-600" : "bg-slate-300 group-hover:bg-slate-400"}`}></span>
+                                    <span className="truncate" title={cat}>{cat}</span>
+                                    <span className="text-[9.5px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-medium shrink-0">
+                                      {qInCat} Qs
+                                    </span>
+                                  </div>
+
+                                  {/* Direct Delete button on each category item! */}
+                                  <button
+                                    type="button"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      setIsCategoryDropdownOpen(false);
+                                      openDeleteCategoryModal(cat);
+                                    }}
+                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-100 rounded-lg transition-colors cursor-pointer shrink-0"
+                                    title={`Delete category "${cat}"`}
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                  </button>
+                                </div>
+                              );
+                            })
+                          )}
+                        </div>
+
+                        <div className="p-2 border-t border-slate-100 bg-slate-50 flex items-center justify-between text-[11px]">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setIsCategoryDropdownOpen(false);
+                              setShowCategoryModal(true);
+                            }}
+                            className="text-xs text-blue-600 hover:text-blue-800 font-bold flex items-center gap-1 cursor-pointer"
+                          >
+                            <Layers className="w-3 h-3" />
+                            <span>Manage / Delete Categories</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setIsCategoryDropdownOpen(false)}
+                            className="text-slate-400 hover:text-slate-600 text-[10px] font-semibold cursor-pointer"
+                          >
+                            Close
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {selectedCategoryView && (
+                    <div className="flex items-center justify-between px-1 text-[10px] text-slate-500 font-semibold pt-0.5">
+                      <span>
+                        {questionsList.filter(q => q.category === selectedCategoryView).length} questions in category
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => openDeleteCategoryModal(selectedCategoryView)}
+                        className="text-rose-600 hover:text-rose-700 hover:underline transition-all cursor-pointer font-bold flex items-center gap-1"
+                        title={`Delete category "${selectedCategoryView}"`}
+                      >
+                        <Trash2 className="w-2.5 h-2.5" />
+                        Delete Category
+                      </button>
+                    </div>
+                  )}
                 </div>
 
               <div className="flex items-center justify-between pt-2 border-t border-slate-100">
@@ -2236,59 +2579,330 @@ Answer: A`;
                 </div>
 
                 {/* Points & Total Marks Configuration (Below Associated Event) */}
-                <div className="bg-gradient-to-r from-amber-50/70 via-amber-50/40 to-blue-50/60 p-3.5 rounded-2xl border border-amber-200/90 space-y-2.5">
+                <div className="bg-gradient-to-r from-amber-50/70 via-amber-50/40 to-blue-50/60 p-4 rounded-2xl border border-amber-200/90 space-y-3.5">
                   <div className="flex items-center justify-between">
                     <label className="text-[11px] font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
                       <Award className="w-4 h-4 text-amber-600" />
                       <span>Scoring & Question Weightage</span>
                     </label>
                     <span className="text-[10px] font-black px-2.5 py-0.5 rounded-full bg-blue-100 text-blue-800 border border-blue-200">
-                      {editingQuiz.questions?.length || 0} Question{(editingQuiz.questions?.length || 0) === 1 ? "" : "s"} Configured
+                      {editingQuiz.questions?.length || 0} Question{(editingQuiz.questions?.length || 0) === 1 ? "" : "s"} Uploaded
                     </span>
                   </div>
 
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-700 block">
-                        Points per Question
-                      </label>
-                      <input
-                        type="number"
-                        min={1}
-                        max={100}
-                        value={editingQuiz.pointsPerQuestion || 2}
-                        onChange={(e) => {
-                          const pts = Math.max(1, Number(e.target.value) || 1);
-                          const qCount = editingQuiz.questions?.length || 0;
-                          const calcTotal = qCount * pts;
-                          const updatedQuestions = editingQuiz.questions?.map((q) => ({
-                            ...q,
-                            points: pts
-                          })) || [];
-                          setEditingQuiz({
-                            ...editingQuiz,
-                            pointsPerQuestion: pts,
-                            totalMarks: calcTotal,
-                            questions: updatedQuestions
-                          });
-                        }}
-                        className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-900 text-xs font-bold focus:ring-2 focus:ring-blue-500 outline-none"
-                        placeholder="e.g. 2"
-                      />
-                    </div>
+                  {(() => {
+                    const qCount = editingQuiz.questions?.length || 0;
+                    const pts = Number(editingQuiz.pointsPerQuestion) || 2;
+                    const currentDist = editingQuiz.categoryDistribution || {};
 
-                    <div className="space-y-1">
-                      <label className="text-[11px] font-bold text-slate-700 block">
-                        Calculated Total Marks
-                      </label>
-                      <div className="w-full px-3 py-2 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-900 text-xs font-black flex items-center justify-between shadow-2xs">
-                        <span>{((editingQuiz.questions?.length || 0) * (editingQuiz.pointsPerQuestion || 2))} Marks</span>
-                        <span className="text-[10px] text-emerald-700 font-bold">
-                          ({editingQuiz.questions?.length || 0} Qs × {editingQuiz.pointsPerQuestion || 2} pts)
-                        </span>
-                      </div>
-                    </div>
-                  </div>
+                    // Calculate category breakdown
+                    const catCounts: Record<string, number> = {};
+                    for (const q of editingQuiz.questions || []) {
+                      const c = (q.category && q.category.trim()) || "General";
+                      catCounts[c] = (catCounts[c] || 0) + 1;
+                    }
+                    const catEntries = Object.entries(catCounts);
+                    const hasCategoryDist = Object.keys(currentDist).length > 0;
+
+                    // Calculate effective questions to attempt
+                    let effectiveAttemptCount = 0;
+                    if (hasCategoryDist) {
+                      for (const [c, pool] of catEntries) {
+                        const val = currentDist[c];
+                        if (val !== undefined && val !== null && (val as any) !== '') {
+                          const n = Number(val);
+                          effectiveAttemptCount += (n > 0 ? Math.min(n, pool) : 0);
+                        } else {
+                          effectiveAttemptCount += pool;
+                        }
+                      }
+                    } else {
+                      const disp = Number(editingQuiz.questionsToDisplayCount) || 0;
+                      effectiveAttemptCount = (disp > 0 && disp < qCount) ? disp : qCount;
+                    }
+
+                    const totalMarks = effectiveAttemptCount * pts;
+                    const isRandomSubset = effectiveAttemptCount > 0 && effectiveAttemptCount < qCount;
+
+                    return (
+                      <>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                          {/* Points per Question */}
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-slate-700 block">
+                              Points per Question
+                            </label>
+                            <input
+                              type="number"
+                              min={1}
+                              max={100}
+                              value={editingQuiz.pointsPerQuestion || 2}
+                              onChange={(e) => {
+                                const newPts = Math.max(1, Number(e.target.value) || 1);
+                                const calcTotal = effectiveAttemptCount * newPts;
+                                const updatedQuestions = editingQuiz.questions?.map((q) => ({
+                                  ...q,
+                                  points: newPts
+                                })) || [];
+                                setEditingQuiz({
+                                  ...editingQuiz,
+                                  pointsPerQuestion: newPts,
+                                  totalMarks: calcTotal,
+                                  questions: updatedQuestions
+                                });
+                              }}
+                              className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-900 text-xs font-bold focus:ring-2 focus:ring-blue-500 outline-none"
+                              placeholder="e.g. 2"
+                            />
+                          </div>
+
+                          {/* Total Questions to Attempt */}
+                          <div className="space-y-1">
+                            <div className="flex items-center justify-between">
+                              <label className="text-[11px] font-bold text-slate-700 block">
+                                Total to Attempt
+                              </label>
+                              {isRandomSubset && (
+                                <span className="text-[9px] font-black text-indigo-700 bg-indigo-50 border border-indigo-200 px-1.5 py-0.5 rounded-md flex items-center gap-1">
+                                  <Shuffle className="w-2.5 h-2.5" />
+                                  Randomized
+                                </span>
+                              )}
+                            </div>
+                            <div className="w-full px-3 py-2 rounded-xl border border-slate-200 bg-white text-slate-900 text-xs font-black flex items-center justify-between min-h-[38px]">
+                              <span>{effectiveAttemptCount} Questions</span>
+                              <span className="text-[10px] text-slate-500 font-bold">
+                                {isRandomSubset ? `out of ${qCount} pool` : `All questions`}
+                              </span>
+                            </div>
+                            <span className="text-[9.5px] text-slate-500 font-medium block leading-tight">
+                              {hasCategoryDist ? "Calculated from category quotas below." : "Enter category quotas below or all questions will be attempted."}
+                            </span>
+                          </div>
+
+                          {/* Calculated Total Marks */}
+                          <div className="space-y-1">
+                            <label className="text-[11px] font-bold text-slate-700 block">
+                              Calculated Total Marks
+                            </label>
+                            <div className="w-full px-3 py-2 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-900 text-xs font-black flex flex-col justify-center min-h-[38px] shadow-2xs">
+                              <div className="flex items-center justify-between">
+                                <span>{totalMarks} Marks</span>
+                                <span className="text-[10px] text-emerald-700 font-bold">
+                                  ({effectiveAttemptCount} Qs × {pts} pts)
+                                </span>
+                              </div>
+                              {isRandomSubset && (
+                                <span className="text-[9px] text-emerald-600 font-bold mt-0.5">
+                                  Random {effectiveAttemptCount} from {qCount} pool
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Category-Wise Question Configuration */}
+                        <div className="mt-3 pt-3 border-t border-amber-200/90 space-y-2.5">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <label className="text-[11px] font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                                <Layers className="w-3.5 h-3.5 text-indigo-600" />
+                                <span>Category-Wise Questions to Attempt</span>
+                              </label>
+                              <span className="text-[10px] text-slate-500 font-medium block">
+                                Enter how many random questions each participant will get from each category pool. Every user receives different questions.
+                              </span>
+                            </div>
+
+                            {catEntries.length > 1 && (
+                              <div className="flex items-center gap-1.5 bg-white/80 p-1 rounded-xl border border-slate-200 shadow-2xs">
+                                <span className="text-[10px] font-bold text-slate-600 pl-1">Set all:</span>
+                                <input
+                                  type="number"
+                                  min={1}
+                                  max={999}
+                                  placeholder="e.g. 5"
+                                  id="quick-set-all-category-quota"
+                                  className="w-14 px-2 py-0.5 text-xs font-bold border border-slate-200 rounded-lg bg-slate-50 text-slate-900 text-center outline-none focus:ring-1 focus:ring-indigo-500"
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter') {
+                                      const inputVal = Number((e.target as HTMLInputElement).value);
+                                      if (inputVal > 0) {
+                                        const nextDist: Record<string, number> = {};
+                                        catEntries.forEach(([catName, poolCount]) => {
+                                          nextDist[catName] = Math.min(inputVal, poolCount);
+                                        });
+                                        let newTotal = 0;
+                                        catEntries.forEach(([catName, poolCount]) => {
+                                          newTotal += Math.min(nextDist[catName] ?? poolCount, poolCount);
+                                        });
+                                        setEditingQuiz({
+                                          ...editingQuiz,
+                                          categoryDistribution: nextDist,
+                                          questionsToDisplayCount: newTotal,
+                                          totalMarks: newTotal * pts
+                                        });
+                                      }
+                                    }
+                                  }}
+                                />
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const inputElem = document.getElementById('quick-set-all-category-quota') as HTMLInputElement;
+                                    const inputVal = Number(inputElem?.value);
+                                    if (inputVal > 0) {
+                                      const nextDist: Record<string, number> = {};
+                                      catEntries.forEach(([catName, poolCount]) => {
+                                        nextDist[catName] = Math.min(inputVal, poolCount);
+                                      });
+                                      let newTotal = 0;
+                                      catEntries.forEach(([catName, poolCount]) => {
+                                        newTotal += Math.min(nextDist[catName] ?? poolCount, poolCount);
+                                      });
+                                      setEditingQuiz({
+                                        ...editingQuiz,
+                                        categoryDistribution: nextDist,
+                                        questionsToDisplayCount: newTotal,
+                                        totalMarks: newTotal * pts
+                                      });
+                                    }
+                                  }}
+                                  className="px-2 py-1 text-[10px] font-bold rounded-lg bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-2xs cursor-pointer"
+                                >
+                                  Apply
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const allCount = editingQuiz.questions?.length || 0;
+                                    setEditingQuiz({
+                                      ...editingQuiz,
+                                      categoryDistribution: {},
+                                      questionsToDisplayCount: allCount,
+                                      totalMarks: allCount * pts
+                                    });
+                                  }}
+                                  className="px-2 py-1 text-[10px] font-bold rounded-lg bg-slate-100 text-slate-600 hover:bg-slate-200 transition-colors cursor-pointer"
+                                >
+                                  Reset
+                                </button>
+                              </div>
+                            )}
+                          </div>
+
+                          {catEntries.length === 0 ? (
+                            <div className="p-3 bg-white/70 rounded-xl border border-dashed border-amber-300 text-center text-xs text-amber-800 font-semibold">
+                              No questions uploaded yet. Upload or add questions to configure category distribution.
+                            </div>
+                          ) : (
+                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-2.5 max-h-60 overflow-y-auto pr-1">
+                              {catEntries.map(([catName, poolCount]) => {
+                                const quota = currentDist[catName];
+                                const hasCustomQuota = quota !== undefined && quota !== null && (quota as any) !== '';
+                                const numQuota = Number(quota);
+                                const isCategorySubset = hasCustomQuota && numQuota > 0 && numQuota < poolCount;
+                                const isCategoryZero = hasCustomQuota && numQuota === 0;
+
+                                return (
+                                  <div
+                                    key={catName}
+                                    className={`p-3 rounded-xl border transition-all shadow-2xs ${
+                                      isCategorySubset
+                                        ? "bg-indigo-50/80 border-indigo-300 ring-1 ring-indigo-300/50"
+                                        : isCategoryZero
+                                        ? "bg-rose-50/60 border-rose-200 opacity-60"
+                                        : "bg-white border-slate-200"
+                                    }`}
+                                  >
+                                    <div className="flex items-center justify-between gap-1.5 mb-1.5">
+                                      <span className="text-[11px] font-black text-slate-800 truncate" title={catName}>
+                                        {catName}
+                                      </span>
+                                      <div className="flex items-center gap-1 shrink-0">
+                                        <span className="text-[9.5px] font-bold text-slate-600 bg-slate-100 border border-slate-200/80 px-1.5 py-0.5 rounded-md whitespace-nowrap">
+                                          {poolCount} in pool
+                                        </span>
+                                        <button
+                                          type="button"
+                                          onClick={() => openDeleteCategoryModal(catName)}
+                                          className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-md transition-colors cursor-pointer"
+                                          title={`Delete category "${catName}"`}
+                                        >
+                                          <Trash2 className="w-3 h-3 text-rose-500" />
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    <div className="space-y-1">
+                                      <div className="relative">
+                                        <input
+                                          type="number"
+                                          min={0}
+                                          max={poolCount}
+                                          value={quota ?? ""}
+                                          onChange={(e) => {
+                                            const inputStr = e.target.value;
+                                            const nextDist = { ...currentDist };
+                                            if (inputStr === "") {
+                                              delete nextDist[catName];
+                                            } else {
+                                              nextDist[catName] = Math.min(poolCount, Math.max(0, Number(inputStr)));
+                                            }
+
+                                            let newTotalAttempt = 0;
+                                            const hasActiveDist = Object.keys(nextDist).length > 0;
+                                            if (hasActiveDist) {
+                                              for (const [c, total] of catEntries) {
+                                                const qVal = nextDist[c];
+                                                if (qVal !== undefined && qVal !== null && (qVal as any) !== '') {
+                                                  const n = Number(qVal);
+                                                  newTotalAttempt += (n > 0 ? Math.min(n, total) : 0);
+                                                } else {
+                                                  newTotalAttempt += total;
+                                                }
+                                              }
+                                            } else {
+                                              newTotalAttempt = qCount;
+                                            }
+
+                                            setEditingQuiz({
+                                              ...editingQuiz,
+                                              categoryDistribution: nextDist,
+                                              questionsToDisplayCount: newTotalAttempt,
+                                              totalMarks: newTotalAttempt * pts
+                                            });
+                                          }}
+                                          placeholder={`All (${poolCount})`}
+                                          className="w-full px-2.5 py-1.5 text-xs font-bold border border-slate-300 rounded-lg bg-white text-slate-900 focus:ring-2 focus:ring-indigo-500 outline-none"
+                                        />
+                                      </div>
+
+                                      <div className="flex items-center justify-between text-[9.5px] font-bold pt-0.5">
+                                        {isCategorySubset ? (
+                                          <span className="text-indigo-700 flex items-center gap-1 font-black">
+                                            <Shuffle className="w-2.5 h-2.5" />
+                                            Random {numQuota} Qs
+                                          </span>
+                                        ) : isCategoryZero ? (
+                                          <span className="text-rose-600 font-semibold">0 Qs (Excluded)</span>
+                                        ) : (
+                                          <span className="text-slate-500 font-semibold">All {poolCount} Qs</span>
+                                        )}
+                                        <span className="text-slate-400">
+                                          {(isCategorySubset ? numQuota : (isCategoryZero ? 0 : poolCount)) * pts} pts
+                                        </span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
 
                 {/* Description */}
@@ -2499,7 +3113,10 @@ Answer: A`;
                   Total Marks: <strong className="text-slate-800 font-black">{((editingQuiz.questions?.length || 0) * (editingQuiz.pointsPerQuestion || 2))}</strong>
                 </span>
                 <button
-                  onClick={() => setShowSettingsModal(false)}
+                  onClick={() => {
+                    setShowSettingsModal(false);
+                    handleSaveQuiz();
+                  }}
                   className="bg-blue-600 hover:bg-blue-700 active:scale-95 text-white font-bold text-xs px-6 py-2 rounded-xl transition-all cursor-pointer shadow-md shadow-blue-500/20"
                 >
                   Done
@@ -2509,12 +3126,15 @@ Answer: A`;
           </div>
         )}
 
-        {/* Add Category Modal */}
+        {/* Manage Categories Modal */}
         {showCategoryModal && (
           <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-sm p-4">
-            <div className="bg-white rounded-3xl w-full max-w-sm shadow-xl overflow-hidden border border-slate-100">
+            <div className="bg-white rounded-3xl w-full max-w-md shadow-xl overflow-hidden border border-slate-100 flex flex-col max-h-[85vh]">
               <div className="flex items-center justify-between p-5 border-b border-slate-100">
-                <h3 className="font-extrabold text-[#0F172A] uppercase tracking-wider text-sm">Add Category</h3>
+                <h3 className="font-extrabold text-[#0F172A] uppercase tracking-wider text-sm flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-blue-600" />
+                  <span>Manage Categories</span>
+                </h3>
                 <button
                   onClick={() => setShowCategoryModal(false)}
                   className="p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 rounded-full transition-colors cursor-pointer"
@@ -2522,35 +3142,196 @@ Answer: A`;
                   <X className="w-4 h-4" />
                 </button>
               </div>
-              <div className="p-6">
+
+              <div className="p-6 space-y-5 overflow-y-auto">
+                {/* Add Category Section */}
+                <div className="space-y-2 bg-slate-50 p-3.5 rounded-2xl border border-slate-200/80">
+                  <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Add New Category</label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="text"
+                      autoFocus
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') handleSaveCategory();
+                      }}
+                      className="flex-1 text-xs font-bold text-[#0F172A] p-2.5 bg-white border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"
+                      placeholder="e.g. Frontend Development"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleSaveCategory}
+                      className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-4 py-2.5 rounded-xl transition-all shadow-sm cursor-pointer whitespace-nowrap"
+                    >
+                      + Add
+                    </button>
+                  </div>
+                </div>
+
+                {/* Existing Categories List */}
                 <div className="space-y-2">
-                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Category Name</label>
-                  <input
-                    type="text"
-                    autoFocus
-                    value={newCategoryName}
-                    onChange={(e) => setNewCategoryName(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') handleSaveCategory();
-                    }}
-                    className="w-full text-xs font-bold text-[#0F172A] p-3 bg-slate-50 border border-slate-200 rounded-xl outline-none focus:ring-2 focus:ring-blue-500"
-                    placeholder="e.g. Frontend Development"
-                  />
+                  <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
+                    Existing Categories ({customCategories.length})
+                  </label>
+
+                  {customCategories.length === 0 ? (
+                    <div className="text-center p-4 bg-slate-50 rounded-xl border border-dashed border-slate-200 text-xs font-medium text-slate-400">
+                      No categories created yet.
+                    </div>
+                  ) : (
+                    <div className="space-y-2 max-h-56 overflow-y-auto pr-1">
+                      {customCategories.map((cat) => {
+                        const count = (editingQuiz?.questions || []).filter(q => q.category === cat).length;
+                        return (
+                          <div
+                            key={cat}
+                            className="flex items-center justify-between p-3 bg-slate-50/80 border border-slate-200 rounded-xl shadow-2xs hover:border-slate-300 transition-all"
+                          >
+                            <div className="flex items-center gap-2 truncate pr-2">
+                              <span className="text-xs font-bold text-slate-800 truncate" title={cat}>
+                                {cat}
+                              </span>
+                              <span className="text-[10px] font-semibold text-slate-500 bg-white border border-slate-200 px-2 py-0.5 rounded-md whitespace-nowrap">
+                                {count} Qs
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 flex-shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => executeDeleteCategory(cat, false)}
+                                className="px-2 py-1 text-[10px] font-bold text-slate-600 hover:text-slate-800 bg-white border border-slate-200 hover:bg-slate-100 rounded-lg transition-colors cursor-pointer"
+                                title={`Delete category tag (moves ${count} questions to "General")`}
+                              >
+                                Remove Tag
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => openDeleteCategoryModal(cat)}
+                                className="p-1.5 text-rose-500 hover:text-white hover:bg-rose-600 bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                title={`Delete category "${cat}"`}
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
-              <div className="p-5 border-t border-slate-100 flex justify-end gap-3 bg-slate-50">
+
+              <div className="p-4 border-t border-slate-100 flex justify-end bg-slate-50">
                 <button
+                  type="button"
                   onClick={() => setShowCategoryModal(false)}
-                  className="px-4 py-2 text-xs font-bold text-slate-500 hover:bg-slate-200 rounded-xl transition-all cursor-pointer"
+                  className="px-5 py-2 text-xs font-bold text-slate-600 hover:bg-slate-200 rounded-xl transition-all cursor-pointer"
                 >
-                  Cancel
+                  Close
                 </button>
-                <button
-                  onClick={handleSaveCategory}
-                  className="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-6 py-2 rounded-xl transition-all shadow-sm cursor-pointer"
-                >
-                  Save
-                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ================= DEDICATED DELETE CATEGORY CONFIRMATION MODAL ================= */}
+        {categoryToDelete && (
+          <div className="fixed inset-0 z-[120] flex items-center justify-center bg-slate-900/60 backdrop-blur-sm p-4 animate-in fade-in duration-150">
+            <div className="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden border border-slate-200 animate-in zoom-in-95 duration-150">
+              <div className="p-6 space-y-4">
+                <div className="flex items-center justify-between">
+                  <div className="w-12 h-12 rounded-2xl bg-rose-50 border border-rose-200 flex items-center justify-center text-rose-600">
+                    <Trash2 className="w-6 h-6" />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setCategoryToDelete(null)}
+                    className="p-1.5 text-slate-400 hover:bg-slate-100 hover:text-slate-600 rounded-full transition-colors cursor-pointer"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+
+                <div>
+                  <h3 className="text-base font-black text-slate-900">
+                    Delete Category "{categoryToDelete.name}"?
+                  </h3>
+                  <p className="text-xs text-slate-500 font-medium mt-1 leading-relaxed">
+                    {categoryToDelete.count > 0 ? (
+                      <>
+                        This category currently contains <strong className="text-slate-800 font-bold">{categoryToDelete.count} question{categoryToDelete.count === 1 ? '' : 's'}</strong>. Choose how you would like to proceed:
+                      </>
+                    ) : (
+                      <>Are you sure you want to delete this category? There are currently no questions assigned to it.</>
+                    )}
+                  </p>
+                </div>
+
+                <div className="space-y-2.5 pt-2">
+                  {categoryToDelete.count > 0 ? (
+                    <>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          executeDeleteCategory(categoryToDelete.name, false);
+                          setCategoryToDelete(null);
+                        }}
+                        className="w-full p-3 rounded-2xl border border-blue-200 bg-blue-50/70 hover:bg-blue-100 text-left transition-all cursor-pointer flex items-center justify-between group"
+                      >
+                        <div>
+                          <div className="text-xs font-bold text-blue-950 flex items-center gap-1.5">
+                            <span>Remove Category Tag Only</span>
+                            <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-blue-200 text-blue-800">Safe</span>
+                          </div>
+                          <div className="text-[11px] text-blue-700/80 font-medium mt-0.5">
+                            Keeps all {categoryToDelete.count} questions and moves them to "General"
+                          </div>
+                        </div>
+                        <ArrowRight className="w-4 h-4 text-blue-600 group-hover:translate-x-0.5 transition-transform shrink-0" />
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          executeDeleteCategory(categoryToDelete.name, true);
+                          setCategoryToDelete(null);
+                        }}
+                        className="w-full p-3 rounded-2xl border border-rose-200 bg-rose-50/70 hover:bg-rose-100 text-left transition-all cursor-pointer flex items-center justify-between group"
+                      >
+                        <div>
+                          <div className="text-xs font-bold text-rose-950 flex items-center gap-1.5">
+                            <span>Delete Category & All {categoryToDelete.count} Questions</span>
+                          </div>
+                          <div className="text-[11px] text-rose-700/80 font-medium mt-0.5">
+                            Permanently delete this category AND all questions inside it
+                          </div>
+                        </div>
+                        <Trash2 className="w-4 h-4 text-rose-600 group-hover:scale-110 transition-transform shrink-0" />
+                      </button>
+                    </>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        executeDeleteCategory(categoryToDelete.name, false);
+                        setCategoryToDelete(null);
+                      }}
+                      className="w-full py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all cursor-pointer shadow-md shadow-rose-500/20"
+                    >
+                      Delete Category
+                    </button>
+                  )}
+
+                  <button
+                    type="button"
+                    onClick={() => setCategoryToDelete(null)}
+                    className="w-full py-2 rounded-xl text-xs font-bold text-slate-500 hover:bg-slate-100 transition-all cursor-pointer text-center"
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             </div>
           </div>
@@ -3067,7 +3848,16 @@ Answer: A`;
                     </div>
                     <div>
                       <span className="text-[10px] font-bold text-slate-400 block uppercase">Questions</span>
-                      <span className="font-extrabold text-[#0F172A]">{q.questions?.length || q.questionsCount || 0}</span>
+                      <span className="font-extrabold text-[#0F172A] flex items-center justify-center gap-1">
+                        {q.questionsToDisplayCount && q.questionsToDisplayCount > 0 && q.questionsToDisplayCount < (q.questions?.length || q.questionsCount || 0) ? (
+                          <>
+                            <Shuffle className="w-3 h-3 text-indigo-600" />
+                            <span>{q.questionsToDisplayCount} / {q.questions?.length || q.questionsCount || 0}</span>
+                          </>
+                        ) : (
+                          <span>{q.questions?.length || q.questionsCount || 0}</span>
+                        )}
+                      </span>
                     </div>
                   </div>
 

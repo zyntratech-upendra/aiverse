@@ -35,6 +35,7 @@ const QuizSessionSchema = new Schema(
     userAgent: { type: String },
     violationsCount: { type: Number, default: 0 },
     violationLogs: [QuizViolationLogSchema],
+    assignedQuestionIds: [{ type: String }],
     createdAt: { type: Number, default: () => Date.now() },
     updatedAt: { type: Number, default: () => Date.now() },
   },

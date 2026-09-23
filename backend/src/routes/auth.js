@@ -183,9 +183,9 @@ router.post(
       }
 
       const role = normalizeRole(userDoc.role, 'participant');
+      let regDoc = null;
 
       if (role === 'participant' && !PREDEFINED_EMAILS.includes(cleanEmail)) {
-        let regDoc = null;
         if (userDoc.registration_id) {
           regDoc = await Registration.findById(userDoc.registration_id).lean();
         }
@@ -224,16 +224,19 @@ router.post(
         ? Boolean(userDoc.requiresPasswordChange)
         : (role === 'participant' && !userDoc.hasCustomPassword && !PREDEFINED_EMAILS.includes(cleanEmail));
 
+      const resolvedTeamName = (regDoc ? (regDoc.teamName || regDoc.groupName) : null) || userDoc.team_name || userDoc.teamName || '';
+      const resolvedParticipantName = (role === 'participant' && regDoc ? (regDoc.fullName || regDoc.teamLeadName || regDoc.name) : null) || userDoc.name || userDoc.display_name || cleanEmail.split('@')[0];
+
       const payload = {
         uid: userDoc.uid || userDoc._id,
         email: userDoc.email,
-        name: userDoc.name || userDoc.display_name || cleanEmail.split('@')[0],
+        name: resolvedParticipantName,
         role,
         displayRole: userDoc.displayRole || userDoc.position || (role === 'faculty' ? 'Super Admin' : (role === 'organizer' ? 'Student Organizer' : (role === 'jury' ? 'Jury Evaluator' : 'Participant'))),
         requiresPasswordChange: requiresPwChange,
-        registration_id: userDoc.registration_id || '',
-        teamName: userDoc.team_name || userDoc.teamName || '',
-        eventTitle: userDoc.event_title || userDoc.eventTitle || '',
+        registration_id: userDoc.registration_id || (regDoc ? String(regDoc._id) : ''),
+        teamName: resolvedTeamName,
+        eventTitle: (regDoc ? regDoc.eventTitle : null) || userDoc.event_title || userDoc.eventTitle || '',
       };
 
       const token = signToken(payload, { expiresIn: '7d' });

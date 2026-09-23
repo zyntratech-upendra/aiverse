@@ -92,6 +92,8 @@ async function fetchQuizFromApi(cleanId: string): Promise<Quiz | null> {
       scheduledStartTime: raw.scheduledStartTime || 0,
       scheduledEndTime: raw.scheduledEndTime || 0,
       questionsCount: Number(raw.questionsCount) || (raw.questions?.length || 0),
+      questionsToDisplayCount: raw.questionsToDisplayCount ? Number(raw.questionsToDisplayCount) : undefined,
+      categoryDistribution: raw.categoryDistribution || {},
       shuffleQuestions: !!raw.shuffleQuestions,
       shuffleOptions: !!raw.shuffleOptions,
       questions: raw.questions || [],
@@ -278,7 +280,8 @@ export async function saveDraftAnswers(
  */
 export function evaluateQuizAnswers(
   quiz: Quiz,
-  answers: Record<string, string> = {}
+  answers: Record<string, string> = {},
+  assignedQuestionIds?: string[]
 ): {
   score: number;
   maxScore: number;
@@ -288,8 +291,23 @@ export function evaluateQuizAnswers(
   unansweredCount: number;
   passed: boolean;
 } {
-  const questions = quiz.questions || [];
+  let questions = quiz.questions || [];
   const defaultPts = Number(quiz.pointsPerQuestion) || 2;
+
+  if (Array.isArray(assignedQuestionIds) && assignedQuestionIds.length > 0) {
+    const idSet = new Set(assignedQuestionIds);
+    questions = questions.filter(q => idSet.has(q.id));
+  } else if (quiz.questionsToDisplayCount && quiz.questionsToDisplayCount > 0 && quiz.questionsToDisplayCount < questions.length) {
+    const answeredKeys = Object.keys(answers || {});
+    if (answeredKeys.length > 0) {
+      const answeredSet = new Set(answeredKeys);
+      const answeredQuestions = questions.filter(q => answeredSet.has(q.id));
+      if (answeredQuestions.length > 0) {
+        questions = answeredQuestions;
+      }
+    }
+  }
+
   let score = 0;
   let maxScore = 0;
   let correctCount = 0;
@@ -298,7 +316,9 @@ export function evaluateQuizAnswers(
 
   if (questions.length === 0) {
     const answered = Object.keys(answers).filter(k => !!answers[k]).length;
-    const totalQ = quiz.questionsCount || (quiz.totalMarks ? Math.round(quiz.totalMarks / defaultPts) : answered);
+    const totalQ = (quiz.questionsToDisplayCount && quiz.questionsToDisplayCount > 0) 
+      ? quiz.questionsToDisplayCount 
+      : (quiz.questionsCount || (quiz.totalMarks ? Math.round(quiz.totalMarks / defaultPts) : answered));
     return {
       score: 0,
       maxScore: quiz.totalMarks || (totalQ * defaultPts) || 50,
@@ -347,6 +367,83 @@ export function evaluateQuizAnswers(
     unansweredCount,
     passed
   };
+}
+
+/**
+ * Seeded deterministic pseudo-random question picker (Fisher-Yates with Mulberry32 PRNG)
+ */
+export function getSeededRandomQuestions<T extends { id: string }>(
+  items: T[],
+  count: number,
+  seedStr: string
+): T[] {
+  if (!items || items.length <= count || count <= 0) return items || [];
+
+  let seed = 0;
+  const str = String(seedStr || 'aiverse_quiz_seed');
+  for (let i = 0; i < str.length; i++) {
+    seed = (seed * 31 + str.charCodeAt(i)) >>> 0;
+  }
+
+  const random = () => {
+    let t = (seed += 0x6d2b79f5);
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+
+  const shuffled = [...items];
+  for (let i = shuffled.length - 1; i > 0; i--) {
+    const j = Math.floor(random() * (i + 1));
+    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+  }
+
+  return shuffled.slice(0, count);
+}
+
+/**
+ * Deterministic category-wise or global question picker (seeded with Mulberry32 PRNG)
+ */
+export function selectSeededCategorizedQuestions<T extends { id: string; category?: string }>(
+  questions: T[],
+  categoryDistribution?: Record<string, number>,
+  globalCount?: number,
+  seedStr?: string
+): T[] {
+  if (!Array.isArray(questions) || questions.length === 0) return [];
+  const seed = seedStr || 'aiverse_quiz_seed';
+
+  if (categoryDistribution && typeof categoryDistribution === 'object' && Object.keys(categoryDistribution).length > 0) {
+    const questionsByCategory = new Map<string, T[]>();
+    for (const q of questions) {
+      const cat = (q.category && String(q.category).trim()) || 'General';
+      if (!questionsByCategory.has(cat)) questionsByCategory.set(cat, []);
+      questionsByCategory.get(cat)!.push(q);
+    }
+
+    let selectedQuestions: T[] = [];
+    for (const [cat, catQs] of questionsByCategory.entries()) {
+      const quotaVal = categoryDistribution[cat];
+      if (quotaVal !== undefined && quotaVal !== null && (quotaVal as any) !== '') {
+        const quota = Number(quotaVal);
+        if (quota > 0) {
+          const picked = getSeededRandomQuestions(catQs, Math.min(quota, catQs.length), `${seed}_cat_${cat}`);
+          selectedQuestions.push(...picked);
+        }
+      } else {
+        selectedQuestions.push(...catQs);
+      }
+    }
+
+    // Keep questions separated category by category (do not mix across categories)
+    return selectedQuestions;
+  }
+
+  if (globalCount && globalCount > 0 && globalCount < questions.length) {
+    return getSeededRandomQuestions(questions, globalCount, seed);
+  }
+
+  return questions;
 }
 
 // ─── Submission Lock ─────────────────────────────────────────────────────────
@@ -428,7 +525,7 @@ export async function submitQuizFinal(
     };
 
     if (targetQuiz) {
-      evalResult = evaluateQuizAnswers(targetQuiz, answers);
+      evalResult = evaluateQuizAnswers(targetQuiz, answers, session.assignedQuestionIds);
     }
 
     const submissionPayload: QuizSubmission = {
@@ -441,6 +538,7 @@ export async function submitQuizFinal(
       userName: session.userName,
       teamId: session.teamId,
       teamName: session.teamName,
+      assignedQuestionIds: session.assignedQuestionIds || [],
       answers,
       answeredCount,
       unansweredCount: evalResult.unansweredCount ?? unansweredCount,
