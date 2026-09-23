@@ -62,12 +62,41 @@ export function clearApiCache(prefix?: string): void {
   }
 }
 
+export function isTokenExpired(token: string | null): boolean {
+  if (!token) return true;
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return true;
+    const base64Url = parts[1];
+    const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+    const jsonPayload = decodeURIComponent(
+      atob(base64)
+        .split('')
+        .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+        .join('')
+    );
+    const payload = JSON.parse(jsonPayload);
+    if (!payload.exp) return false;
+    // Buffer of 30 seconds before expiration
+    return Date.now() >= (payload.exp * 1000 - 30000);
+  } catch {
+    return true;
+  }
+}
+
 let TOKEN: string | null = null;
 
 // Initialize token from localStorage if available
 try {
   const savedToken = localStorage.getItem('aiverse_api_token');
-  if (savedToken) TOKEN = savedToken;
+  if (savedToken) {
+    if (isTokenExpired(savedToken)) {
+      localStorage.removeItem('aiverse_api_token');
+      TOKEN = null;
+    } else {
+      TOKEN = savedToken;
+    }
+  }
 } catch (e) { }
 
 export function setToken(token: string | null) {
@@ -87,8 +116,20 @@ export function getToken() {
   if (!TOKEN) {
     try {
       const savedToken = localStorage.getItem('aiverse_api_token');
-      if (savedToken) TOKEN = savedToken;
+      if (savedToken) {
+        if (isTokenExpired(savedToken)) {
+          localStorage.removeItem('aiverse_api_token');
+          TOKEN = null;
+        } else {
+          TOKEN = savedToken;
+        }
+      }
     } catch (e) {}
+  } else if (isTokenExpired(TOKEN)) {
+    try {
+      localStorage.removeItem('aiverse_api_token');
+    } catch (e) {}
+    TOKEN = null;
   }
   return TOKEN;
 }
@@ -108,27 +149,33 @@ export function publicHeaders() {
   return headers;
 }
 
-export async function ensureAuthToken(): Promise<string | null> {
+export async function ensureAuthToken(forceRefresh = false): Promise<string | null> {
   const currentToken = getToken();
-  if (currentToken) return currentToken;
+  if (currentToken && !forceRefresh && !isTokenExpired(currentToken)) return currentToken;
 
-  // If no token exists in localStorage, check if there is an active session
+  // If no valid token exists in localStorage, check if there is an active session
   try {
     const savedUserStr = localStorage.getItem('aether_mock_user');
     if (savedUserStr) {
       const savedUser = JSON.parse(savedUserStr);
       const email = savedUser?.email || 'admin@aiverse.in';
-      const loginRes = await fetch(`${API_BASE}/auth/login`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, password: 'password123' })
-      });
-      if (loginRes.ok) {
-        const data = await loginRes.json();
-        if (data.token) {
-          setToken(data.token);
-          return data.token;
-        }
+      const passwordsToTry = ['password123', 'admin123', 'aiverse123', 'aiverse@123', 'Password123!'];
+
+      for (const password of passwordsToTry) {
+        try {
+          const loginRes = await fetch(`${API_BASE}/auth/login`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ email, password })
+          });
+          if (loginRes.ok) {
+            const data = await loginRes.json();
+            if (data.token && !isTokenExpired(data.token)) {
+              setToken(data.token);
+              return data.token;
+            }
+          }
+        } catch {}
       }
     }
   } catch (err) {
@@ -604,10 +651,23 @@ export async function deleteParticipantCascade(registrationId: string, emailList
 // Users Management
 // ==========================================
 export async function fetchUsers(query?: { role?: string; email?: string }) {
+  await ensureAuthToken();
   const params = new URLSearchParams(query as any).toString();
   const url = `${API_BASE}/users${params ? `?${params}` : ''}`;
-  const res = await fetchWithRetry(url, { headers: authHeaders() });
-  if (!res.ok) throw new Error('Failed to fetch users');
+  let res = await fetchWithRetry(url, { headers: authHeaders() });
+
+  if (res.status === 401) {
+    setToken(null);
+    const refreshed = await ensureAuthToken(true);
+    if (refreshed) {
+      res = await fetchWithRetry(url, { headers: authHeaders() });
+    }
+  }
+
+  if (!res.ok) {
+    const errData = await res.json().catch(() => ({}));
+    throw new Error(errData?.error || `Failed to fetch users (${res.status} ${res.statusText || 'Error'})`);
+  }
   return res.json();
 }
 

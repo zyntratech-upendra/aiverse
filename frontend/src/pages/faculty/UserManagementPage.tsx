@@ -186,57 +186,7 @@ const UserManagementPage: React.FC = () => {
         console.warn("[UserManagement] Notice fetching users from backend:", backErr);
       }
 
-      // 2. Fetch from Supabase / Mongo
-      try {
-        const supaUsers = await userService.getUsers();
-        if (supaUsers && supaUsers.length > 0) {
-          supaUsers.forEach((su: any) => {
-            const email = (su.email || "").toLowerCase().trim();
-            const rawName = (su.name || su.display_name || "").trim();
-
-            if (email && seenEmails.has(email)) {
-              const idx = combinedList.findIndex(item => (item.email || "").toLowerCase().trim() === email);
-              if (idx >= 0) {
-                combinedList[idx] = {
-                  ...combinedList[idx],
-                  personal_email: combinedList[idx].personal_email || su.personal_email || "",
-                  personalEmail: combinedList[idx].personalEmail || su.personal_email || "",
-                  image: combinedList[idx].image || su.image || "",
-                  bio: combinedList[idx].bio || su.bio || "",
-                  linkedin: combinedList[idx].linkedin || su.linkedin || "",
-                  github: combinedList[idx].github || su.github || "",
-                  phone: combinedList[idx].phone || su.phone || "",
-                  order: su.order !== undefined ? Number(su.order) : combinedList[idx].order,
-                };
-              }
-            } else {
-              if (email) seenEmails.add(email);
-              combinedList.push({
-                id: su.id || "",
-                name: rawName || "Member",
-                email: su.email || "",
-                personal_email: su.personal_email || "",
-                personalEmail: su.personal_email || "",
-                phone: su.phone || "",
-                role: (su.role || "Student Member") as any,
-                position: su.position || su.role || "",
-                sub_role: su.sub_role || su.position || "",
-                order: su.order !== undefined ? Number(su.order) : undefined,
-                status: (su.status || "Active") as any,
-                image: su.image || "",
-                showInAbout: su.show_in_about ? "Yes" : "No",
-                bio: su.bio || "",
-                linkedin: su.linkedin || "",
-                github: su.github || ""
-              });
-            }
-          });
-        }
-      } catch (supaErr) {
-        console.warn("[UserManagement] Notice fetching users from Supabase:", supaErr);
-      }
-
-      // 3. Fetch organizers
+      // 2. Fetch organizers
       try {
         const orgs = await fetchOrganizers();
         if (orgs && orgs.length > 0) {

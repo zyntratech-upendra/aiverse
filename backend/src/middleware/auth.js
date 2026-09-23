@@ -50,6 +50,7 @@ function requireAdmin(req, res, next) {
       userRole.includes('faculty') ||
       userRole.includes('coordinator') ||
       userRole.includes('advisor') ||
+      userRole.includes('organizer') ||
       userRole.includes('super');
 
     if (!isAdmin) {

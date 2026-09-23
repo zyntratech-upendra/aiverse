@@ -2,6 +2,7 @@ import React, { createContext, useContext, useState, useEffect } from "react";
 import { 
   setToken as setApiToken, 
   getToken, 
+  ensureAuthToken,
   loginWithBackend, 
   registerWithBackend, 
   updatePassword as apiUpdatePassword, 
@@ -44,18 +45,17 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 // Helper function to normalize system role across the auth system
 export const normalizeRole = (
-  rawRole: any, 
+  role: string | undefined | null, 
   defaultRole: "faculty" | "organizer" | "member" | "jury" | "participant" = "participant"
 ): "faculty" | "organizer" | "member" | "jury" | "participant" => {
-  if (!rawRole) return defaultRole;
-  const lower = String(rawRole).toLowerCase().trim();
+  if (!role) return defaultRole;
+  const lower = role.toLowerCase().trim();
   if (
     lower === "faculty" || 
-    lower === "admin" || 
     lower.includes("super admin") || 
     lower.includes("faculty advisor") || 
     lower.includes("faculty coordinator") || 
-    lower.includes("system admin")
+    lower.includes("admin")
   ) {
     return "faculty";
   }
@@ -63,10 +63,7 @@ export const normalizeRole = (
     lower === "organizer" || 
     lower.includes("lead organizer") || 
     lower.includes("student organizer") || 
-    lower.includes("co-organizer") || 
-    lower.includes("co organizer") || 
-    lower.includes("secretary") || 
-    lower.includes("facilitator")
+    lower.includes("organizer")
   ) {
     return "organizer";
   }
@@ -75,8 +72,9 @@ export const normalizeRole = (
   }
   if (
     lower === "participant" || 
+    lower.includes("team lead") || 
     lower.includes("participant") || 
-    lower === "member" || 
+    lower.includes("member") || 
     lower.includes("student member") || 
     lower.includes("student") || 
     lower.includes("attendee") || 
@@ -121,9 +119,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               localStorage.setItem("aether_mock_user", JSON.stringify(profile));
               setLoading(false);
               return;
+            } else {
+              setApiToken(null);
             }
           } catch (e) {
-            console.warn("[AuthContext] fetchCurrentUser error, trying cached user:", e);
+            console.warn("[AuthContext] fetchCurrentUser error, clearing stale token:", e);
+            setApiToken(null);
           }
         }
 
@@ -131,14 +132,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           try {
             const saved = JSON.parse(savedUserStr);
             if (saved && saved.email && saved.role) {
-              setUser(saved);
-              // Silent backend re-authentication if token was missing or expired
-              if (!token) {
-                loginWithBackend(saved.email, "password123")
-                  .then((res) => {
-                    if (res?.token) setApiToken(res.token);
-                  })
-                  .catch(() => {});
+              // Attempt to verify or acquire token before trusting cached user session
+              const acquiredToken = await ensureAuthToken();
+              if (acquiredToken) {
+                setUser(saved);
+              } else {
+                console.warn("[AuthContext] Session expired, requiring re-login");
+                localStorage.removeItem("aether_mock_user");
+                setUser(null);
               }
             } else {
               localStorage.removeItem("aether_mock_user");
@@ -280,8 +281,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         .then((res) => {
           if (res?.token) setApiToken(res.token);
         })
-        .catch((err) => {
-          console.warn("[AuthContext] setMockRole silent backend login notice:", err);
+        .catch(async () => {
+          const freshToken = await ensureAuthToken(true);
+          if (freshToken) setApiToken(freshToken);
         });
     }
   };
