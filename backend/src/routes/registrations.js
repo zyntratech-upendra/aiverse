@@ -262,13 +262,14 @@ router.put(
       userRole.includes('super') ||
       userRole.includes('organizer');
 
+    const existing = await Registration.findOne({ $or: [{ _id: id }, { id: id }] }).lean();
+    if (!existing) {
+      return res.status(404).json({ success: false, error: 'Registration not found' });
+    }
+
     // If not elevated, ensure the user owns or belongs to this registration
     if (!isElevated) {
       const userEmail = (req.user?.email || '').toLowerCase().trim();
-      const existing = await Registration.findOne({ $or: [{ _id: id }, { id: id }] }).lean();
-      if (!existing) {
-        return res.status(404).json({ success: false, error: 'Registration not found' });
-      }
       const isLead = [
         existing.teamLeadEmail,
         existing.leadEmail,
@@ -285,6 +286,22 @@ router.put(
 
       if (!isLead && !isMember && !isRegisteredUser) {
         return res.status(403).json({ success: false, error: 'Forbidden: You can only update your own team registration' });
+      }
+    }
+
+    if (Array.isArray(updateData.members)) {
+      updateData.members = updateData.members.filter((m) => m && (m.name || m.email || m.studentId));
+      if (!updateData.teamSize) {
+        updateData.teamSize = Math.max(1, updateData.members.length + 1);
+      }
+    }
+
+    if (updateData.teamSize && existing.eventId) {
+      const newSize = Number(updateData.teamSize) || 1;
+      const oldSize = Number(existing.teamSize) || (Array.isArray(existing.members) ? existing.members.length + 1 : 1);
+      const delta = newSize - oldSize;
+      if (delta !== 0) {
+        await Event.findByIdAndUpdate(existing.eventId, { $inc: { currentReg: delta } }).catch(() => {});
       }
     }
 

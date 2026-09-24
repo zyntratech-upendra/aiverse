@@ -1302,10 +1302,59 @@ const RegistrationsManagementPage: React.FC = () => {
     }
   };
 
+  const handleAddRosterMember = () => {
+    if (!selectedReg) return;
+    setEditForm(prev => {
+      const base = prev || JSON.parse(JSON.stringify(selectedReg));
+      const currentMembers = Array.isArray(base.members) ? [...base.members] : [];
+      return {
+        ...base,
+        members: [
+          ...currentMembers,
+          {
+            name: "",
+            studentId: "",
+            email: "",
+            phone: "",
+            phoneNumber: "",
+            role: "Developer"
+          }
+        ]
+      };
+    });
+    setIsEditing(true);
+  };
+
+  const handleRemoveRosterMember = (idx: number) => {
+    setEditForm(prev => {
+      if (!prev) return null;
+      const currentMembers = Array.isArray(prev.members) ? [...prev.members] : [];
+      return {
+        ...prev,
+        members: currentMembers.filter((_, i) => i !== idx)
+      };
+    });
+  };
+
   const handleSaveRoster = async () => {
     if (!editForm) return;
     try {
-      await updateRegistration(editForm.id, {
+      const rawMembers = Array.isArray(editForm.members) ? editForm.members : [];
+      const updatedMembers = rawMembers
+        .map(m => ({
+          ...m,
+          name: (m.name || "").trim(),
+          studentId: (m.studentId || "").trim(),
+          email: (m.email || "").trim(),
+          phone: (m.phone || m.phoneNumber || "").trim(),
+          phoneNumber: (m.phone || m.phoneNumber || "").trim(),
+          role: m.role || "Developer"
+        }))
+        .filter(m => m.name || m.studentId || m.email || m.phone);
+
+      const newTeamSize = updatedMembers.length + 1;
+
+      const patchPayload = {
         groupName: editForm.groupName,
         teamLeadName: editForm.teamLeadName,
         teamLeadEmail: editForm.teamLeadEmail,
@@ -1317,12 +1366,24 @@ const RegistrationsManagementPage: React.FC = () => {
         branch: editForm.branch || "",
         section: editForm.section || "",
         year: editForm.year || "",
-        members: editForm.members
-      });
+        collegeName: editForm.collegeName || editForm.college || "",
+        college: editForm.collegeName || editForm.college || "",
+        collegePlace: editForm.collegePlace || "",
+        members: updatedMembers,
+        teamSize: newTeamSize
+      };
+
+      await updateRegistration(editForm.id, patchPayload);
       
+      const updatedItem: RegistrationItem = {
+        ...editForm,
+        ...patchPayload
+      };
+
       // Update local state list
-      setRegistrations(prev => prev.map(r => r.id === editForm.id ? { ...r, ...editForm } : r));
-      setSelectedReg(editForm);
+      setRegistrations(prev => prev.map(r => r.id === editForm.id ? { ...r, ...updatedItem } : r));
+      setSelectedReg(updatedItem);
+      setEditForm(JSON.parse(JSON.stringify(updatedItem)));
       setIsEditing(false);
       alert("Roster successfully updated.");
     } catch (err) {
@@ -2136,12 +2197,29 @@ const RegistrationsManagementPage: React.FC = () => {
                   <span className="text-[10px] font-mono font-bold text-slate-400 bg-slate-200/60 px-2 py-0.5 rounded-md">
                     #{selectedReg.id.slice(0, 8).toUpperCase()}
                   </span>
-                  {!isEditing && (
+                  {!isEditing ? (
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setIsEditing(true)}
+                        className="px-2.5 py-1 text-[10px] font-black bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200/50 rounded-lg transition-all cursor-pointer"
+                      >
+                        Edit Roster
+                      </button>
+                      <button
+                        onClick={handleAddRosterMember}
+                        className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-black bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200/70 rounded-lg transition-all cursor-pointer"
+                      >
+                        <Plus className="w-3 h-3" />
+                        Add Member
+                      </button>
+                    </div>
+                  ) : (
                     <button
-                      onClick={() => setIsEditing(true)}
-                      className="px-2.5 py-1 text-[10px] font-black bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200/50 rounded-lg transition-all cursor-pointer"
+                      onClick={handleAddRosterMember}
+                      className="flex items-center gap-1 px-2.5 py-1 text-[10px] font-black bg-blue-600 hover:bg-blue-700 text-white rounded-lg transition-all cursor-pointer shadow-xs"
                     >
-                      Edit Roster
+                      <Plus className="w-3 h-3" />
+                      Add Member
                     </button>
                   )}
                 </h3>
@@ -2173,7 +2251,7 @@ const RegistrationsManagementPage: React.FC = () => {
                     {isEditing ? (
                       <input 
                         type="text" 
-                        className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-blue-500 bg-white" 
+                        className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-850 focus:outline-none focus:border-blue-500 bg-white" 
                         value={editForm?.groupName || ""}
                         onChange={(e) => setEditForm(prev => prev ? { ...prev, groupName: e.target.value } : null)}
                       />
@@ -2189,7 +2267,7 @@ const RegistrationsManagementPage: React.FC = () => {
                       <input 
                         type="tel" 
                         placeholder="e.g. 9876543210"
-                        className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-blue-500 bg-white" 
+                        className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-850 focus:outline-none focus:border-blue-500 bg-white" 
                         value={editForm?.phoneNumber || ""}
                         onChange={(e) => setEditForm(prev => prev ? { ...prev, phoneNumber: e.target.value } : null)}
                       />
@@ -2216,7 +2294,9 @@ const RegistrationsManagementPage: React.FC = () => {
                     <span className="text-[10px] font-bold text-slate-400 block uppercase">Team Size & Status</span>
                     <div className="flex items-center gap-1.5 mt-0.5">
                       <span className="px-2 py-0.5 bg-blue-100/80 text-blue-700 font-black rounded-md text-[10px]">
-                        {selectedReg.teamSize || selectedReg.members.length + 1} Member{selectedReg.members.length > 0 ? "s" : ""}
+                        {isEditing 
+                          ? `${(editForm?.members?.length || 0) + 1} Member${(editForm?.members?.length || 0) > 0 ? "s" : ""}` 
+                          : `${selectedReg.teamSize || selectedReg.members.length + 1} Member${selectedReg.members.length > 0 ? "s" : ""}`}
                       </span>
                       <span className={`px-2 py-0.5 font-black rounded-md text-[10px] ${
                         selectedReg.status === "Confirmed" 
@@ -2381,8 +2461,16 @@ const RegistrationsManagementPage: React.FC = () => {
                 <div className="flex items-center justify-between pl-1">
                   <h4 className="text-[11px] font-black text-slate-500 uppercase tracking-wider flex items-center gap-1.5">
                     <ClipboardList className="h-3.5 w-3.5 text-blue-600" />
-                    Roster List ({selectedReg.members.length + 1} members)
+                    Roster List ({isEditing ? ((editForm?.members?.length || 0) + 1) : (selectedReg.members.length + 1)} members)
                   </h4>
+                  <button
+                    type="button"
+                    onClick={handleAddRosterMember}
+                    className="flex items-center gap-1 px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-600 border border-blue-200/80 font-bold rounded-xl text-xs transition-all cursor-pointer shadow-2xs hover:shadow-xs active:scale-95"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    <span>Add Member</span>
+                  </button>
                 </div>
                 
                 <div className="border border-slate-200/80 rounded-2xl overflow-hidden bg-white shadow-xs">
@@ -2395,6 +2483,7 @@ const RegistrationsManagementPage: React.FC = () => {
                           <th className="px-4 py-3">Email Address</th>
                           <th className="px-4 py-3">Phone Number</th>
                           <th className="px-4 py-3 text-right">Role</th>
+                          {isEditing && <th className="px-3 py-3 text-center w-14">Action</th>}
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
@@ -2472,17 +2561,24 @@ const RegistrationsManagementPage: React.FC = () => {
                               Leader
                             </span>
                           </td>
+                          {isEditing && (
+                            <td className="px-3 py-3.5 text-center text-slate-300 text-[10px]" title="Team Lead cannot be removed">
+                              —
+                            </td>
+                          )}
                         </tr>
 
                         {/* Teammates */}
-                        {selectedReg.members.map((m, idx) => {
-                          const roles = ["Developer", "Researcher", "Analyst"];
+                        {((isEditing ? (editForm?.members || []) : selectedReg.members) || []).map((m, idx) => {
+                          const roles = ["Developer", "Researcher", "Analyst", "Designer", "Member"];
                           const badgeStyles = [
                             "bg-sky-50 text-sky-700 border-sky-100",
                             "bg-emerald-50 text-emerald-700 border-emerald-100",
-                            "bg-indigo-50 text-indigo-700 border-indigo-100"
+                            "bg-indigo-50 text-indigo-700 border-indigo-100",
+                            "bg-purple-50 text-purple-700 border-purple-100",
+                            "bg-amber-50 text-amber-700 border-amber-100"
                           ];
-                          const roleName = roles[idx % roles.length];
+                          const roleName = m.role || roles[idx % roles.length];
                           const badgeStyle = badgeStyles[idx % badgeStyles.length];
 
                           return (
@@ -2492,13 +2588,14 @@ const RegistrationsManagementPage: React.FC = () => {
                                   <div className="space-y-1">
                                     <input 
                                       type="text" 
+                                      placeholder="Member Name"
                                       className="w-full px-2 py-1 border border-slate-200 rounded-lg text-xs font-bold text-slate-850" 
-                                      value={editForm?.members[idx]?.name || ""}
+                                      value={editForm?.members?.[idx]?.name || ""}
                                       onChange={(e) => {
                                         const val = e.target.value;
                                         setEditForm(prev => {
                                           if (!prev) return null;
-                                          const members = [...prev.members];
+                                          const members = [...(prev.members || [])];
                                           members[idx] = { ...members[idx], name: val };
                                           return { ...prev, members };
                                         });
@@ -2517,13 +2614,14 @@ const RegistrationsManagementPage: React.FC = () => {
                                 {isEditing ? (
                                   <input 
                                     type="text" 
-                                    className="w-full px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-700 font-bold" 
-                                    value={editForm?.members[idx]?.studentId || ""}
+                                    placeholder="Student ID / Roll No"
+                                    className="w-full px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-700 font-bold uppercase" 
+                                    value={editForm?.members?.[idx]?.studentId || ""}
                                     onChange={(e) => {
                                       const val = e.target.value;
                                       setEditForm(prev => {
                                         if (!prev) return null;
-                                        const members = [...prev.members];
+                                        const members = [...(prev.members || [])];
                                         members[idx] = { ...members[idx], studentId: val };
                                         return { ...prev, members };
                                       });
@@ -2536,14 +2634,15 @@ const RegistrationsManagementPage: React.FC = () => {
                               <td className="px-4 py-3.5 text-slate-655">
                                 {isEditing ? (
                                   <input 
-                                    type="text" 
+                                    type="email" 
+                                    placeholder="Email Address"
                                     className="w-full px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-705" 
-                                    value={editForm?.members[idx]?.email || ""}
+                                    value={editForm?.members?.[idx]?.email || ""}
                                     onChange={(e) => {
                                       const val = e.target.value;
                                       setEditForm(prev => {
                                         if (!prev) return null;
-                                        const members = [...prev.members];
+                                        const members = [...(prev.members || [])];
                                         members[idx] = { ...members[idx], email: val };
                                         return { ...prev, members };
                                       });
@@ -2558,13 +2657,13 @@ const RegistrationsManagementPage: React.FC = () => {
                                   <input 
                                     type="tel" 
                                     placeholder="Phone"
-                                    className="w-full px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-705" 
-                                    value={editForm?.members[idx]?.phone || editForm?.members[idx]?.phoneNumber || ""}
+                                    className="w-full px-2 py-1 border border-slate-200 rounded-lg text-xs text-slate-705 font-bold" 
+                                    value={editForm?.members?.[idx]?.phone || editForm?.members?.[idx]?.phoneNumber || ""}
                                     onChange={(e) => {
                                       const val = e.target.value;
                                       setEditForm(prev => {
                                         if (!prev) return null;
-                                        const members = [...prev.members];
+                                        const members = [...(prev.members || [])];
                                         members[idx] = { ...members[idx], phone: val, phoneNumber: val };
                                         return { ...prev, members };
                                       });
@@ -2583,12 +2682,12 @@ const RegistrationsManagementPage: React.FC = () => {
                                 {isEditing ? (
                                   <select 
                                     className="px-2 py-1 border border-slate-200 rounded-lg text-[10px] font-bold text-slate-600 bg-white focus:outline-none" 
-                                    value={editForm?.members[idx]?.role || roleName}
+                                    value={editForm?.members?.[idx]?.role || roleName}
                                     onChange={(e) => {
                                       const val = e.target.value;
                                       setEditForm(prev => {
                                         if (!prev) return null;
-                                        const members = [...prev.members];
+                                        const members = [...(prev.members || [])];
                                         members[idx] = { ...members[idx], role: val };
                                         return { ...prev, members };
                                       });
@@ -2597,6 +2696,8 @@ const RegistrationsManagementPage: React.FC = () => {
                                     <option value="Developer">Developer</option>
                                     <option value="Researcher">Researcher</option>
                                     <option value="Analyst">Analyst</option>
+                                    <option value="Designer">Designer</option>
+                                    <option value="Member">Member</option>
                                   </select>
                                 ) : (
                                   <span className={`inline-block px-2.5 py-0.5 border font-black rounded text-[8px] uppercase tracking-wide ${badgeStyle}`}>
@@ -2604,6 +2705,18 @@ const RegistrationsManagementPage: React.FC = () => {
                                   </span>
                                 )}
                               </td>
+                              {isEditing && (
+                                <td className="px-3 py-3.5 text-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => handleRemoveRosterMember(idx)}
+                                    className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                    title="Remove this member"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                  </button>
+                                </td>
+                              )}
                             </tr>
                           );
                         })}
@@ -2611,6 +2724,20 @@ const RegistrationsManagementPage: React.FC = () => {
                     </table>
                   </div>
                 </div>
+
+                {/* Add Member Quick Action in Edit Mode */}
+                {isEditing && (
+                  <button
+                    type="button"
+                    onClick={handleAddRosterMember}
+                    className="w-full py-2.5 border-2 border-dashed border-blue-200 hover:border-blue-400 hover:bg-blue-50/60 bg-blue-50/20 text-blue-600 font-bold rounded-2xl text-xs flex items-center justify-center gap-2 transition-all cursor-pointer group shadow-2xs"
+                  >
+                    <div className="w-5 h-5 rounded-lg bg-blue-100 group-hover:bg-blue-600 group-hover:text-white text-blue-600 flex items-center justify-center transition-colors">
+                      <Plus className="w-3.5 h-3.5" />
+                    </div>
+                    <span>Add Member to Team</span>
+                  </button>
+                )}
               </div>
 
               {/* Payment Proof & Transaction Details for Faculty View */}
