@@ -26,12 +26,20 @@ import {
   BarChart3,
   TrendingUp,
   Sparkles,
-  Award
+  Award,
+  UserPlus,
+  Plus,
+  ArrowRight,
+  ArrowLeft,
+  ChevronRight,
+  Layers,
+  Tag
 } from "lucide-react";
 import SEO from "../../components/layout/SEO";
 import { 
   fetchRegistrations as apiFetchRegistrations, 
   fetchEvents as apiFetchEvents,
+  createRegistration,
   updateRegistration,
   deleteParticipantCascade 
 } from "../../services/apiClient";
@@ -492,6 +500,339 @@ const RegistrationsManagementPage: React.FC = () => {
 
   // College Analytics Modal State
   const [isCollegeModalOpen, setIsCollegeModalOpen] = useState(false);
+
+  // Add Registration Modal State & Handlers
+  const [isAddModalOpen, setIsAddModalOpen] = useState(false);
+  const [addStep, setAddStep] = useState<1 | 2>(1);
+  const [selectedAddEventId, setSelectedAddEventId] = useState<string>("");
+  const [addEventSearch, setAddEventSearch] = useState("");
+  const [isSubmittingAdd, setIsSubmittingAdd] = useState(false);
+  const [addFormError, setAddFormError] = useState<string | null>(null);
+
+  const [addForm, setAddForm] = useState<{
+    registrationType: "Group" | "Individual";
+    teamName: string;
+    fullName: string;
+    email: string;
+    phone: string;
+    studentId: string;
+    collegeName: string;
+    customCollegeName: string;
+    collegePlace: string;
+    branch: string;
+    customBranch: string;
+    year: string;
+    section: string;
+    status: "Confirmed" | "Not Confirmed" | "Waitlisted";
+    paymentStatus: "Free" | "Paid";
+    transactionId: string;
+    foodPreference: "Veg" | "Non-Veg" | "None";
+    sendConfirmationEmail: boolean;
+    members: Array<{
+      name: string;
+      email: string;
+      phone: string;
+      studentId: string;
+      college: string;
+      role: string;
+    }>;
+  }>({
+    registrationType: "Group",
+    teamName: "",
+    fullName: "",
+    email: "",
+    phone: "",
+    studentId: "",
+    collegeName: "Vishnu Institute of Technology",
+    customCollegeName: "",
+    collegePlace: "Bhimavaram",
+    branch: "CSE",
+    customBranch: "",
+    year: "3rd Year",
+    section: "A",
+    status: "Confirmed",
+    paymentStatus: "Free",
+    transactionId: "",
+    foodPreference: "Veg",
+    sendConfirmationEmail: true,
+    members: []
+  });
+
+  const resetAddForm = (preselectedEventId?: string) => {
+    let targetEvId = preselectedEventId || "";
+    if (!targetEvId && selectedEvent !== "All") {
+      const found = eventsList.find(e => (e.title || "").trim().toLowerCase() === selectedEvent.trim().toLowerCase());
+      if (found) targetEvId = found.id || found._id;
+    }
+    setSelectedAddEventId(targetEvId);
+    setAddStep(targetEvId ? 2 : 1);
+    setAddEventSearch("");
+    setAddFormError(null);
+
+    const targetEv = eventsList.find(e => (e.id === targetEvId || e._id === targetEvId));
+    const isIndivOnly = targetEv && (targetEv.registrationType === "Individual" || targetEv.maxTeamSize === 1);
+
+    setAddForm({
+      registrationType: isIndivOnly ? "Individual" : "Group",
+      teamName: "",
+      fullName: "",
+      email: "",
+      phone: "",
+      studentId: "",
+      collegeName: "Vishnu Institute of Technology",
+      customCollegeName: "",
+      collegePlace: "Bhimavaram",
+      branch: "CSE",
+      customBranch: "",
+      year: "3rd Year",
+      section: "A",
+      status: "Confirmed",
+      paymentStatus: "Free",
+      transactionId: "",
+      foodPreference: "Veg",
+      sendConfirmationEmail: true,
+      members: []
+    });
+    setIsAddModalOpen(true);
+  };
+
+  const handleSelectEventForAdd = (eventId: string) => {
+    setSelectedAddEventId(eventId);
+    const targetEv = eventsList.find(e => (e.id === eventId || e._id === eventId));
+    const isIndivOnly = targetEv && (targetEv.registrationType === "Individual" || targetEv.maxTeamSize === 1);
+    setAddForm(prev => ({
+      ...prev,
+      registrationType: isIndivOnly ? "Individual" : prev.registrationType
+    }));
+    setAddFormError(null);
+    setAddStep(2);
+  };
+
+  const handleAddMember = () => {
+    const targetEv = eventsList.find(e => (e.id === selectedAddEventId || e._id === selectedAddEventId));
+    const maxMembers = targetEv?.maxTeamSize ? targetEv.maxTeamSize - 1 : 5;
+    if (addForm.members.length >= maxMembers) {
+      alert(`Maximum team size for this event is ${targetEv?.maxTeamSize || 6} participants.`);
+      return;
+    }
+    const currentCollege = addForm.collegeName === "Other" ? addForm.customCollegeName : addForm.collegeName;
+    setAddForm(prev => ({
+      ...prev,
+      members: [
+        ...prev.members,
+        {
+          name: "",
+          email: "",
+          phone: "",
+          studentId: "",
+          college: currentCollege || "Vishnu Institute of Technology",
+          role: "Member"
+        }
+      ]
+    }));
+  };
+
+  const handleRemoveMember = (idx: number) => {
+    setAddForm(prev => ({
+      ...prev,
+      members: prev.members.filter((_, i) => i !== idx)
+    }));
+  };
+
+  const handleMemberChange = (idx: number, field: string, val: string) => {
+    setAddForm(prev => {
+      const nextMembers = [...prev.members];
+      nextMembers[idx] = { ...nextMembers[idx], [field]: val };
+      return { ...prev, members: nextMembers };
+    });
+  };
+
+  const handleCreateRegistration = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    setAddFormError(null);
+
+    const targetEv = eventsList.find(e => (e.id === selectedAddEventId || e._id === selectedAddEventId));
+    if (!targetEv) {
+      setAddFormError("Please select an event for registration.");
+      setAddStep(1);
+      return;
+    }
+
+    const isGroup = addForm.registrationType === "Group";
+    const cleanLeadName = addForm.fullName.trim();
+    const cleanLeadEmail = addForm.email.trim().toLowerCase();
+    const cleanLeadPhone = addForm.phone.trim();
+    const cleanLeadId = addForm.studentId.trim().toUpperCase();
+
+    if (!cleanLeadName) {
+      setAddFormError("Participant / Team Lead name is required.");
+      return;
+    }
+    if (!cleanLeadEmail || !cleanLeadEmail.includes("@")) {
+      setAddFormError("Please provide a valid participant email address.");
+      return;
+    }
+    if (!cleanLeadPhone) {
+      setAddFormError("Contact phone number is required.");
+      return;
+    }
+    if (!cleanLeadId) {
+      setAddFormError("Roll number or Student ID is required.");
+      return;
+    }
+    if (isGroup && !addForm.teamName.trim()) {
+      setAddFormError("Team name is required for group registrations.");
+      return;
+    }
+
+    // Validate members
+    if (isGroup && addForm.members.length > 0) {
+      const seenEmails = new Set<string>([cleanLeadEmail]);
+      for (let i = 0; i < addForm.members.length; i++) {
+        const m = addForm.members[i];
+        const mName = m.name.trim();
+        const mEmail = m.email.trim().toLowerCase();
+        if (!mName) {
+          setAddFormError(`Member #${i + 2}'s full name is required.`);
+          return;
+        }
+        if (!mEmail || !mEmail.includes("@")) {
+          setAddFormError(`Member #${i + 2} (${mName || "Member"}) requires a valid email address.`);
+          return;
+        }
+        if (seenEmails.has(mEmail)) {
+          setAddFormError(`Duplicate email detected for member #${i + 2} (${mEmail}). All participants must have unique emails.`);
+          return;
+        }
+        seenEmails.add(mEmail);
+      }
+    }
+
+    const finalCollege = addForm.collegeName === "Other" 
+      ? (addForm.customCollegeName.trim() || "Other College") 
+      : addForm.collegeName;
+    const finalBranch = addForm.branch === "Other" 
+      ? (addForm.customBranch.trim() || "Engineering") 
+      : addForm.branch;
+    const finalTeamName = isGroup ? addForm.teamName.trim() : "Individual RSVP";
+    const teamSize = isGroup ? addForm.members.length + 1 : 1;
+    const isVishnu = finalCollege.toLowerCase().includes("vishnu") || 
+      finalCollege.toLowerCase().includes("vitb") || 
+      finalCollege.toLowerCase().includes("svecw");
+
+    const payload: any = {
+      eventId: targetEv.id || targetEv._id,
+      eventTitle: targetEv.title || "AI Verse Event",
+      category: targetEv.category || "General",
+      isQuiz: Boolean(targetEv.isQuiz || targetEv.category === "QUIZ" || targetEv.category === "Quiz"),
+      groupName: finalTeamName,
+      teamName: finalTeamName,
+      fullName: cleanLeadName,
+      teamLeadName: cleanLeadName,
+      email: cleanLeadEmail,
+      teamLeadEmail: cleanLeadEmail,
+      userEmail: cleanLeadEmail,
+      phoneNumber: cleanLeadPhone,
+      teamLeadPhone: cleanLeadPhone,
+      phone: cleanLeadPhone,
+      studentId: cleanLeadId,
+      teamLeadStudentId: cleanLeadId,
+      rollNo: cleanLeadId,
+      collegeName: finalCollege,
+      college: finalCollege,
+      collegePlace: addForm.collegePlace.trim() || "Bhimavaram",
+      branch: finalBranch,
+      year: addForm.year,
+      section: addForm.section.trim(),
+      teamSize,
+      members: isGroup ? addForm.members.map(m => ({
+        name: m.name.trim(),
+        email: m.email.trim().toLowerCase(),
+        phone: m.phone.trim(),
+        studentId: m.studentId.trim().toUpperCase(),
+        college: m.college.trim() || finalCollege,
+        role: m.role || "Member"
+      })) : [],
+      status: addForm.status,
+      paymentStatus: addForm.paymentStatus,
+      transactionId: addForm.transactionId.trim(),
+      foodPreference: addForm.foodPreference,
+      needsFood: Boolean(addForm.foodPreference && addForm.foodPreference !== "None"),
+      isVishnuStudent: isVishnu,
+      confirmedAt: addForm.status === "Confirmed" ? Date.now() : undefined,
+      createdAt: Date.now()
+    };
+
+    try {
+      setIsSubmittingAdd(true);
+      const res = await createRegistration(payload);
+      const newRegId = res.id || res.registration?.id || res.registration?._id || `reg_${Date.now()}`;
+      
+      const newRegistrationItem: RegistrationItem = {
+        id: newRegId,
+        eventId: payload.eventId,
+        eventTitle: payload.eventTitle,
+        groupName: finalTeamName,
+        teamName: finalTeamName,
+        teamEmail: "",
+        teamLeadName: cleanLeadName,
+        teamLeadEmail: cleanLeadEmail,
+        teamLeadStudentId: cleanLeadId,
+        phoneNumber: cleanLeadPhone,
+        teamLeadPhone: cleanLeadPhone,
+        collegeName: finalCollege,
+        college: finalCollege,
+        collegePlace: payload.collegePlace,
+        branch: finalBranch,
+        section: addForm.section.trim(),
+        year: addForm.year,
+        teamSize,
+        members: payload.members,
+        status: addForm.status,
+        paymentStatus: addForm.paymentStatus,
+        transactionId: addForm.transactionId.trim(),
+        foodPreference: addForm.foodPreference,
+        createdAt: Date.now()
+      };
+
+      setRegistrations(prev => [newRegistrationItem, ...prev]);
+
+      // If email confirmation is enabled and status is Confirmed, deliver confirmation receipt
+      if (addForm.sendConfirmationEmail && addForm.status === "Confirmed") {
+        try {
+          const ticketUrl = `https://aiversevitb.in/ticket/${newRegId}`;
+          const emailContent = buildRegistrationConfirmationEmail({
+            teamLeadName: cleanLeadName,
+            eventTitle: payload.eventTitle,
+            groupName: finalTeamName,
+            teamLeadStudentId: cleanLeadId,
+            teamSize,
+            transactionId: payload.transactionId,
+            members: payload.members,
+            ticketUrl,
+            whatsGroupLink: targetEv.whatsGroupLink || targetEv.whatsappGroupLink || targetEv.whatsappGroupUrl || "",
+          });
+          await sendResendEmail({
+            to: cleanLeadEmail,
+            subject: emailContent.subject,
+            text: emailContent.text,
+            html: emailContent.html,
+          });
+        } catch (emailErr) {
+          console.warn("Could not send confirmation email:", emailErr);
+        }
+      }
+
+      setConfirmSuccessMsg(`Successfully registered ${isGroup ? `team "${finalTeamName}"` : cleanLeadName} for ${payload.eventTitle}!`);
+      setTimeout(() => setConfirmSuccessMsg(null), 6000);
+      setIsAddModalOpen(false);
+    } catch (err: any) {
+      console.error("Error creating registration:", err);
+      setAddFormError(err.message || "Failed to create registration. Please check inputs and try again.");
+    } finally {
+      setIsSubmittingAdd(false);
+    }
+  };
 
   const handleExport = (format: "csv" | "excel" = "csv") => {
     const targetRegs = exportSelectedEvent === "All"
@@ -1429,6 +1770,15 @@ const RegistrationsManagementPage: React.FC = () => {
               >
                 <FileSpreadsheet className="h-3.5 w-3.5" />
                 Export Data
+              </button>
+
+              <button
+                onClick={() => resetAddForm()}
+                className="flex items-center gap-1.5 justify-center px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs shadow-sm hover:shadow transition-all whitespace-nowrap cursor-pointer"
+                title="Add a new participant or team registration"
+              >
+                <UserPlus className="h-3.5 w-3.5" />
+                Add Registration
               </button>
 
               {!isDeleteSelectionMode ? (
@@ -2747,6 +3097,705 @@ const RegistrationsManagementPage: React.FC = () => {
               >
                 Close
               </button>
+            </div>
+
+          </div>
+        </div>,
+        document.body
+      )}
+
+      {/* ================= ADD REGISTRATION MODAL ================= */}
+      {isAddModalOpen && typeof document !== "undefined" && createPortal(
+        <div 
+          className="fixed inset-0 w-screen h-screen z-[99999] bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-6 animate-in fade-in duration-200 overflow-hidden"
+          onClick={() => !isSubmittingAdd && setIsAddModalOpen(false)}
+        >
+          <div 
+            className="bg-white w-full max-w-3xl rounded-3xl border border-slate-100 shadow-2xl overflow-hidden text-left max-h-[92vh] flex flex-col relative z-10 animate-in zoom-in-95 duration-200"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Modal Header */}
+            <div className="p-5 sm:p-6 border-b border-slate-100 flex items-center justify-between bg-slate-50/70 shrink-0">
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center font-bold shadow-inner shrink-0">
+                  <UserPlus className="h-5 w-5" />
+                </div>
+                <div>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <h3 className="text-base sm:text-lg font-extrabold text-slate-850">
+                      Add Event Registration
+                    </h3>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        type="button"
+                        onClick={() => setAddStep(1)}
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition-all cursor-pointer ${
+                          addStep === 1 ? "bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300" : "bg-slate-100 text-slate-600 hover:bg-slate-200"
+                        }`}
+                      >
+                        1. Select Event
+                      </button>
+                      <ChevronRight className="w-3 h-3 text-slate-400" />
+                      <button
+                        type="button"
+                        onClick={() => selectedAddEventId && setAddStep(2)}
+                        disabled={!selectedAddEventId}
+                        className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition-all ${
+                          addStep === 2 
+                            ? "bg-emerald-100 text-emerald-800 ring-1 ring-emerald-300" 
+                            : selectedAddEventId 
+                            ? "bg-slate-100 text-slate-600 hover:bg-slate-200 cursor-pointer" 
+                            : "bg-slate-50 text-slate-400 cursor-not-allowed"
+                        }`}
+                      >
+                        2. Registration Details
+                      </button>
+                    </div>
+                  </div>
+                  <p className="text-xs text-slate-500 font-medium mt-0.5">
+                    {addStep === 1 
+                      ? "Select the event you want to register participants or teams into."
+                      : "Fill in team/participant details, college affiliation, and membership roster."}
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => !isSubmittingAdd && setIsAddModalOpen(false)}
+                className="p-2 rounded-xl hover:bg-slate-200/60 text-slate-400 hover:text-slate-700 transition-colors cursor-pointer shrink-0"
+                title="Close"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <div className="p-5 sm:p-6 space-y-5 flex-1 overflow-y-auto">
+              
+              {/* Error Message */}
+              {addFormError && (
+                <div className="p-3.5 bg-rose-50 border border-rose-200 rounded-2xl flex items-start gap-2.5 text-rose-800 text-xs font-semibold animate-in fade-in duration-200">
+                  <AlertCircle className="w-4 h-4 text-rose-600 shrink-0 mt-0.5" />
+                  <div className="flex-1">{addFormError}</div>
+                </div>
+              )}
+
+              {/* ================= STEP 1: SELECT EVENT ================= */}
+              {addStep === 1 && (
+                <div className="space-y-4">
+                  <div className="relative">
+                    <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+                    <input
+                      type="text"
+                      placeholder="Search events by title, category, or track..."
+                      value={addEventSearch}
+                      onChange={(e) => setAddEventSearch(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2.5 border border-slate-200 rounded-xl focus:outline-none focus:border-emerald-500 font-medium text-xs text-slate-800 bg-slate-50/40 focus:bg-white transition-all"
+                    />
+                  </div>
+
+                  <div className="space-y-2.5 max-h-[50vh] overflow-y-auto pr-1">
+                    {(() => {
+                      const filteredEvents = (eventsList || []).filter(ev => {
+                        const q = addEventSearch.trim().toLowerCase();
+                        if (!q) return true;
+                        const title = (ev.title || "").toLowerCase();
+                        const cat = (ev.category || "").toLowerCase();
+                        const track = (ev.track || "").toLowerCase();
+                        return title.includes(q) || cat.includes(q) || track.includes(q);
+                      });
+
+                      if (filteredEvents.length === 0) {
+                        return (
+                          <div className="text-center py-10 px-4 bg-slate-50 border border-dashed border-slate-200 rounded-2xl">
+                            <Calendar className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                            <p className="text-xs font-bold text-slate-600">No matching events found</p>
+                            <p className="text-[11px] text-slate-400 mt-0.5">Try searching with a different keyword</p>
+                          </div>
+                        );
+                      }
+
+                      return filteredEvents.map((ev) => {
+                        const evId = ev.id || ev._id;
+                        const isSelected = selectedAddEventId === evId;
+                        const isIndiv = ev.registrationType === "Individual" || ev.maxTeamSize === 1;
+
+                        return (
+                          <div
+                            key={evId}
+                            onClick={() => handleSelectEventForAdd(evId)}
+                            className={`p-4 rounded-2xl border transition-all cursor-pointer flex items-center justify-between gap-3 ${
+                              isSelected
+                                ? "bg-emerald-50/70 border-emerald-500 ring-2 ring-emerald-500/20 shadow-xs"
+                                : "bg-white border-slate-200 hover:border-emerald-300 hover:bg-slate-50/50"
+                            }`}
+                          >
+                            <div className="space-y-1 min-w-0">
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <h4 className="text-xs sm:text-sm font-black text-slate-850 truncate">
+                                  {ev.title}
+                                </h4>
+                                {ev.category && (
+                                  <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-blue-100 text-blue-700">
+                                    {ev.category}
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-[11px] text-slate-500 flex items-center gap-2 flex-wrap">
+                                <span>Type: <strong className="text-slate-700 font-bold">{isIndiv ? "Individual (1 Person)" : `Team (${ev.minTeamSize || 1}-${ev.maxTeamSize || 6} Members)`}</strong></span>
+                                {ev.date && <span>• Date: <strong className="text-slate-700">{ev.date}</strong></span>}
+                                {ev.currentReg !== undefined && (
+                                  <span>• Current Regs: <strong className="text-slate-700">{ev.currentReg}</strong></span>
+                                )}
+                              </p>
+                            </div>
+
+                            <div className="shrink-0 flex items-center gap-2">
+                              {isSelected ? (
+                                <div className="w-7 h-7 rounded-full bg-emerald-600 text-white flex items-center justify-center shadow-xs">
+                                  <Check className="w-4 h-4" />
+                                </div>
+                              ) : (
+                                <div className="w-7 h-7 rounded-full border-2 border-slate-200 flex items-center justify-center text-slate-400 group-hover:border-slate-300">
+                                  <ChevronRight className="w-4 h-4" />
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+              )}
+
+              {/* ================= STEP 2: REGISTRATION DETAILS ================= */}
+              {addStep === 2 && (
+                <div className="space-y-5">
+                  {/* Selected Event Card Banner */}
+                  {(() => {
+                    const activeEv = eventsList.find(e => (e.id === selectedAddEventId || e._id === selectedAddEventId));
+                    return (
+                      <div className="p-3.5 bg-emerald-50/60 border border-emerald-200/80 rounded-2xl flex items-center justify-between gap-3">
+                        <div className="space-y-0.5">
+                          <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Selected Event</span>
+                          <div className="flex items-center gap-2">
+                            <span className="text-xs sm:text-sm font-extrabold text-slate-850">{activeEv?.title || "Event Selected"}</span>
+                            {activeEv?.category && (
+                              <span className="text-[9.5px] font-bold px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800">
+                                {activeEv.category}
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setAddStep(1)}
+                          className="px-2.5 py-1 text-[11px] font-bold bg-white text-emerald-700 border border-emerald-300 hover:bg-emerald-50 rounded-xl transition-colors cursor-pointer shrink-0"
+                        >
+                          Change Event
+                        </button>
+                      </div>
+                    );
+                  })()}
+
+                  {/* Registration Type Selector */}
+                  <div className="space-y-1.5">
+                    <label className="text-[11px] font-black text-slate-700 uppercase tracking-wider block">
+                      Registration Type
+                    </label>
+                    <div className="grid grid-cols-2 gap-3">
+                      <button
+                        type="button"
+                        onClick={() => setAddForm(prev => ({ ...prev, registrationType: "Group" }))}
+                        className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
+                          addForm.registrationType === "Group"
+                            ? "bg-blue-50/80 border-blue-500 ring-2 ring-blue-500/20"
+                            : "bg-white border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                          addForm.registrationType === "Group" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"
+                        }`}>
+                          <UsersIcon className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-bold text-slate-850 block">Team / Group</span>
+                          <span className="text-[10px] text-slate-500">Lead + multiple members</span>
+                        </div>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() => setAddForm(prev => ({ ...prev, registrationType: "Individual" }))}
+                        className={`p-3 rounded-2xl border text-left transition-all cursor-pointer flex items-center gap-3 ${
+                          addForm.registrationType === "Individual"
+                            ? "bg-blue-50/80 border-blue-500 ring-2 ring-blue-500/20"
+                            : "bg-white border-slate-200 hover:bg-slate-50"
+                        }`}
+                      >
+                        <div className={`w-8 h-8 rounded-xl flex items-center justify-center ${
+                          addForm.registrationType === "Individual" ? "bg-blue-600 text-white" : "bg-slate-100 text-slate-500"
+                        }`}>
+                          <User className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <span className="text-xs font-bold text-slate-850 block">Individual RSVP</span>
+                          <span className="text-[10px] text-slate-500">Single participant</span>
+                        </div>
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Team Name (if Group) */}
+                  {addForm.registrationType === "Group" && (
+                    <div className="space-y-1">
+                      <label className="text-[11px] font-bold text-slate-700 flex items-center gap-1">
+                        <span>Team / Group Name</span>
+                        <span className="text-rose-500">*</span>
+                      </label>
+                      <input
+                        type="text"
+                        placeholder="e.g. CodeForge, AI Gladiators, ByteSquad"
+                        value={addForm.teamName}
+                        onChange={(e) => setAddForm(prev => ({ ...prev, teamName: e.target.value }))}
+                        className="w-full px-3.5 py-2 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-500 bg-white"
+                      />
+                    </div>
+                  )}
+
+                  {/* Lead / Participant Primary Details */}
+                  <div className="bg-slate-50/70 border border-slate-200/70 rounded-2xl p-4 sm:p-5 space-y-3.5">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-[11px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                        <User className="w-3.5 h-3.5 text-blue-600" />
+                        <span>{addForm.registrationType === "Group" ? "Team Lead Details" : "Participant Details"}</span>
+                      </h4>
+                      <span className="text-[10px] text-slate-400 font-medium">Primary Contact</span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                      {/* Full Name */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block">
+                          Full Name <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Rama Raju K"
+                          value={addForm.fullName}
+                          onChange={(e) => setAddForm(prev => ({ ...prev, fullName: e.target.value }))}
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-500 bg-white"
+                        />
+                      </div>
+
+                      {/* Email */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block">
+                          Email Address <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="email"
+                          placeholder="e.g. ramaraju@gmail.com"
+                          value={addForm.email}
+                          onChange={(e) => setAddForm(prev => ({ ...prev, email: e.target.value }))}
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-500 bg-white"
+                        />
+                      </div>
+
+                      {/* Phone */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block">
+                          Contact / Phone Number <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="tel"
+                          placeholder="e.g. 9876543210"
+                          value={addForm.phone}
+                          onChange={(e) => setAddForm(prev => ({ ...prev, phone: e.target.value }))}
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-500 bg-white"
+                        />
+                      </div>
+
+                      {/* Roll / Student ID */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block">
+                          Roll No / Student ID <span className="text-rose-500">*</span>
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. 22PA1A4541"
+                          value={addForm.studentId}
+                          onChange={(e) => setAddForm(prev => ({ ...prev, studentId: e.target.value }))}
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-500 bg-white uppercase"
+                        />
+                      </div>
+
+                      {/* College Selection */}
+                      <div className="space-y-1 sm:col-span-2">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block">
+                          College / University <span className="text-rose-500">*</span>
+                        </label>
+                        <select
+                          value={addForm.collegeName}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            let place = addForm.collegePlace;
+                            if (val.includes("Vishnu") || val.includes("SVECW")) place = "Bhimavaram";
+                            else if (val.includes("BVRIT Hyderabad")) place = "Hyderabad";
+                            else if (val.includes("B V Raju") || val.includes("BVRIT")) place = "Narsapur";
+                            else if (val.includes("SRKR")) place = "Bhimavaram";
+                            else if (val.includes("Sasi")) place = "Tadepalligudem";
+                            else if (val.includes("Swarnandhra")) place = "Narsapur";
+                            else if (val.includes("Aditya")) place = "Surampalem";
+                            else if (val.includes("JNTU")) place = "Kakinada";
+                            setAddForm(prev => ({ ...prev, collegeName: val, collegePlace: place }));
+                          }}
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-850 focus:outline-none focus:border-emerald-500 bg-white"
+                        >
+                          <option value="Vishnu Institute of Technology">Vishnu Institute of Technology (VITB), Bhimavaram</option>
+                          <option value="Shri Vishnu Engineering College for Women">Shri Vishnu Engineering College for Women (SVECW), Bhimavaram</option>
+                          <option value="B V Raju Institute of Technology">B V Raju Institute of Technology (BVRIT), Narsapur</option>
+                          <option value="BVRIT Hyderabad College of Engineering for Women">BVRIT Hyderabad College of Engineering for Women, Hyderabad</option>
+                          <option value="SRKR Engineering College">SRKR Engineering College, Bhimavaram</option>
+                          <option value="Sasi Institute of Technology and Engineering">Sasi Institute of Technology and Engineering, Tadepalligudem</option>
+                          <option value="Swarnandhra College of Engineering and Technology">Swarnandhra College of Engineering and Technology, Narsapur</option>
+                          <option value="Aditya Engineering College">Aditya Engineering College, Surampalem</option>
+                          <option value="Raghu Engineering College">Raghu Engineering College, Visakhapatnam</option>
+                          <option value="Gayatri Vidya Parishad College of Engineering">Gayatri Vidya Parishad College of Engineering (GVP), Visakhapatnam</option>
+                          <option value="Jawaharlal Nehru Technological University">JNTU Kakinada / Hyderabad</option>
+                          <option value="Other">Other Institution (Type manually below)</option>
+                        </select>
+                      </div>
+
+                      {/* Custom College Name (if Other) */}
+                      {addForm.collegeName === "Other" && (
+                        <div className="space-y-1 sm:col-span-2">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block">
+                            Enter Institution Name <span className="text-rose-500">*</span>
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Indian Institute of Technology, Madras"
+                            value={addForm.customCollegeName}
+                            onChange={(e) => setAddForm(prev => ({ ...prev, customCollegeName: e.target.value }))}
+                            className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-500 bg-white"
+                          />
+                        </div>
+                      )}
+
+                      {/* College City/Place */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block">
+                          College City / Location
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. Bhimavaram"
+                          value={addForm.collegePlace}
+                          onChange={(e) => setAddForm(prev => ({ ...prev, collegePlace: e.target.value }))}
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-500 bg-white"
+                        />
+                      </div>
+
+                      {/* Branch / Department */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block">
+                          Branch / Department
+                        </label>
+                        <select
+                          value={addForm.branch}
+                          onChange={(e) => setAddForm(prev => ({ ...prev, branch: e.target.value }))}
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-850 focus:outline-none focus:border-emerald-500 bg-white"
+                        >
+                          <option value="CSE">Computer Science & Engineering (CSE)</option>
+                          <option value="IT">Information Technology (IT)</option>
+                          <option value="AI & DS">Artificial Intelligence & Data Science (AI & DS)</option>
+                          <option value="AI & ML">Artificial Intelligence & Machine Learning (AI & ML)</option>
+                          <option value="CSBS">Computer Science & Business Systems (CSBS)</option>
+                          <option value="Cyber Security">Cyber Security</option>
+                          <option value="ECE">Electronics & Communication Engineering (ECE)</option>
+                          <option value="EEE">Electrical & Electronics Engineering (EEE)</option>
+                          <option value="Mechanical">Mechanical Engineering</option>
+                          <option value="Civil">Civil Engineering</option>
+                          <option value="Other">Other Specialization</option>
+                        </select>
+                      </div>
+
+                      {addForm.branch === "Other" && (
+                        <div className="space-y-1 sm:col-span-2">
+                          <label className="text-[10px] font-bold text-slate-500 uppercase block">
+                            Enter Department / Specialization
+                          </label>
+                          <input
+                            type="text"
+                            placeholder="e.g. Data Analytics / Biotech"
+                            value={addForm.customBranch}
+                            onChange={(e) => setAddForm(prev => ({ ...prev, customBranch: e.target.value }))}
+                            className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-500 bg-white"
+                          />
+                        </div>
+                      )}
+
+                      {/* Year of Study */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block">
+                          Year of Study
+                        </label>
+                        <select
+                          value={addForm.year}
+                          onChange={(e) => setAddForm(prev => ({ ...prev, year: e.target.value }))}
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-850 focus:outline-none focus:border-emerald-500 bg-white"
+                        >
+                          <option value="1st Year">1st Year</option>
+                          <option value="2nd Year">2nd Year</option>
+                          <option value="3rd Year">3rd Year</option>
+                          <option value="4th Year">4th Year</option>
+                        </select>
+                      </div>
+
+                      {/* Section */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block">
+                          Section (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. A, B, C"
+                          value={addForm.section}
+                          onChange={(e) => setAddForm(prev => ({ ...prev, section: e.target.value }))}
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 focus:outline-none focus:border-emerald-500 bg-white uppercase"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Team Members Section (if Group) */}
+                  {addForm.registrationType === "Group" && (
+                    <div className="space-y-3 pt-1">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <h4 className="text-[11px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                            <UsersIcon className="w-3.5 h-3.5 text-indigo-600" />
+                            <span>Additional Team Members ({addForm.members.length})</span>
+                          </h4>
+                          <span className="text-[10px] text-slate-500">
+                            Total team size: 1 Lead + {addForm.members.length} Member{addForm.members.length === 1 ? "" : "s"} = {addForm.members.length + 1}
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={handleAddMember}
+                          className="flex items-center gap-1 px-3 py-1.5 bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 font-bold rounded-xl text-xs transition-all cursor-pointer"
+                        >
+                          <Plus className="w-3.5 h-3.5" />
+                          Add Member
+                        </button>
+                      </div>
+
+                      {addForm.members.length === 0 ? (
+                        <div className="p-4 bg-slate-50 border border-dashed border-slate-200 rounded-2xl text-center text-xs text-slate-500 font-medium">
+                          No additional members added yet. Click "+ Add Member" to add team roster participants.
+                        </div>
+                      ) : (
+                        <div className="space-y-3">
+                          {addForm.members.map((m, idx) => (
+                            <div key={idx} className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/50 space-y-2.5">
+                              <div className="flex items-center justify-between pb-1.5 border-b border-slate-200/60">
+                                <span className="text-[11px] font-extrabold text-slate-700">
+                                  Member #{idx + 2}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() => handleRemoveMember(idx)}
+                                  className="p-1 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-lg transition-colors cursor-pointer"
+                                  title="Remove Member"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5 text-rose-500" />
+                                </button>
+                              </div>
+
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 text-xs">
+                                <input
+                                  type="text"
+                                  placeholder="Full Name *"
+                                  value={m.name}
+                                  onChange={(e) => handleMemberChange(idx, "name", e.target.value)}
+                                  className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 bg-white"
+                                />
+                                <input
+                                  type="email"
+                                  placeholder="Email Address *"
+                                  value={m.email}
+                                  onChange={(e) => handleMemberChange(idx, "email", e.target.value)}
+                                  className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 bg-white"
+                                />
+                                <input
+                                  type="tel"
+                                  placeholder="Phone Number"
+                                  value={m.phone}
+                                  onChange={(e) => handleMemberChange(idx, "phone", e.target.value)}
+                                  className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 bg-white"
+                                />
+                                <input
+                                  type="text"
+                                  placeholder="Roll No / Student ID"
+                                  value={m.studentId}
+                                  onChange={(e) => handleMemberChange(idx, "studentId", e.target.value)}
+                                  className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 bg-white uppercase"
+                                />
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
+                  {/* Administrative & Status Options */}
+                  <div className="p-4 bg-slate-50/70 border border-slate-200/70 rounded-2xl space-y-3">
+                    <h4 className="text-[11px] font-black text-slate-700 uppercase tracking-wider flex items-center gap-1.5">
+                      <Tag className="w-3.5 h-3.5 text-slate-600" />
+                      <span>Status & Preferences</span>
+                    </h4>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                      {/* Registration Status */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block">Status</label>
+                        <select
+                          value={addForm.status}
+                          onChange={(e) => setAddForm(prev => ({ ...prev, status: e.target.value as any }))}
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-850 bg-white"
+                        >
+                          <option value="Confirmed">Confirmed (Approved)</option>
+                          <option value="Not Confirmed">Not Confirmed (Pending)</option>
+                          <option value="Waitlisted">Waitlisted</option>
+                        </select>
+                      </div>
+
+                      {/* Payment Status */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block">Payment</label>
+                        <select
+                          value={addForm.paymentStatus}
+                          onChange={(e) => setAddForm(prev => ({ ...prev, paymentStatus: e.target.value as any }))}
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-850 bg-white"
+                        >
+                          <option value="Free">Free</option>
+                          <option value="Paid">Paid / Confirmed</option>
+                        </select>
+                      </div>
+
+                      {/* Food Preference */}
+                      <div className="space-y-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block">Food Preference</label>
+                        <select
+                          value={addForm.foodPreference}
+                          onChange={(e) => setAddForm(prev => ({ ...prev, foodPreference: e.target.value as any }))}
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-850 bg-white"
+                        >
+                          <option value="Veg">Vegetarian</option>
+                          <option value="Non-Veg">Non-Vegetarian</option>
+                          <option value="None">Not Applicable</option>
+                        </select>
+                      </div>
+                    </div>
+
+                    {addForm.paymentStatus === "Paid" && (
+                      <div className="space-y-1 pt-1">
+                        <label className="text-[10px] font-bold text-slate-500 uppercase block">Transaction ID / UTR Number</label>
+                        <input
+                          type="text"
+                          placeholder="e.g. UPI1234567890"
+                          value={addForm.transactionId}
+                          onChange={(e) => setAddForm(prev => ({ ...prev, transactionId: e.target.value }))}
+                          className="w-full px-3 py-1.5 border border-slate-200 rounded-xl text-xs font-bold text-slate-800 bg-white"
+                        />
+                      </div>
+                    )}
+
+                    <label className="flex items-center gap-2 pt-1 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={addForm.sendConfirmationEmail}
+                        onChange={(e) => setAddForm(prev => ({ ...prev, sendConfirmationEmail: e.target.checked }))}
+                        className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500 border-slate-300"
+                      />
+                      <span className="text-xs font-bold text-slate-700">
+                        Send official confirmation email with event ticket & pass to participant
+                      </span>
+                    </label>
+                  </div>
+                </div>
+              )}
+
+            </div>
+
+            {/* Modal Footer */}
+            <div className="p-4 sm:p-5 border-t border-slate-100 bg-slate-50/80 flex items-center justify-between gap-3 shrink-0">
+              {addStep === 2 ? (
+                <button
+                  type="button"
+                  onClick={() => setAddStep(1)}
+                  disabled={isSubmittingAdd}
+                  className="flex items-center gap-1.5 px-4 py-2 bg-white border border-slate-200 hover:bg-slate-100 text-slate-700 font-bold rounded-xl text-xs transition-colors cursor-pointer disabled:opacity-50"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5" />
+                  <span>Back to Events</span>
+                </button>
+              ) : (
+                <div />
+              )}
+
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => !isSubmittingAdd && setIsAddModalOpen(false)}
+                  disabled={isSubmittingAdd}
+                  className="px-4 py-2 bg-white border border-slate-200 text-slate-700 hover:bg-slate-50 font-bold rounded-xl text-xs transition-colors cursor-pointer shadow-2xs disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+
+                {addStep === 1 ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!selectedAddEventId) {
+                        setAddFormError("Please select an event to proceed.");
+                        return;
+                      }
+                      setAddFormError(null);
+                      setAddStep(2);
+                    }}
+                    disabled={!selectedAddEventId}
+                    className="flex items-center gap-1.5 px-5 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-emerald-500/20 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    <span>Next: Enter Details</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </button>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => handleCreateRegistration()}
+                    disabled={isSubmittingAdd}
+                    className="flex items-center gap-2 px-6 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white font-bold rounded-xl text-xs transition-all shadow-md shadow-emerald-500/20 cursor-pointer disabled:opacity-50"
+                  >
+                    {isSubmittingAdd ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>Registering...</span>
+                      </>
+                    ) : (
+                      <>
+                        <CheckCircle2 className="w-4 h-4" />
+                        <span>Submit Registration</span>
+                      </>
+                    )}
+                  </button>
+                )}
+              </div>
             </div>
 
           </div>
