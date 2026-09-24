@@ -905,8 +905,8 @@ export const ParticipantDashboardPage: React.FC = () => {
                 </div>
               )}
 
-              {/* 3. FOUR ESSENTIAL LIVE METRIC TILES */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+              {/* 3. ESSENTIAL LIVE METRIC TILES */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
                 
                 {/* Tile 1: Stage & Round */}
                 <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-2xs space-y-3 hover:border-blue-300 transition-colors">
@@ -925,46 +925,6 @@ export const ParticipantDashboardPage: React.FC = () => {
                     <span className="font-extrabold text-emerald-600 bg-emerald-50 px-2 py-0.5 rounded-full border border-emerald-200/60">
                       {roundStatus === "Qualified" || currentRound > 1 ? "✓ Qualified" : "Active"}
                     </span>
-                  </div>
-                </div>
-
-                {/* Tile 2: Online Quiz Score - ALWAYS VISIBLE */}
-                <div className="bg-white border border-slate-200/90 rounded-2xl p-5 shadow-2xs space-y-3 hover:border-purple-300 transition-colors">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-black uppercase tracking-wider text-slate-400">Online Quiz</span>
-                    <div className="w-8 h-8 rounded-xl bg-purple-50 text-purple-600 flex items-center justify-center border border-purple-200/60">
-                      <HelpCircle className="w-4 h-4" />
-                    </div>
-                  </div>
-                  <div>
-                    <h3 className="text-xl font-black text-[#0F172A]">
-                      {quizScore !== null 
-                        ? `${quizScore} / ${quizMaxScore || 50}` 
-                        : Object.keys(userSubmissions).length > 0 && Object.values(userSubmissions)[0]?.score !== undefined
-                          ? `${Object.values(userSubmissions)[0].score} / ${Object.values(userSubmissions)[0].maxScore || 50}`
-                          : Object.keys(userSubmissions).length > 0 
-                            ? "Submitted ✓" 
-                            : "Assessment Pending"}
-                    </h3>
-                    <p className="text-xs font-bold text-purple-600 mt-0.5">
-                      {quizPercentage !== null 
-                        ? `${quizPercentage}% Score Achieved` 
-                        : Object.keys(userSubmissions).length > 0 && Object.values(userSubmissions)[0]?.percentage !== undefined
-                          ? `${Object.values(userSubmissions)[0].percentage}% Score Achieved`
-                          : currentRound > 1
-                            ? "Round 1 Quiz Completed"
-                            : "Preliminary Assessment"}
-                    </p>
-                  </div>
-                  <div className="pt-2 border-t border-slate-100 flex items-center justify-between text-[11px] font-semibold text-slate-500">
-                    <span>Performance</span>
-                    <button 
-                      onClick={() => setActiveTab("quizzes")}
-                      className="font-extrabold text-purple-600 hover:text-purple-700 flex items-center gap-1 cursor-pointer"
-                    >
-                      <span>{quizScore !== null || Object.keys(userSubmissions).length > 0 ? "View Answers & Score" : "Take Exam"}</span>
-                      <ChevronRight className="w-3 h-3" />
-                    </button>
                   </div>
                 </div>
 
