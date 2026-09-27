@@ -15,6 +15,7 @@ import {
   deleteEvent, 
   createRegistration,
   updateRegistration,
+  batchRoundAccess,
   fetchAllQuizzes,
   fetchQuizSubmissions,
   fetchJuryEvaluations,
@@ -459,8 +460,9 @@ const EventManagementPage: React.FC = () => {
   const [loginAccessSuccessMsg, setLoginAccessSuccessMsg] = useState<string | null>(null);
   const [isProvisioningLoginAccess, setIsProvisioningLoginAccess] = useState(false);
   const [provisionedTeamIds, setProvisionedTeamIds] = useState<string[]>([]);
+  const [authTargetRound, setAuthTargetRound] = useState<number>(1);
   const [eventRosterViewMode, setEventRosterViewMode] = useState<"teams" | "individuals">("teams");
-  const [eventRosterFilter, setEventRosterFilter] = useState<"all" | "teams" | "individuals" | "confirmed" | "pending">("all");
+  const [eventRosterFilter, setEventRosterFilter] = useState<"all" | "teams" | "individuals" | "confirmed" | "pending" | "current_round" | "access_granted" | "access_pending">("all");
   const [expandedTeamIds, setExpandedTeamIds] = useState<string[]>([]);
 
   // Step Lock Modal State & Handlers
@@ -536,6 +538,14 @@ const EventManagementPage: React.FC = () => {
     pollEv = setInterval(loadEv, 5000);
     return () => { if (pollEv) clearInterval(pollEv); };
   }, [isEventAccessModalOpen, eventAccessEvent?.id]);
+
+  // Sync auth target round with event current round whenever event changes
+  useEffect(() => {
+    if (eventAccessEvent) {
+      const curRound = Number(eventAccessEvent.currentRound) || 1;
+      setAuthTargetRound(curRound);
+    }
+  }, [eventAccessEvent?.id]);
 
   // Automatically open Event Access modal when navigated with ?accessEventId= or ?eventId=
   useEffect(() => {
@@ -3103,6 +3113,157 @@ const EventManagementPage: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
+  const handleExportUnpromotedCSV = () => {
+    // 1. Identify unpromoted teams
+    let targetTeams = promotionRoster.filter(t => t.currentTeamRound < promoteFromRound && !t.isEliminated);
+    if (promotionStatusFilter === "eliminated") {
+      targetTeams = promotionRoster.filter(t => t.isEliminated);
+    } else if (targetTeams.length === 0) {
+      targetTeams = promotionRoster.filter(t => t.isEliminated || (t.currentTeamRound < promoteToRound && !selectedPromoteRegIds.includes(t.id)));
+    }
+
+    // If faculty is currently on unpromoted tab with an active search query, filter matching teams
+    if (promotionStatusFilter === "unpromoted" && promotionSearchQuery.trim()) {
+      const q = promotionSearchQuery.toLowerCase().trim();
+      targetTeams = targetTeams.filter(team =>
+        (team.groupName || "").toLowerCase().includes(q) ||
+        (team.teamLeadName || team.name || "").toLowerCase().includes(q) ||
+        (team.teamLeadStudentId || team.studentId || "").toLowerCase().includes(q) ||
+        (team.teamLeadEmail || team.email || "").toLowerCase().includes(q)
+      );
+    }
+
+    if (targetTeams.length === 0) {
+      alert("No unpromoted teams found for this stage.");
+      return;
+    }
+
+    const headers = [
+      "S.No",
+      "Team / Group Name",
+      "Member Name",
+      "Member Role",
+      "Student ID / Roll No",
+      "Email Address",
+      "Phone Number",
+      "Department / Branch",
+      "Section",
+      "College Name",
+      "Team Size",
+      "Current Round",
+      "Round Status",
+      "Quiz Score",
+      "Quiz Max Score",
+      "Quiz Percentage",
+      "Jury Score",
+      "Submission Status"
+    ];
+
+    const formatTextCell = (val: string) => {
+      if (!val) return '""';
+      const clean = String(val).trim().replace(/"/g, '""');
+      // If pure digits (like 10-digit phone number), wrap as Excel formula so Excel preserves digits and avoids scientific notation 9.85E+09
+      if (/^\d{7,15}$/.test(clean)) {
+        return `="${clean}"`;
+      }
+      return `"${clean}"`;
+    };
+
+    const rows: (string | number)[][] = [];
+    let serialCounter = 1;
+
+    targetTeams.forEach((t) => {
+      const isGroup = Boolean(t.groupName && t.groupName !== "Individual RSVP");
+      const teamDisplayName = t.groupName || t.teamName || t.teamLeadName || "Individual Participant";
+      const branch = t.branch || t.department || "CSE";
+      const section = t.section || "";
+      const college = t.collegeName || t.college || "";
+      const teamSize = t.teamSize || (Array.isArray(t.members) ? t.members.length + 1 : 1);
+      const currentRoundStr = `Round ${t.currentTeamRound}`;
+      const statusStr = t.isEliminated ? "Eliminated" : `Unpromoted (R < ${promoteFromRound})`;
+      const quizScoreVal = t.quizScore !== null && t.quizScore !== undefined ? t.quizScore : "N/A";
+      const quizMaxScoreVal = t.quizMaxScore || 90;
+      const quizPctVal = t.quizPercentage !== null && t.quizPercentage !== undefined ? `${t.quizPercentage}%` : "N/A";
+      const juryScoreVal = t.juryScore !== null && t.juryScore !== undefined ? `${t.juryScore}/100` : "N/A";
+      const submissionVal = t.submissionStatus || "Pending";
+
+      // 1. Team Lead / Solo Participant
+      const leadName = t.teamLeadName || t.name || t.fullName || "N/A";
+      const leadStudentId = t.teamLeadStudentId || t.studentId || t.rollNo || "N/A";
+      const leadEmail = t.teamLeadPersonalEmail || t.personalEmail || t.teamLeadEmail || t.email || "N/A";
+      const leadPhone = t.phoneNumber || t.teamLeadPhone || t.phone || "";
+
+      rows.push([
+        serialCounter++,
+        `"${teamDisplayName.replace(/"/g, '""')}"`,
+        `"${leadName.replace(/"/g, '""')}"`,
+        `"${isGroup ? "Team Lead" : "Solo Participant"}"`,
+        `"${leadStudentId.replace(/"/g, '""')}"`,
+        `"${leadEmail.replace(/"/g, '""')}"`,
+        formatTextCell(leadPhone),
+        `"${branch.replace(/"/g, '""')}"`,
+        `"${section.replace(/"/g, '""')}"`,
+        `"${college.replace(/"/g, '""')}"`,
+        teamSize,
+        `"${currentRoundStr}"`,
+        `"${statusStr}"`,
+        quizScoreVal,
+        quizMaxScoreVal,
+        `"${quizPctVal}"`,
+        `"${juryScoreVal}"`,
+        `"${submissionVal.replace(/"/g, '""')}"`
+      ]);
+
+      // 2. Team Members
+      if (Array.isArray(t.members)) {
+        t.members.forEach((m: any, mIdx: number) => {
+          if (m && (m.name || m.email || m.studentId)) {
+            const mName = m.name || `Member #${mIdx + 2}`;
+            const mStudentId = m.studentId || m.rollNo || m.registrationNumber || "N/A";
+            const mEmail = m.email || m.personalEmail || "N/A";
+            const mPhone = m.phone || m.phoneNumber || leadPhone || "";
+            const mBranch = m.branch || branch || "N/A";
+            const mSection = m.section || section || "";
+            const mCollege = m.college || college || "";
+
+            rows.push([
+              serialCounter++,
+              `"${teamDisplayName.replace(/"/g, '""')}"`,
+              `"${mName.replace(/"/g, '""')}"`,
+              `"${(m.role || `Team Member #${mIdx + 2}`).replace(/"/g, '""')}"`,
+              `"${mStudentId.replace(/"/g, '""')}"`,
+              `"${mEmail.replace(/"/g, '""')}"`,
+              formatTextCell(mPhone),
+              `"${mBranch.replace(/"/g, '""')}"`,
+              `"${mSection.replace(/"/g, '""')}"`,
+              `"${mCollege.replace(/"/g, '""')}"`,
+              teamSize,
+              `"${currentRoundStr}"`,
+              `"${statusStr}"`,
+              quizScoreVal,
+              quizMaxScoreVal,
+              `"${quizPctVal}"`,
+              `"${juryScoreVal}"`,
+              `"${submissionVal.replace(/"/g, '""')}"`
+            ]);
+          }
+        });
+      }
+    });
+
+    const csvContent = [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.setAttribute("href", url);
+    const eventSlug = (eventAccessEvent?.title || "event").replace(/[^a-zA-Z0-9]/g, "_");
+    link.setAttribute("download", `${eventSlug}_Unpromoted_Members_Roster.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
   const handleSetActiveRound = async (targetRoundNum: number) => {
     if (!targetRoundNum || targetRoundNum < 1) return;
     const sanitizedRounds = liveRoundsList.map((r) => ({
@@ -3275,6 +3436,159 @@ const EventManagementPage: React.FC = () => {
     } catch (err) {
       console.error("Error granting login access:", err);
       alert("Failed to grant login access.");
+    } finally {
+      setIsProvisioningLoginAccess(false);
+    }
+  };
+
+  const handleEnableRoundWiseLoginAccess = async () => {
+    if (!eventAccessRegistrations || eventAccessRegistrations.length === 0) {
+      await showAlert({
+        title: "No Teams Available",
+        message: "No registered teams available to grant access to.",
+        type: "info"
+      });
+      return;
+    }
+
+    const roundToGrant = Number(authTargetRound) || Number(eventAccessEvent?.currentRound) || 1;
+
+    // Filter confirmed, non-eliminated teams that belong to target round
+    const targetRoundTeams = eventAccessRegistrations.filter((r) => {
+      const isConfirmed = String(r.status || "").toLowerCase().trim() === "confirmed";
+      const isEliminated = r.roundStatus === "Eliminated";
+      const teamRound = Number(r.currentRound || r.promotedToRound) || 1;
+      return isConfirmed && !isEliminated && teamRound === roundToGrant;
+    });
+
+    if (targetRoundTeams.length === 0) {
+      await showAlert({
+        title: `No Active Teams in Round ${roundToGrant}`,
+        message: `There are no confirmed and active teams currently assigned to Round ${roundToGrant}. Please ensure teams are confirmed or promoted to Round ${roundToGrant} before granting round-wise access.`,
+        type: "warning",
+        icon: "alert"
+      });
+      return;
+    }
+
+    // Teams to lock out: all other confirmed teams not in target round (or eliminated) who currently have access
+    const otherTeamsToLock = eventAccessRegistrations.filter((r) => {
+      const isConfirmed = String(r.status || "").toLowerCase().trim() === "confirmed";
+      const isEliminated = r.roundStatus === "Eliminated";
+      const teamRound = Number(r.currentRound || r.promotedToRound) || 1;
+      const isTargetRound = isConfirmed && !isEliminated && teamRound === roundToGrant;
+      return !isTargetRound;
+    });
+
+    const currentlyGrantedOthers = otherTeamsToLock.filter(
+      r => provisionedTeamIds.includes(r.id) || r.accessGranted || r.loginAccessGranted
+    );
+
+    const confirmMsg = currentlyGrantedOthers.length > 0
+      ? `Allow portal login access ONLY for Round ${roundToGrant} (${targetRoundTeams.length} confirmed active team(s))?\n\n` +
+        `🔒 Access will be automatically LOCKED for ${currentlyGrantedOthers.length} team(s) from other rounds/eliminated status.`
+      : `Allow portal login access ONLY for Round ${roundToGrant} (${targetRoundTeams.length} confirmed active team(s))?\n\n` +
+        `Only members of Round ${roundToGrant} will be permitted to log in to the portal.`;
+
+    const confirmGrant = await showConfirm({
+      title: `Allow Round ${roundToGrant} Access Only?`,
+      message: confirmMsg,
+      confirmText: `Allow Round ${roundToGrant} Access`,
+      cancelText: "Cancel",
+      type: "warning",
+      icon: "alert"
+    });
+    if (!confirmGrant) return;
+
+    setIsProvisioningLoginAccess(true);
+
+    try {
+      const targetIds = targetRoundTeams.map(t => t.id);
+      const revokeIds = otherTeamsToLock.map(t => t.id);
+      const now = Date.now();
+
+      // 1. Try batch API first for lightning fast atomic update
+      let batchSuccess = false;
+      if (eventAccessEvent?.id) {
+        try {
+          const batchRes = await batchRoundAccess({
+            eventId: eventAccessEvent.id,
+            targetRound: roundToGrant,
+            targetIds,
+            revokeIds,
+          });
+          if (batchRes && batchRes.success) {
+            batchSuccess = true;
+          }
+        } catch (bErr) {
+          console.warn("Notice: batchRoundAccess failed, falling back to individual updates:", bErr);
+        }
+      }
+
+      // 2. Fallback / concurrent update if batch didn't complete
+      if (!batchSuccess) {
+        const updatePromises = [
+          ...targetRoundTeams.map(reg => updateRegistration(reg.id, {
+            accessGranted: true,
+            loginAccessGranted: true,
+            loginAllowedRound: roundToGrant,
+            accessProvisionedAt: now,
+            updatedAt: now
+          }).catch(() => null)),
+          ...currentlyGrantedOthers.map(reg => updateRegistration(reg.id, {
+            accessGranted: false,
+            loginAccessGranted: false,
+            accessRevokedAt: now,
+            updatedAt: now
+          }).catch(() => null))
+        ];
+        await Promise.allSettled(updatePromises);
+      }
+
+      if (eventAccessEvent?.id) {
+        try {
+          await updateEvent(eventAccessEvent.id, {
+            allowLoginAccess: true,
+            activeLoginRound: roundToGrant,
+            updatedAt: now
+          });
+        } catch (evErr) {
+          console.warn("Notice updating event activeLoginRound:", evErr);
+        }
+      }
+
+      // 3. Update local states
+      setProvisionedTeamIds(targetIds);
+      setEventAccessRegistrations(prev =>
+        prev.map(r => {
+          if (targetIds.includes(r.id)) {
+            return {
+              ...r,
+              accessGranted: true,
+              loginAccessGranted: true,
+              loginAllowedRound: roundToGrant,
+              accessProvisionedAt: now
+            };
+          }
+          if (revokeIds.includes(r.id)) {
+            return {
+              ...r,
+              accessGranted: false,
+              loginAccessGranted: false,
+              accessRevokedAt: now
+            };
+          }
+          return r;
+        })
+      );
+
+      setLoginAccessSuccessMsg(`✅ Login access granted exclusively to Round ${roundToGrant} (${targetIds.length} active team(s))! Other rounds are locked.`);
+      setTimeout(() => {
+        setLoginAccessSuccessMsg(null);
+      }, 5000);
+    } catch (err) {
+      console.error("Error setting round-wise login access:", err);
+      alert("Failed to grant round-wise login access.");
     } finally {
       setIsProvisioningLoginAccess(false);
     }
@@ -3539,6 +3853,8 @@ const EventManagementPage: React.FC = () => {
       createdAt: number;
       teamNumber?: number;
       foodPreference?: string;
+      currentRound?: number;
+      roundStatus?: string;
     }> = [];
 
     (eventAccessRegistrations || []).forEach((reg, idx) => {
@@ -3553,6 +3869,8 @@ const EventManagementPage: React.FC = () => {
       const college = reg.collegeName || reg.college || "";
       const teamNum = reg.teamNumber || reg.teamNo || idx + 1;
       const foodPref = reg.foodPreference || "";
+      const teamRound = Number(reg.currentRound || reg.promotedToRound) || 1;
+      const roundStatus = reg.roundStatus || "";
 
       // 1. Team Lead / Solo Participant
       const leadName = reg.teamLeadName || reg.fullName || reg.name || "Student Participant";
@@ -3580,7 +3898,9 @@ const EventManagementPage: React.FC = () => {
         accessGranted,
         createdAt: reg.createdAt || Date.now(),
         teamNumber: teamNum,
-        foodPreference: foodPref
+        foodPreference: foodPref,
+        currentRound: teamRound,
+        roundStatus
       });
 
       // 2. Team Members
@@ -3607,7 +3927,9 @@ const EventManagementPage: React.FC = () => {
               accessGranted,
               createdAt: reg.createdAt || Date.now(),
               teamNumber: teamNum,
-              foodPreference: foodPref
+              foodPreference: foodPref,
+              currentRound: teamRound,
+              roundStatus
             });
           }
         });
@@ -3628,6 +3950,13 @@ const EventManagementPage: React.FC = () => {
       list = list.filter(r => String(r.status || "").toLowerCase().trim() === "confirmed");
     } else if (eventRosterFilter === "pending") {
       list = list.filter(r => String(r.status || "").toLowerCase().trim() !== "confirmed");
+    } else if (eventRosterFilter === "current_round") {
+      const curRoundNum = Number(eventAccessEvent?.currentRound) || 1;
+      list = list.filter(r => (Number(r.currentRound || r.promotedToRound) || 1) === curRoundNum && r.roundStatus !== "Eliminated");
+    } else if (eventRosterFilter === "access_granted") {
+      list = list.filter(r => provisionedTeamIds.includes(r.id) || r.accessGranted || r.loginAccessGranted);
+    } else if (eventRosterFilter === "access_pending") {
+      list = list.filter(r => String(r.status || "").toLowerCase().trim() === "confirmed" && !provisionedTeamIds.includes(r.id) && !r.accessGranted && !r.loginAccessGranted);
     }
 
     if (!eventAccessSearchQuery.trim()) return list;
@@ -3646,7 +3975,7 @@ const EventManagementPage: React.FC = () => {
 
       return leadName.includes(q) || leadEmail.includes(q) || studentId.includes(q) || groupName.includes(q) || phone.includes(q) || membersMatch;
     });
-  }, [eventAccessRegistrations, eventAccessSearchQuery, eventRosterFilter]);
+  }, [eventAccessRegistrations, eventAccessSearchQuery, eventRosterFilter, provisionedTeamIds, eventAccessEvent?.currentRound]);
 
   const filteredIndividualAttendees = useMemo(() => {
     let list = flattenedEventAttendees;
@@ -3659,6 +3988,13 @@ const EventManagementPage: React.FC = () => {
       list = list.filter(a => String(a.status || "").toLowerCase().trim() === "confirmed");
     } else if (eventRosterFilter === "pending") {
       list = list.filter(a => String(a.status || "").toLowerCase().trim() !== "confirmed");
+    } else if (eventRosterFilter === "current_round") {
+      const curRoundNum = Number(eventAccessEvent?.currentRound) || 1;
+      list = list.filter(a => (a.currentRound || 1) === curRoundNum && a.roundStatus !== "Eliminated");
+    } else if (eventRosterFilter === "access_granted") {
+      list = list.filter(a => provisionedTeamIds.includes(a.regId) || a.accessGranted);
+    } else if (eventRosterFilter === "access_pending") {
+      list = list.filter(a => String(a.status || "").toLowerCase().trim() === "confirmed" && !provisionedTeamIds.includes(a.regId) && !a.accessGranted);
     }
 
     if (!eventAccessSearchQuery.trim()) return list;
@@ -3671,7 +4007,7 @@ const EventManagementPage: React.FC = () => {
       a.phone.toLowerCase().includes(q) ||
       a.role.toLowerCase().includes(q)
     );
-  }, [flattenedEventAttendees, eventAccessSearchQuery, eventRosterFilter]);
+  }, [flattenedEventAttendees, eventAccessSearchQuery, eventRosterFilter, provisionedTeamIds, eventAccessEvent?.currentRound]);
 
   const toggleTeamExpand = (teamId: string) => {
     setExpandedTeamIds(prev =>
@@ -8900,6 +9236,9 @@ const EventManagementPage: React.FC = () => {
                       className="px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-bold text-slate-700 focus:outline-none focus:ring-2 focus:ring-blue-500/20 cursor-pointer"
                     >
                       <option value="all">Filter: All Records</option>
+                      <option value="current_round">Present Round ({Number(eventAccessEvent?.currentRound) || 1}) Only</option>
+                      <option value="access_granted">Access Granted Only</option>
+                      <option value="access_pending">Access Pending Only</option>
                       <option value="teams">Teams Only</option>
                       <option value="individuals">Individuals Only</option>
                       <option value="confirmed">Confirmed Status</option>
@@ -8987,6 +9326,16 @@ const EventManagementPage: React.FC = () => {
                                       ) : (
                                         <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-amber-100 text-amber-800 border border-amber-200 inline-flex items-center gap-1">
                                           <Clock className="w-2.5 h-2.5" /> Pending
+                                        </span>
+                                      )}
+                                      {/* Round Badge */}
+                                      {reg.roundStatus === "Eliminated" ? (
+                                        <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-rose-100 text-rose-800 border border-rose-200 inline-flex items-center gap-1 shadow-2xs">
+                                          Eliminated
+                                        </span>
+                                      ) : (
+                                        <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase bg-indigo-50 text-indigo-700 border border-indigo-200/80 inline-flex items-center gap-1 shadow-2xs">
+                                          <Layers className="w-2.5 h-2.5 text-indigo-500" /> Round {Number(reg.currentRound || reg.promotedToRound) || 1}
                                         </span>
                                       )}
                                     </div>
@@ -9294,6 +9643,13 @@ const EventManagementPage: React.FC = () => {
                         <span className="font-extrabold text-slate-800 truncate max-w-[150px]">{eventAccessEvent?.title || "Active Event"}</span>
                       </div>
                       <div className="flex justify-between items-center">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase">Active Stage</span>
+                        <span className="font-extrabold text-purple-700 bg-purple-50 px-2 py-0.5 rounded-md border border-purple-200/60 inline-flex items-center gap-1">
+                          <Layers className="w-3 h-3 text-purple-600" />
+                          Round {Number(eventAccessEvent?.currentRound) || 1}
+                        </span>
+                      </div>
+                      <div className="flex justify-between items-center">
                         <span className="text-[10px] font-bold text-slate-400 uppercase">Total Registered</span>
                         <span className="font-extrabold text-blue-600">{eventAccessRegistrations.length} Teams</span>
                       </div>
@@ -9311,6 +9667,121 @@ const EventManagementPage: React.FC = () => {
                       </div>
                     </div>
 
+                    {/* 🛡️ ROUND-WISE LOGIN ACCESS (ACTIVE ROUND RESTRICTION) */}
+                    <div className="p-4 rounded-2xl bg-gradient-to-br from-indigo-50/70 via-purple-50/50 to-blue-50/70 border border-indigo-100/90 space-y-3.5 shadow-2xs">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <div className="w-6 h-6 rounded-lg bg-indigo-600 text-white flex items-center justify-center shadow-xs">
+                            <Layers className="w-3.5 h-3.5" />
+                          </div>
+                          <div>
+                            <span className="text-xs font-black text-slate-900 tracking-tight block">Round-Wise Access</span>
+                            <span className="text-[9px] text-slate-400 font-bold uppercase tracking-wider block">Stage Gate Control</span>
+                          </div>
+                        </div>
+                        <span className="text-[9px] font-black text-indigo-700 bg-white border border-indigo-200 px-2 py-0.5 rounded-full uppercase tracking-wider shadow-2xs">
+                          Round {authTargetRound}
+                        </span>
+                      </div>
+
+                      <p className="text-[11px] text-slate-600 font-medium leading-relaxed">
+                        Grant portal login access <strong>only to members in the selected competition round</strong>. All other rounds & eliminated teams will be locked out.
+                      </p>
+
+                      {/* Round Selector Tabs */}
+                      <div className="space-y-1.5">
+                        <div className="flex items-center justify-between text-[10px] font-bold text-slate-500 uppercase px-0.5">
+                          <span>Select Target Round:</span>
+                          <span className="text-indigo-600 font-extrabold">Active: Round {Number(eventAccessEvent?.currentRound) || 1}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 p-1 bg-white/90 rounded-xl border border-indigo-100">
+                          {(() => {
+                            const totalRoundsCount = Math.max(
+                              Number(eventAccessEvent?.totalRounds) || 0,
+                              Array.isArray(eventAccessEvent?.rounds) && eventAccessEvent.rounds.length > 0 ? eventAccessEvent.rounds.length : 0,
+                              Number(eventAccessEvent?.currentRound) || 0,
+                              3
+                            );
+                            const roundsList = Array.from({ length: Math.min(totalRoundsCount, 5) }, (_, i) => i + 1);
+
+                            return roundsList.map((rNum) => {
+                              const isSelected = authTargetRound === rNum;
+                              const isPresentStage = (Number(eventAccessEvent?.currentRound) || 1) === rNum;
+                              const roundTeamCount = eventAccessRegistrations.filter(r =>
+                                String(r.status || "").toLowerCase().trim() === "confirmed" &&
+                                r.roundStatus !== "Eliminated" &&
+                                (Number(r.currentRound || r.promotedToRound) || 1) === rNum
+                              ).length;
+
+                              return (
+                                <button
+                                  key={rNum}
+                                  type="button"
+                                  onClick={() => setAuthTargetRound(rNum)}
+                                  className={`flex-1 py-1.5 px-2 rounded-lg text-xs font-black transition-all cursor-pointer flex flex-col items-center justify-center gap-0.5 ${
+                                    isSelected
+                                      ? "bg-gradient-to-r from-purple-600 to-indigo-600 text-white shadow-xs shadow-indigo-600/30 ring-2 ring-indigo-500/20"
+                                      : "text-slate-600 hover:text-slate-900 hover:bg-slate-100/70"
+                                  }`}
+                                >
+                                  <span className="inline-flex items-center gap-1">
+                                    R{rNum}
+                                    {isPresentStage && (
+                                      <span className={`w-1.5 h-1.5 rounded-full ${isSelected ? "bg-amber-300" : "bg-emerald-500"}`} title="Present Event Stage" />
+                                    )}
+                                  </span>
+                                  <span className={`text-[9px] font-bold ${isSelected ? "text-indigo-100" : "text-slate-400"}`}>
+                                    {roundTeamCount} {roundTeamCount === 1 ? "team" : "teams"}
+                                  </span>
+                                </button>
+                              );
+                            });
+                          })()}
+                        </div>
+                      </div>
+
+                      {/* Round-Wise Action Button */}
+                      {(() => {
+                        const targetRoundTeamsCount = eventAccessRegistrations.filter(r =>
+                          String(r.status || "").toLowerCase().trim() === "confirmed" &&
+                          r.roundStatus !== "Eliminated" &&
+                          (Number(r.currentRound || r.promotedToRound) || 1) === authTargetRound
+                        ).length;
+
+                        return (
+                          <div className="space-y-1.5">
+                            <button
+                              onClick={handleEnableRoundWiseLoginAccess}
+                              disabled={isProvisioningLoginAccess || targetRoundTeamsCount === 0}
+                              className="w-full py-3.5 bg-gradient-to-r from-purple-600 via-indigo-600 to-blue-600 hover:from-purple-500 hover:to-blue-500 disabled:from-slate-300 disabled:to-slate-300 text-white font-black rounded-2xl text-xs sm:text-sm transition-all shadow-md shadow-indigo-500/25 active:scale-95 flex items-center justify-center gap-2 cursor-pointer text-center leading-snug border border-indigo-400/30"
+                            >
+                              {isProvisioningLoginAccess ? (
+                                <>
+                                  <Loader2 className="h-4.5 w-4.5 animate-spin" />
+                                  <span>Setting Round Access...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Layers className="h-4.5 w-4.5" />
+                                  <span>Allow Round {authTargetRound} Access ({targetRoundTeamsCount} Active)</span>
+                                </>
+                              )}
+                            </button>
+                            <p className="text-[10px] text-slate-500 font-medium text-center leading-tight">
+                              🔒 Restricts login strictly to confirmed teams in <strong>Round {authTargetRound}</strong>.
+                            </p>
+                          </div>
+                        );
+                      })()}
+                    </div>
+
+                    {/* DIVIDER */}
+                    <div className="relative flex py-1 items-center">
+                      <div className="flex-grow border-t border-slate-200"></div>
+                      <span className="flex-shrink mx-3 text-[10px] text-slate-400 font-bold uppercase tracking-wider">or allow all rounds</span>
+                      <div className="flex-grow border-t border-slate-200"></div>
+                    </div>
+
                     <div className="space-y-3">
                       {(() => {
                         const confirmedCount = eventAccessRegistrations.filter(r => String(r.status || "").toLowerCase().trim() === "confirmed").length;
@@ -9320,7 +9791,7 @@ const EventManagementPage: React.FC = () => {
                           <button
                             onClick={handleEnableLoginAccess}
                             disabled={isProvisioningLoginAccess || confirmedCount === 0}
-                            className="w-full py-4 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-300 disabled:to-slate-300 text-white font-black rounded-2xl text-xs sm:text-sm transition-all shadow-md shadow-blue-500/25 active:scale-95 flex items-center justify-center gap-2 cursor-pointer text-center leading-snug border border-blue-400/30"
+                            className="w-full py-3.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 disabled:from-slate-300 disabled:to-slate-300 text-white font-black rounded-2xl text-xs sm:text-sm transition-all shadow-md shadow-blue-500/25 active:scale-95 flex items-center justify-center gap-2 cursor-pointer text-center leading-snug border border-blue-400/30"
                           >
                             {isProvisioningLoginAccess ? (
                               <>
@@ -9330,7 +9801,7 @@ const EventManagementPage: React.FC = () => {
                             ) : (
                               <>
                                 <UserCheck className="h-5 w-5" />
-                                {isAllGranted ? "Update / Re-grant Login Access" : pendingCount > 0 ? `Allow to Login (${pendingCount} Confirmed)` : "Allow to Login"}
+                                {isAllGranted ? "Update / Re-grant All Login Access" : pendingCount > 0 ? `Allow All to Login (${pendingCount} Confirmed)` : "Allow All to Login"}
                               </>
                             )}
                           </button>
@@ -10746,15 +11217,29 @@ const EventManagementPage: React.FC = () => {
                         })()}
                       </div>
 
-                      {/* Export Shortlist Button */}
-                      <button
-                        type="button"
-                        onClick={handleExportShortlistCSV}
-                        className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold rounded-2xl text-xs flex items-center gap-2 transition-all cursor-pointer border border-slate-200 shrink-0"
-                      >
-                        <Download className="w-3.5 h-3.5" />
-                        <span>Export Shortlist CSV</span>
-                      </button>
+                      {/* Action Buttons: Download Unpromoted Members & Export Shortlist CSV */}
+                      <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                        {/* Download Unpromoted Members Button */}
+                        <button
+                          type="button"
+                          onClick={handleExportUnpromotedCSV}
+                          className="px-4 py-2 bg-gradient-to-r from-amber-50 to-orange-50 hover:from-amber-100 hover:to-orange-100 text-amber-900 border border-amber-300 font-extrabold rounded-2xl text-xs flex items-center gap-2 transition-all cursor-pointer shadow-2xs active:scale-95"
+                          title="Download CSV roster of all unpromoted teams and individual members"
+                        >
+                          <Download className="w-3.5 h-3.5 text-amber-700" />
+                          <span>Download Unpromoted Members</span>
+                        </button>
+
+                        {/* Export Shortlist Button */}
+                        <button
+                          type="button"
+                          onClick={handleExportShortlistCSV}
+                          className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-800 font-extrabold rounded-2xl text-xs flex items-center gap-2 transition-all cursor-pointer border border-slate-200 shrink-0 shadow-2xs active:scale-95"
+                        >
+                          <Download className="w-3.5 h-3.5 text-slate-600" />
+                          <span>Export Shortlist CSV</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* Matrix Table */}

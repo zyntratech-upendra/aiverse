@@ -41,10 +41,28 @@ const isRegistrationConfirmed = (reg) => {
   if (status !== 'confirmed') {
     return false;
   }
+  if (reg.roundStatus === 'Eliminated') {
+    return false;
+  }
   if (reg.accessGranted === false || reg.loginAccessGranted === false) {
     return false;
   }
   return true;
+};
+
+const getRegistrationAccessError = (reg) => {
+  if (!reg) return 'No event registration found.';
+  const status = String(reg.status || '').toLowerCase().trim();
+  if (status !== 'confirmed') {
+    return 'Your team registration is pending verification. Please wait for faculty confirmation before logging in.';
+  }
+  if (reg.roundStatus === 'Eliminated') {
+    return 'Your team has been eliminated and is no longer eligible to access the event portal.';
+  }
+  if (reg.accessGranted === false || reg.loginAccessGranted === false) {
+    return 'Portal login access is currently restricted by faculty to active participants in the current competition round.';
+  }
+  return 'Access denied.';
 };
 
 // POST /api/auth/login - Direct login endpoint with MongoDB
@@ -91,7 +109,7 @@ router.post(
         if (!isRegistrationConfirmed(regDoc)) {
           return res.status(403).json({
             success: false,
-            error: 'Your team registration is pending verification. Please wait for faculty confirmation before logging in.',
+            error: getRegistrationAccessError(regDoc),
           });
         }
 
@@ -127,7 +145,7 @@ router.post(
           if (!isRegistrationConfirmed(regDoc)) {
             return res.status(403).json({
               success: false,
-              error: 'Your team registration is pending verification. Please wait for faculty confirmation before logging in.',
+              error: getRegistrationAccessError(regDoc),
             });
           }
         }
@@ -215,7 +233,7 @@ router.post(
         if (!isRegistrationConfirmed(regDoc)) {
           return res.status(403).json({
             success: false,
-            error: 'Your team registration is pending verification. Please wait for faculty confirmation before logging in.',
+            error: getRegistrationAccessError(regDoc),
           });
         }
       }
@@ -318,7 +336,7 @@ router.post(
       if (!isRegistrationConfirmed(reg)) {
         return res.status(403).json({
           success: false,
-          error: 'Your team registration is pending verification. Please wait for faculty confirmation before logging in.',
+          error: getRegistrationAccessError(reg),
         });
       }
 

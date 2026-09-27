@@ -666,6 +666,22 @@ export async function deleteParticipantCascade(registrationId: string, emailList
   return res.json();
 }
 
+export async function batchRoundAccess(payload: {
+  eventId: string;
+  targetRound?: number;
+  targetIds?: string[];
+  revokeIds?: string[];
+  allowAll?: boolean;
+}) {
+  const res = await fetch(`${API_BASE}/registrations/batch-round-access`, {
+    method: 'POST',
+    headers: authHeaders(),
+    body: JSON.stringify(payload),
+  });
+  return res.json();
+}
+
+
 // ==========================================
 // Users Management
 // ==========================================

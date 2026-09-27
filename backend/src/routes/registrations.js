@@ -390,4 +390,158 @@ router.post(
   })
 );
 
+// POST /api/registrations/batch-round-access - Allow or restrict login access round-wise for an event
+router.post(
+  '/batch-round-access',
+  requireAdmin,
+  asyncHandler(async (req, res) => {
+    const { eventId, targetRound, targetIds, revokeIds, allowAll = false } = req.body || {};
+    if (!eventId) {
+      return res.status(400).json({ success: false, error: 'eventId is required' });
+    }
+
+    const now = Date.now();
+    const roundNum = Number(targetRound) || 1;
+
+    let grantedCount = 0;
+    let lockedCount = 0;
+
+    // If explicit targetIds and revokeIds are provided by frontend
+    if (Array.isArray(targetIds) && targetIds.length > 0) {
+      const grantRes = await Registration.updateMany(
+        { _id: { $in: targetIds } },
+        {
+          $set: {
+            accessGranted: true,
+            loginAccessGranted: true,
+            loginAllowedRound: roundNum,
+            accessProvisionedAt: now,
+            updatedAt: now,
+          },
+        }
+      );
+      grantedCount = grantRes.modifiedCount || 0;
+    }
+
+    if (Array.isArray(revokeIds) && revokeIds.length > 0) {
+      const revokeRes = await Registration.updateMany(
+        { _id: { $in: revokeIds } },
+        {
+          $set: {
+            accessGranted: false,
+            loginAccessGranted: false,
+            accessRevokedAt: now,
+            updatedAt: now,
+          },
+        }
+      );
+      lockedCount = revokeRes.modifiedCount || 0;
+    }
+
+    // If no explicit IDs provided, use DB query
+    if (!Array.isArray(targetIds)) {
+      if (allowAll) {
+        const grantRes = await Registration.updateMany(
+          {
+            $or: [{ eventId }, { eventId: String(eventId) }],
+            status: { $regex: /^confirmed$/i },
+            roundStatus: { $ne: 'Eliminated' },
+          },
+          {
+            $set: {
+              accessGranted: true,
+              loginAccessGranted: true,
+              accessProvisionedAt: now,
+              updatedAt: now,
+            },
+          }
+        );
+        grantedCount = grantRes.modifiedCount || 0;
+      } else {
+        const targetQuery = {
+          $or: [{ eventId }, { eventId: String(eventId) }],
+          status: { $regex: /^confirmed$/i },
+          roundStatus: { $ne: 'Eliminated' },
+          $and: [
+            roundNum === 1
+              ? {
+                  $or: [
+                    { currentRound: 1 },
+                    { promotedToRound: 1 },
+                    { currentRound: { $exists: false } },
+                    { currentRound: null },
+                    { currentRound: 0 },
+                  ],
+                }
+              : {
+                  $or: [{ currentRound: roundNum }, { promotedToRound: roundNum }],
+                },
+          ],
+        };
+
+        const grantRes = await Registration.updateMany(targetQuery, {
+          $set: {
+            accessGranted: true,
+            loginAccessGranted: true,
+            loginAllowedRound: roundNum,
+            accessProvisionedAt: now,
+            updatedAt: now,
+          },
+        });
+        grantedCount = grantRes.modifiedCount || 0;
+
+        const lockQuery = {
+          $or: [{ eventId }, { eventId: String(eventId) }],
+          $or: [
+            { status: { $not: { $regex: /^confirmed$/i } } },
+            { roundStatus: 'Eliminated' },
+            ...(roundNum === 1
+              ? [{ currentRound: { $gt: 1 } }, { promotedToRound: { $gt: 1 } }]
+              : [
+                  {
+                    $and: [
+                      { currentRound: { $ne: roundNum } },
+                      { promotedToRound: { $ne: roundNum } },
+                    ],
+                  },
+                ]),
+          ],
+        };
+
+        const lockRes = await Registration.updateMany(lockQuery, {
+          $set: {
+            accessGranted: false,
+            loginAccessGranted: false,
+            accessRevokedAt: now,
+            updatedAt: now,
+          },
+        });
+        lockedCount = lockRes.modifiedCount || 0;
+      }
+    }
+
+    // Update active round on event document
+    await Event.findOneAndUpdate(
+      { $or: [{ _id: eventId }, { id: eventId }] },
+      {
+        $set: {
+          activeLoginRound: roundNum,
+          allowLoginAccess: true,
+          updatedAt: now,
+        },
+      }
+    ).catch(() => {});
+
+    return res.json({
+      success: true,
+      targetRound: roundNum,
+      grantedCount,
+      lockedCount,
+      message: allowAll
+        ? `Granted login access to all confirmed teams.`
+        : `Granted login access exclusively to Round ${roundNum} teams (${grantedCount} granted, ${lockedCount} locked).`,
+    });
+  })
+);
+
 module.exports = router;
