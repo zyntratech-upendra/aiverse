@@ -3,6 +3,7 @@ import { createPortal } from "react-dom";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import SEO from "../../components/layout/SEO";
 import Papa from "papaparse";
+import * as XLSX from "xlsx";
 import { userService } from "../../services/userService";
 import { deleteQuizzesByEventId, evaluateQuizAnswers } from "../../services/quizService";
 import { 
@@ -2102,9 +2103,25 @@ const EventManagementPage: React.FC = () => {
   // Promotion Engine Specific States
   const [promoteFromRound, setPromoteFromRound] = useState<number>(1);
   const [promoteToRound, setPromoteToRound] = useState<number>(2);
-  const [promotionMode, setPromotionMode] = useState<"quiz" | "jury" | "manual">("quiz");
+  const [promotionMode, setPromotionMode] = useState<"quiz" | "jury" | "manual" | "excel">("quiz");
   const [promotionSearchQuery, setPromotionSearchQuery] = useState("");
   const [promotionStatusFilter, setPromotionStatusFilter] = useState<"active" | "all" | "selected" | "qualified" | "unpromoted" | "eliminated">("active");
+
+  // Excel Sheet Selection States
+  const [excelUploadedFileName, setExcelUploadedFileName] = useState<string>("");
+  const [excelMatchedTeamIds, setExcelMatchedTeamIds] = useState<string[]>([]);
+  const [excelImportStats, setExcelImportStats] = useState<{
+    totalRows: number;
+    matchedCount: number;
+    activeCount: number;
+    otherRoundCount: number;
+    eliminatedCount: number;
+    unmatchedCount: number;
+    unmatchedSample: string[];
+  } | null>(null);
+  const [filterOnlyExcelMatched, setFilterOnlyExcelMatched] = useState<boolean>(false);
+  const [isParsingExcel, setIsParsingExcel] = useState<boolean>(false);
+  const excelFileInputRef = React.useRef<HTMLInputElement | null>(null);
 
   // Quiz Promotion Criteria
   const [eventQuizzesList, setEventQuizzesList] = useState<any[]>([]);
@@ -2118,6 +2135,21 @@ const EventManagementPage: React.FC = () => {
   const [juryCutoffType, setJuryCutoffType] = useState<"score" | "topN">("score");
   const [juryCutoffScore, setJuryCutoffScore] = useState<number>(60);
   const [juryTopNCount, setJuryTopNCount] = useState<number>(10);
+
+  // Table Sorting state
+  const [promotionSortKey, setPromotionSortKey] = useState<"rank" | "score" | "name" | "deliverables" | "jury" | "round">("score");
+  const [promotionSortOrder, setPromotionSortOrder] = useState<"asc" | "desc">("desc");
+
+  // Keep default sort synchronized with active promotion mode
+  useEffect(() => {
+    if (promotionMode === "quiz") {
+      setPromotionSortKey("score");
+      setPromotionSortOrder("desc");
+    } else if (promotionMode === "jury") {
+      setPromotionSortKey("jury");
+      setPromotionSortOrder("desc");
+    }
+  }, [promotionMode]);
 
   // Promotion Selection & Execution
   const [selectedPromoteRegIds, setSelectedPromoteRegIds] = useState<string[]>([]);
@@ -2164,7 +2196,7 @@ const EventManagementPage: React.FC = () => {
              }
 
              if ((sData.score === undefined || sData.score === null) && sData.answers) {
-                const evaluated = evaluateQuizAnswers(qDef, sData.answers);
+                const evaluated = evaluateQuizAnswers(qDef, sData.answers, sData.assignedQuestionIds);
                 sData.score = evaluated.score;
                 sData.maxScore = evaluated.maxScore;
                 sData.percentage = evaluated.percentage;
@@ -2248,8 +2280,22 @@ const EventManagementPage: React.FC = () => {
 
   // Memoized team score matrix for all registrations in the current event
   const promotionRoster = useMemo(() => {
+    // 1. Build an index of emails and member emails across all registrations to prevent a submission from being falsely stolen by duplicate group names
+    const emailToRegIdMap = new Map<string, string>();
+    eventAccessRegistrations.forEach((r) => {
+      const rid = (r.id || r._id || "").toString().toLowerCase().trim();
+      const le = (r.teamLeadEmail || r.email || "").toLowerCase().trim();
+      if (le) emailToRegIdMap.set(le, rid);
+      if (Array.isArray(r.members)) {
+        r.members.forEach((m: any) => {
+          const me = (m.email || "").toLowerCase().trim();
+          if (me) emailToRegIdMap.set(me, rid);
+        });
+      }
+    });
+
     return eventAccessRegistrations.map((reg) => {
-      const regId = (reg.id || "").toLowerCase().trim();
+      const regId = (reg.id || reg._id || "").toString().toLowerCase().trim();
       const groupName = (reg.groupName || reg.teamName || "").toLowerCase().trim();
       const cleanGroupName = groupName.replace(/[^a-z0-9]/g, "");
       const leadName = (reg.teamLeadName || reg.name || "").toLowerCase().trim();
@@ -2273,36 +2319,58 @@ const EventManagementPage: React.FC = () => {
         ...memberEmails
       ].filter(Boolean)));
 
-      // Helper to match a quiz submission to this registration
-      const isSubmissionMatch = (sub: any): boolean => {
-        if (!sub) return false;
-        
-        // Match by registration / team doc ID
+      // Helper to compute confidence of matching a quiz submission to this registration
+      const scoreSubmissionMatch = (sub: any): number => {
+        if (!sub) return 0;
         const sTeamId = (sub.teamId || sub.registrationId || sub.userId || "").toLowerCase().trim();
-        if (sTeamId && (sTeamId === regId || sTeamId === reg.id)) return true;
-
-        // Match by team / lead / member emails
+        const sId = (sub._id || sub.sessionId || sub.id || "").toLowerCase().trim();
         const sUserEmail = (sub.userEmail || "").toLowerCase().trim();
-        if (sUserEmail && allTeamEmails.includes(sUserEmail)) return true;
-
-        // Match by team name (exact or alphanumeric)
+        const sStudentId = (sub.studentId || sub.rollNo || "").toLowerCase().trim();
         const sTeamName = (sub.teamName || "").toLowerCase().trim();
-        if (sTeamName && groupName) {
-          if (sTeamName === groupName) return true;
-          if (cleanGroupName && sTeamName.replace(/[^a-z0-9]/g, "") === cleanGroupName) return true;
+        const sUserName = (sub.userName || sub.teamLeadName || "").toLowerCase().trim();
+
+        // Priority 1: Exact registration / team doc ID in teamId/registrationId/userId or in _id/sessionId (1000)
+        if (regId && (sTeamId === regId || sId === regId || sId.endsWith('_' + regId) || sId.includes(regId))) {
+          return 1000;
         }
 
-        // Match by user / leader name
-        const sUserName = (sub.userName || "").toLowerCase().trim();
-        if (sUserName) {
-          if (leadName && (sUserName === leadName || sUserName.includes(leadName) || leadName.includes(sUserName))) return true;
-          if (groupName && (sUserName === groupName || (cleanGroupName && sUserName.replace(/[^a-z0-9]/g, "") === cleanGroupName))) return true;
+        // Priority 2: Team lead email exact match (800)
+        if (leadEmail && sUserEmail === leadEmail) {
+          return 800;
         }
 
-        // Match by student ID
-        if (studentId && sub.studentId && sub.studentId.toLowerCase().trim() === studentId) return true;
+        // Priority 3: Alternate / member email match (700)
+        if (sUserEmail && allTeamEmails.includes(sUserEmail)) {
+          return 700;
+        }
 
-        return false;
+        // Priority 4: Student ID match (600)
+        if (studentId && sStudentId && sStudentId === studentId) {
+          return 600;
+        }
+
+        // Priority 5: Team name match - STRICTLY ONLY IF this submission's email does not belong to another registration
+        if (groupName && sTeamName && (sTeamName === groupName || (cleanGroupName && sTeamName.replace(/[^a-z0-9]/g, "") === cleanGroupName))) {
+          const ownerRegId = emailToRegIdMap.get(sUserEmail);
+          const belongsToAnotherReg = ownerRegId && ownerRegId !== regId;
+          if (!belongsToAnotherReg) {
+            if (leadName && sUserName && (sUserName === leadName || sUserName.includes(leadName) || leadName.includes(sUserName))) {
+              return 500;
+            }
+            return 300;
+          }
+        }
+
+        // Priority 6: Leader name match - STRICTLY ONLY IF this submission's email does not belong to another registration
+        if (leadName && sUserName && (sUserName === leadName || (leadName.length > 5 && sUserName.includes(leadName)))) {
+          const ownerRegId = emailToRegIdMap.get(sUserEmail);
+          const belongsToAnotherReg = ownerRegId && ownerRegId !== regId;
+          if (!belongsToAnotherReg) {
+            return 200;
+          }
+        }
+
+        return 0;
       };
 
       // Find matching quiz submission (priority: selected quiz, fallback: any quiz of event)
@@ -2310,14 +2378,35 @@ const EventManagementPage: React.FC = () => {
         ? allQuizSubmissions.filter((s) => s.quizId === selectedPromotionQuizId)
         : allQuizSubmissions;
 
-      const matchedQuiz = primaryTargetSubs.find(isSubmissionMatch) || allQuizSubmissions.find(isSubmissionMatch);
+      const pickBestSubmission = (subsList: any[]) => {
+        let bestSub: any = null;
+        let bestScore = 0;
+        for (const sub of subsList) {
+          const conf = scoreSubmissionMatch(sub);
+          if (conf > bestScore) {
+            bestScore = conf;
+            bestSub = sub;
+          } else if (conf > 0 && conf === bestScore && bestSub) {
+            if ((Number(sub.score) || 0) > (Number(bestSub.score) || 0)) {
+              bestSub = sub;
+            }
+          }
+        }
+        return bestScore > 0 ? bestSub : null;
+      };
 
-      // Find matching jury evaluation
+      const matchedQuiz = pickBestSubmission(primaryTargetSubs) || pickBestSubmission(allQuizSubmissions);
+
+      // Find matching jury evaluation (prioritizing ID, email, then team name)
       const matchedJury = allJuryEvaluations.find((j) => {
-        if (j.id && (j.id === reg.id || j.id.toLowerCase().trim() === regId)) return true;
-        if (j.teamName && groupName && j.teamName.toLowerCase().trim() === groupName) return true;
-        if (j.teamName && leadName && j.teamName.toLowerCase().trim() === leadName) return true;
+        const jId = (j.id || j.teamId || j.registrationId || "").toLowerCase().trim();
+        if (regId && (jId === regId || jId.endsWith(regId))) return true;
+        const jEmail = (j.email || j.teamLeadEmail || j.userEmail || "").toLowerCase().trim();
+        if (jEmail && allTeamEmails.includes(jEmail)) return true;
         return false;
+      }) || allJuryEvaluations.find((j) => {
+        const jName = (j.teamName || "").toLowerCase().trim();
+        return groupName && jName && jName === groupName;
       });
 
       const activeQuizDef = eventQuizzesList.find(q => q.id === (matchedQuiz?.quizId || selectedPromotionQuizId));
@@ -2397,14 +2486,25 @@ const EventManagementPage: React.FC = () => {
           .slice(0, juryTopNCount)
           .map((t) => t.id);
       }
+    } else if (promotionMode === "excel") {
+      return activeCandidates
+        .filter((t) => excelMatchedTeamIds.includes(t.id))
+        .map((t) => t.id);
     }
     return [];
-  }, [promotionRoster, promotionMode, quizCutoffType, quizCutoffScore, quizCutoffPercentage, quizTopNCount, juryCutoffType, juryCutoffScore, juryTopNCount, promoteFromRound]);
+  }, [promotionRoster, promotionMode, quizCutoffType, quizCutoffScore, quizCutoffPercentage, quizTopNCount, juryCutoffType, juryCutoffScore, juryTopNCount, promoteFromRound, excelMatchedTeamIds]);
 
-  // When criteria or promoteFromRound changes in quiz/jury mode, sync selectedPromoteRegIds
+  // When criteria or promoteFromRound changes, sync selectedPromoteRegIds
   useEffect(() => {
     if (promotionMode === "quiz" || promotionMode === "jury") {
       setSelectedPromoteRegIds(eligibleTeamIds);
+    } else if (promotionMode === "excel") {
+      // In Excel mode, auto-select active matched teams in promoteFromRound
+      setSelectedPromoteRegIds(
+        promotionRoster
+          .filter((t) => t.currentTeamRound === promoteFromRound && !t.isEliminated && excelMatchedTeamIds.includes(t.id))
+          .map((t) => t.id)
+      );
     } else {
       // In manual mode, strip any selected IDs that aren't in promoteFromRound
       setSelectedPromoteRegIds((prev) =>
@@ -2414,7 +2514,7 @@ const EventManagementPage: React.FC = () => {
         })
       );
     }
-  }, [eligibleTeamIds, promotionMode, promoteFromRound]);
+  }, [eligibleTeamIds, promotionMode, promoteFromRound, excelMatchedTeamIds]);
 
   const handleApplyQuizAutoSelect = () => {
     const matched = promotionRoster
@@ -2457,6 +2557,265 @@ const EventManagementPage: React.FC = () => {
     setSelectedPromoteRegIds(matched);
   };
 
+  const handleDownloadExcelTemplate = () => {
+    const activeTeams = promotionRoster.filter(
+      (t) => t.currentTeamRound === promoteFromRound && !t.isEliminated
+    );
+
+    const headers = [
+      "Team / Reg ID",
+      "Team Name",
+      "Team Lead Name",
+      "Lead Email",
+      "Student ID / Roll No",
+      "Current Round",
+      "Promote Decision (Yes / No)"
+    ];
+
+    const dataRows = (activeTeams.length > 0 ? activeTeams : promotionRoster).map((t) => [
+      t.id || "",
+      t.groupName || t.teamLeadName || "Team",
+      t.teamLeadName || t.name || "",
+      t.teamLeadEmail || t.email || "",
+      t.teamLeadStudentId || t.studentId || "",
+      t.currentTeamRound || promoteFromRound,
+      "Yes"
+    ]);
+
+    const worksheet = XLSX.utils.aoa_to_sheet([headers, ...dataRows]);
+
+    worksheet["!cols"] = [
+      { wch: 28 }, // ID
+      { wch: 25 }, // Team Name
+      { wch: 20 }, // Lead Name
+      { wch: 28 }, // Lead Email
+      { wch: 20 }, // Student ID
+      { wch: 15 }, // Current Round
+      { wch: 26 }  // Decision
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(workbook, worksheet, `Round ${promoteFromRound} Candidates`);
+
+    const cleanEventName = (eventAccessEvent?.title || "Event").replace(/[^a-zA-Z0-9]/g, "_");
+    XLSX.writeFile(workbook, `${cleanEventName}_Round_${promoteFromRound}_Promotion_Template.xlsx`);
+  };
+
+  const handleExcelFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsParsingExcel(true);
+    const reader = new FileReader();
+
+    reader.onload = (evt) => {
+      try {
+        const data = new Uint8Array(evt.target?.result as ArrayBuffer);
+        const workbook = XLSX.read(data, { type: "array" });
+        const sheetName = workbook.SheetNames[0];
+        if (!sheetName) {
+          throw new Error("No sheets found in spreadsheet");
+        }
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonRows: any[] = XLSX.utils.sheet_to_json(worksheet, { defval: "" });
+
+        if (jsonRows.length === 0) {
+          showAlert({
+            title: "Empty Spreadsheet",
+            message: "The uploaded file does not contain any readable data rows.",
+            type: "warning",
+            icon: "alert"
+          });
+          setIsParsingExcel(false);
+          return;
+        }
+
+        // Build lookup maps from promotionRoster for accurate matching
+        const idMap = new Map<string, any>();
+        const emailMap = new Map<string, any>();
+        const studentIdMap = new Map<string, any>();
+        const cleanTeamNameMap = new Map<string, any>();
+
+        promotionRoster.forEach((team) => {
+          const tid = (team.id || "").toLowerCase().trim();
+          if (tid) idMap.set(tid, team);
+
+          // Emails
+          const leadEmail = (team.teamLeadEmail || team.email || "").toLowerCase().trim();
+          if (leadEmail) emailMap.set(leadEmail, team);
+
+          const teamEmail = (team.teamEmail || "").toLowerCase().trim();
+          if (teamEmail) emailMap.set(teamEmail, team);
+
+          const personalEmail = (team.teamLeadPersonalEmail || team.personalEmail || "").toLowerCase().trim();
+          if (personalEmail) emailMap.set(personalEmail, team);
+
+          const collegeEmail = (team.teamLeadCollegeEmail || team.collegeEmail || "").toLowerCase().trim();
+          if (collegeEmail) emailMap.set(collegeEmail, team);
+
+          if (Array.isArray(team.members)) {
+            team.members.forEach((m: any) => {
+              const me = (m.email || "").toLowerCase().trim();
+              if (me) emailMap.set(me, team);
+            });
+          }
+
+          // Student IDs
+          const sid = (team.teamLeadStudentId || team.studentId || "").toLowerCase().trim();
+          if (sid) studentIdMap.set(sid, team);
+          if (Array.isArray(team.members)) {
+            team.members.forEach((m: any) => {
+              const msid = (m.studentId || m.rollNo || "").toLowerCase().trim();
+              if (msid) studentIdMap.set(msid, team);
+            });
+          }
+
+          // Team names
+          const gn = (team.groupName || team.teamName || "").toLowerCase().trim();
+          const cgn = gn.replace(/[^a-z0-9]/g, "");
+          if (cgn) cleanTeamNameMap.set(cgn, team);
+        });
+
+        const matchedTeamIdsSet = new Set<string>();
+        let activeMatchedCount = 0;
+        let otherRoundMatchedCount = 0;
+        let eliminatedMatchedCount = 0;
+        let rejectedRowsCount = 0;
+        const unmatchedSample: string[] = [];
+
+        jsonRows.forEach((row, rowIdx) => {
+          const rowKeys = Object.keys(row);
+          let rowId = "";
+          let rowEmail = "";
+          let rowStudentId = "";
+          let rowTeamName = "";
+          let rowDecision = "";
+
+          rowKeys.forEach((key) => {
+            const val = String(row[key] ?? "").trim();
+            if (!val) return;
+            const kNorm = key.toLowerCase().replace(/[^a-z0-9]/g, "");
+
+            if (kNorm.includes("teamid") || kNorm.includes("regid") || kNorm.includes("registrationid") || kNorm === "id" || kNorm === "uid") {
+              rowId = val;
+            } else if (kNorm.includes("email") || kNorm.includes("mail")) {
+              rowEmail = val;
+            } else if (kNorm.includes("studentid") || kNorm.includes("rollno") || kNorm.includes("rollnumber") || kNorm.includes("regno") || kNorm.includes("usn")) {
+              rowStudentId = val;
+            } else if (kNorm.includes("teamname") || kNorm.includes("groupname") || kNorm === "team" || kNorm === "group") {
+              rowTeamName = val;
+            } else if (kNorm.includes("decision") || kNorm.includes("status") || kNorm.includes("shortlist") || kNorm.includes("promote") || kNorm.includes("select") || kNorm.includes("result") || kNorm.includes("qualif")) {
+              rowDecision = val;
+            }
+          });
+
+          // Single-value row fallback
+          if (!rowId && !rowEmail && !rowStudentId && !rowTeamName) {
+            const firstVal = String(Object.values(row)[0] || "").trim();
+            if (firstVal.includes("@")) {
+              rowEmail = firstVal;
+            } else if (firstVal.length >= 20 && !firstVal.includes(" ")) {
+              rowId = firstVal;
+            } else {
+              rowTeamName = firstVal;
+            }
+          }
+
+          // Check for explicit reject
+          const decNorm = rowDecision.toLowerCase();
+          if (
+            decNorm === "no" ||
+            decNorm === "reject" ||
+            decNorm === "rejected" ||
+            decNorm === "eliminated" ||
+            decNorm === "not qualified" ||
+            decNorm === "false" ||
+            decNorm === "0" ||
+            decNorm === "fail"
+          ) {
+            rejectedRowsCount++;
+            return;
+          }
+
+          // Match against promotionRoster
+          let matchedTeam: any = null;
+          if (rowId) {
+            matchedTeam = idMap.get(rowId.toLowerCase());
+          }
+          if (!matchedTeam && rowEmail) {
+            matchedTeam = emailMap.get(rowEmail.toLowerCase());
+          }
+          if (!matchedTeam && rowStudentId) {
+            matchedTeam = studentIdMap.get(rowStudentId.toLowerCase());
+          }
+          if (!matchedTeam && rowTeamName) {
+            const cleanName = rowTeamName.toLowerCase().replace(/[^a-z0-9]/g, "");
+            if (cleanName) {
+              matchedTeam = cleanTeamNameMap.get(cleanName);
+            }
+          }
+
+          if (matchedTeam) {
+            matchedTeamIdsSet.add(matchedTeam.id);
+            if (matchedTeam.isEliminated) {
+              eliminatedMatchedCount++;
+            } else if (matchedTeam.currentTeamRound === promoteFromRound) {
+              activeMatchedCount++;
+            } else {
+              otherRoundMatchedCount++;
+            }
+          } else {
+            const sampleLabel = rowTeamName || rowEmail || rowStudentId || rowId || `Row ${rowIdx + 2}`;
+            if (unmatchedSample.length < 5) {
+              unmatchedSample.push(sampleLabel);
+            }
+          }
+        });
+
+        const matchedIdsArray = Array.from(matchedTeamIdsSet);
+        setExcelUploadedFileName(file.name);
+        setExcelMatchedTeamIds(matchedIdsArray);
+
+        // Auto-select active matched candidates in promoteFromRound
+        const activeMatchedCandidates = promotionRoster
+          .filter((t) => t.currentTeamRound === promoteFromRound && !t.isEliminated && matchedTeamIdsSet.has(t.id))
+          .map((t) => t.id);
+
+        setSelectedPromoteRegIds(activeMatchedCandidates);
+
+        const unmatchedCount = jsonRows.length - matchedTeamIdsSet.size - rejectedRowsCount;
+
+        setExcelImportStats({
+          totalRows: jsonRows.length,
+          matchedCount: matchedTeamIdsSet.size,
+          activeCount: activeMatchedCandidates.length,
+          otherRoundCount: otherRoundMatchedCount,
+          eliminatedCount: eliminatedMatchedCount,
+          unmatchedCount: Math.max(0, unmatchedCount),
+          unmatchedSample
+        });
+
+        setRoundsSuccessMsg(
+          `📊 Excel Parsed: ${activeMatchedCandidates.length} eligible team(s) selected for Round ${promoteFromRound} ➔ ${promoteToRound} promotion!`
+        );
+        setTimeout(() => setRoundsSuccessMsg(null), 6000);
+      } catch (err: any) {
+        console.error("Error parsing Excel file:", err);
+        showAlert({
+          title: "Excel Import Error",
+          message: err?.message || "Failed to parse the uploaded Excel file. Please ensure it is a valid .xlsx, .xls, or .csv document.",
+          type: "danger",
+          icon: "alert"
+        });
+      } finally {
+        setIsParsingExcel(false);
+        if (e.target) e.target.value = "";
+      }
+    };
+
+    reader.readAsArrayBuffer(file);
+  };
+
   const handleExecuteBatchPromotion = async () => {
     // Filter selectedPromoteRegIds to strictly include only teams in promoteFromRound
     const validCandidateIds = selectedPromoteRegIds.filter((id) => {
@@ -2469,6 +2828,8 @@ const EventManagementPage: React.FC = () => {
         title: "No Eligible Teams in Round " + promoteFromRound,
         message: promotionMode === "quiz" 
           ? `No teams currently in Round ${promoteFromRound} meet the minimum quiz cutoff threshold (${quizCutoffType === "score" ? `${quizCutoffScore} marks` : `${quizCutoffPercentage}%`}). Only participants active in Round ${promoteFromRound} with score equal or greater than the cutoff can be selected to promote.`
+          : promotionMode === "excel"
+          ? `No active teams in Round ${promoteFromRound} are selected from the Excel spreadsheet. Please upload an Excel sheet containing valid teams active in Round ${promoteFromRound} or select teams in the table.`
           : `Please select at least one active team in Round ${promoteFromRound} to promote to Round ${promoteToRound}.`,
         type: "warning",
         icon: "alert"
@@ -9895,7 +10256,7 @@ const EventManagementPage: React.FC = () => {
                     </div>
 
                     {/* Mode Buttons */}
-                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3.5">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
                       {/* Option 1: Quiz Score */}
                       <button
                         type="button"
@@ -9976,6 +10337,34 @@ const EventManagementPage: React.FC = () => {
                           <h5 className="font-black text-sm text-slate-900">3. Custom / Manual Check</h5>
                           <p className="text-[11px] text-slate-500 font-medium mt-0.5">
                             Select individual teams manually or use quick bulk filters.
+                          </p>
+                        </div>
+                      </button>
+
+                      {/* Option 4: Select via Excel Sheet */}
+                      <button
+                        type="button"
+                        onClick={() => setPromotionMode("excel")}
+                        className={`p-4 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between space-y-3 ${
+                          promotionMode === "excel"
+                            ? "bg-emerald-50/80 border-emerald-500 shadow-md ring-4 ring-emerald-500/10"
+                            : "bg-slate-50 border-slate-200 hover:border-slate-300"
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="w-9 h-9 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center font-black">
+                            <FileSpreadsheet className="w-5 h-5" />
+                          </div>
+                          {promotionMode === "excel" && (
+                            <span className="px-2 py-0.5 bg-emerald-600 text-white rounded-full text-[9px] font-black uppercase tracking-wider">
+                              ACTIVE MODE
+                            </span>
+                          )}
+                        </div>
+                        <div>
+                          <h5 className="font-black text-sm text-slate-900">4. Select via Excel Sheet</h5>
+                          <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                            Upload .xlsx, .xls, or .csv list of shortlisted teams or student IDs.
                           </p>
                         </div>
                       </button>
@@ -10163,6 +10552,142 @@ const EventManagementPage: React.FC = () => {
                         </div>
                       </div>
                     )}
+
+                    {promotionMode === "excel" && (
+                      <div className="bg-emerald-50/60 p-4 sm:p-5 rounded-2xl border border-emerald-200 space-y-4">
+                        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                          {/* Upload Zone / Info */}
+                          <div className="flex items-center gap-3.5 flex-1">
+                            <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center font-black shadow-md shadow-emerald-500/20 shrink-0">
+                              <FileSpreadsheet className="w-6 h-6" />
+                            </div>
+                            <div className="space-y-0.5 text-left">
+                              <h5 className="font-black text-sm text-emerald-950 flex items-center gap-2 flex-wrap">
+                                <span>Select Teams via Excel / CSV Sheet</span>
+                                {excelUploadedFileName && (
+                                  <span className="px-2.5 py-0.5 rounded-full bg-emerald-200 text-emerald-900 font-mono text-[10px] font-bold">
+                                    {excelUploadedFileName}
+                                  </span>
+                                )}
+                              </h5>
+                              <p className="text-[11px] text-emerald-800 font-medium">
+                                Upload your shortlisted spreadsheet (.xlsx, .xls, .csv). Matches by Team ID, Lead Email, Student ID, or Team Name.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Upload and Template Actions */}
+                          <div className="flex items-center gap-2.5 flex-wrap shrink-0">
+                            <input
+                              ref={excelFileInputRef}
+                              type="file"
+                              accept=".xlsx,.xls,.csv"
+                              onChange={handleExcelFileUpload}
+                              className="hidden"
+                            />
+
+                            <button
+                              type="button"
+                              onClick={() => excelFileInputRef.current?.click()}
+                              disabled={isParsingExcel}
+                              className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 active:scale-95 text-white rounded-xl text-xs font-black cursor-pointer transition-all shadow-md shadow-emerald-500/20 flex items-center gap-2"
+                            >
+                              {isParsingExcel ? (
+                                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                              ) : (
+                                <Upload className="w-3.5 h-3.5" />
+                              )}
+                              <span>{excelUploadedFileName ? "Upload Different Sheet" : "Upload Excel / CSV"}</span>
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={handleDownloadExcelTemplate}
+                              className="px-3.5 py-2 bg-white hover:bg-emerald-50 text-emerald-800 border border-emerald-300 rounded-xl text-xs font-black cursor-pointer transition-all flex items-center gap-1.5 shadow-2xs"
+                              title="Download pre-filled Excel template containing all active teams in Round"
+                            >
+                              <Download className="w-3.5 h-3.5 text-emerald-600" />
+                              <span>Download Round {promoteFromRound} Template</span>
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* Parsed Stats Overview Banner if file uploaded */}
+                        {excelImportStats && (
+                          <div className="pt-3 border-t border-emerald-200/70 space-y-3">
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 text-xs">
+                              <div className="p-2.5 bg-white rounded-xl border border-emerald-100 text-left">
+                                <span className="text-[10px] font-bold text-slate-400 uppercase block">Total Rows In Sheet</span>
+                                <span className="font-extrabold text-slate-800 text-sm">{excelImportStats.totalRows}</span>
+                              </div>
+
+                              <div className="p-2.5 bg-white rounded-xl border border-emerald-200 text-left">
+                                <span className="text-[10px] font-bold text-emerald-700 uppercase block">Active In Round {promoteFromRound}</span>
+                                <span className="font-extrabold text-emerald-700 text-sm flex items-center gap-1">
+                                  <span>{excelImportStats.activeCount}</span>
+                                  <Check className="w-3.5 h-3.5" />
+                                </span>
+                              </div>
+
+                              <div className="p-2.5 bg-white rounded-xl border border-slate-200 text-left">
+                                <span className="text-[10px] font-bold text-slate-500 uppercase block">In Other Rounds</span>
+                                <span className="font-extrabold text-slate-700 text-sm">
+                                  {excelImportStats.otherRoundCount + excelImportStats.eliminatedCount}
+                                </span>
+                              </div>
+
+                              <div className="p-2.5 bg-white rounded-xl border border-slate-200 text-left">
+                                <span className="text-[10px] font-bold text-amber-700 uppercase block">Unmatched Rows</span>
+                                <span className="font-extrabold text-amber-700 text-sm">{excelImportStats.unmatchedCount}</span>
+                              </div>
+                            </div>
+
+                            {excelImportStats.unmatchedSample.length > 0 && (
+                              <div className="text-[11px] text-amber-800 bg-amber-50/80 px-3 py-1.5 rounded-lg border border-amber-200 flex items-center gap-1.5 text-left">
+                                <Info className="w-3.5 h-3.5 shrink-0 text-amber-600" />
+                                <span>Unmatched sample: <b>{excelImportStats.unmatchedSample.join(", ")}</b></span>
+                              </div>
+                            )}
+
+                            <div className="flex flex-wrap items-center justify-between gap-3 pt-1 text-xs">
+                              <div className="flex items-center gap-3">
+                                <label className="flex items-center gap-1.5 text-xs font-bold text-emerald-950 cursor-pointer select-none">
+                                  <input
+                                    type="checkbox"
+                                    checked={filterOnlyExcelMatched}
+                                    onChange={(e) => setFilterOnlyExcelMatched(e.target.checked)}
+                                    className="w-4 h-4 rounded text-emerald-600 focus:ring-emerald-500"
+                                  />
+                                  <span>Filter table to show only teams present in Excel sheet</span>
+                                </label>
+                              </div>
+
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const activeMatched = promotionRoster
+                                      .filter(t => t.currentTeamRound === promoteFromRound && !t.isEliminated && excelMatchedTeamIds.includes(t.id))
+                                      .map(t => t.id);
+                                    setSelectedPromoteRegIds(activeMatched);
+                                  }}
+                                  className="px-3.5 py-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black cursor-pointer shadow-xs transition-all active:scale-95"
+                                >
+                                  Select All Matched ({excelImportStats.activeCount})
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setSelectedPromoteRegIds([])}
+                                  className="px-3.5 py-1.5 bg-white hover:bg-slate-50 border border-slate-300 text-slate-700 rounded-xl text-xs font-black cursor-pointer shadow-2xs transition-all"
+                                >
+                                  Clear Selection
+                                </button>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
                   </div>
 
                   {/* STEP 3: Roster Search & Filter Matrix */}
@@ -10246,6 +10771,10 @@ const EventManagementPage: React.FC = () => {
 
                             if (!matchQuery) return false;
 
+                            if (promotionMode === "excel" && filterOnlyExcelMatched && !excelMatchedTeamIds.includes(team.id)) {
+                              return false;
+                            }
+
                             if (promotionStatusFilter === "active") return team.currentTeamRound === promoteFromRound && !team.isEliminated;
                             if (promotionStatusFilter === "selected") return selectedPromoteRegIds.includes(team.id);
                             if (promotionStatusFilter === "qualified") return team.currentTeamRound >= promoteToRound;
@@ -10261,7 +10790,9 @@ const EventManagementPage: React.FC = () => {
                               <div className="py-16 text-center text-slate-400 space-y-3 bg-slate-50/50 p-6">
                                 <Users className="w-10 h-10 mx-auto text-slate-300" />
                                 <p className="text-xs font-bold text-slate-700">
-                                  {promotionStatusFilter === "active"
+                                  {promotionMode === "excel" && filterOnlyExcelMatched
+                                    ? "No active teams match the uploaded Excel sheet filter."
+                                    : promotionStatusFilter === "active"
                                     ? `No teams are currently active in Round ${promoteFromRound}.`
                                     : "No teams match your filter or search query."}
                                 </p>
@@ -10289,8 +10820,48 @@ const EventManagementPage: React.FC = () => {
                             );
                           }
 
+                          // Sort filtered roster by active sort key and direction
+                          const sortedRoster = [...filteredRoster].sort((a, b) => {
+                            let comparison = 0;
+                            if (promotionSortKey === "score") {
+                              const aScore = a.quizScore;
+                              const bScore = b.quizScore;
+                              if (aScore === null && bScore === null) comparison = 0;
+                              else if (aScore === null) return 1;
+                              else if (bScore === null) return -1;
+                              else {
+                                comparison = Number(bScore) - Number(aScore);
+                                if (comparison === 0) {
+                                  comparison = (Number(b.quizPercentage) || 0) - (Number(a.quizPercentage) || 0);
+                                }
+                              }
+                            } else if (promotionSortKey === "jury") {
+                              const aJury = a.juryScore;
+                              const bJury = b.juryScore;
+                              if (aJury === null && bJury === null) comparison = 0;
+                              else if (aJury === null) return 1;
+                              else if (bJury === null) return -1;
+                              else comparison = Number(bJury) - Number(aJury);
+                            } else if (promotionSortKey === "name") {
+                              const aName = (a.groupName || a.teamLeadName || a.name || "").toLowerCase();
+                              const bName = (b.groupName || b.teamLeadName || b.name || "").toLowerCase();
+                              comparison = aName.localeCompare(bName);
+                            } else if (promotionSortKey === "deliverables") {
+                              const aStatus = (a.submissionStatus === "Submitted" || a.submittedAt) ? 2 : (a.problemStatement ? 1 : 0);
+                              const bStatus = (b.submissionStatus === "Submitted" || b.submittedAt) ? 2 : (b.problemStatement ? 1 : 0);
+                              comparison = bStatus - aStatus;
+                            } else if (promotionSortKey === "round") {
+                              comparison = (b.currentTeamRound || 1) - (a.currentTeamRound || 1);
+                            }
+
+                            if (promotionSortOrder === "asc" && comparison !== 0) {
+                              return -comparison;
+                            }
+                            return comparison;
+                          });
+
                           // Candidate teams eligible for selection in the currently filtered view
-                          const candidateTeamsInView = filteredRoster.filter(
+                          const candidateTeamsInView = sortedRoster.filter(
                             t => t.currentTeamRound === promoteFromRound && !t.isEliminated &&
                             (promotionMode === "quiz" ? (
                               t.quizScore !== null &&
@@ -10307,7 +10878,7 @@ const EventManagementPage: React.FC = () => {
                           return (
                             <table className="w-full text-left text-xs border-collapse min-w-[900px]">
                               <thead>
-                                <tr className="bg-slate-900 text-white text-[11px] font-black uppercase tracking-wider">
+                                <tr className="bg-slate-900 text-white text-[11px] font-black uppercase tracking-wider select-none">
                                   <th className="py-4 px-4 w-12 text-center">
                                     <input
                                       type="checkbox"
@@ -10328,18 +10899,124 @@ const EventManagementPage: React.FC = () => {
                                       title={candidateTeamsInView.length === 0 ? `No eligible teams in Round ${promoteFromRound} meeting criteria` : "Select/Deselect all eligible teams in this round"}
                                     />
                                   </th>
-                                  <th className="py-4 px-3 w-12 text-center">#</th>
-                                  <th className="py-4 px-4">Team & Leader Details</th>
-                                  <th className="py-4 px-3 text-center">Deliverables</th>
-                                  <th className="py-4 px-3 text-center">Online Quiz</th>
-                                  <th className="py-4 px-3 text-center">Jury Score</th>
-                                  <th className="py-4 px-3 text-center">Stage & Status</th>
+                                  <th 
+                                    className="py-4 px-3 w-14 text-center cursor-pointer hover:bg-slate-800 transition-colors"
+                                    onClick={() => {
+                                      if (promotionSortKey === "rank") {
+                                        setPromotionSortOrder(prev => prev === "asc" ? "desc" : "asc");
+                                      } else {
+                                        setPromotionSortKey("rank");
+                                        setPromotionSortOrder("asc");
+                                      }
+                                    }}
+                                    title="Click to sort by rank / default order"
+                                  >
+                                    <div className="flex items-center justify-center gap-1">
+                                      <span>#</span>
+                                      {promotionSortKey === "rank" && (promotionSortOrder === "asc" ? <ChevronUp className="w-3 h-3 text-blue-400" /> : <ChevronDown className="w-3 h-3 text-blue-400" />)}
+                                    </div>
+                                  </th>
+                                  <th 
+                                    className="py-4 px-4 cursor-pointer hover:bg-slate-800 transition-colors"
+                                    onClick={() => {
+                                      if (promotionSortKey === "name") {
+                                        setPromotionSortOrder(prev => prev === "asc" ? "desc" : "asc");
+                                      } else {
+                                        setPromotionSortKey("name");
+                                        setPromotionSortOrder("asc");
+                                      }
+                                    }}
+                                    title="Click to sort alphabetically by team name"
+                                  >
+                                    <div className="flex items-center gap-1.5">
+                                      <span>Team & Leader Details</span>
+                                      {promotionSortKey === "name" && (promotionSortOrder === "asc" ? <ChevronUp className="w-3 h-3 text-blue-400" /> : <ChevronDown className="w-3 h-3 text-blue-400" />)}
+                                    </div>
+                                  </th>
+                                  <th 
+                                    className="py-4 px-3 text-center cursor-pointer hover:bg-slate-800 transition-colors"
+                                    onClick={() => {
+                                      if (promotionSortKey === "deliverables") {
+                                        setPromotionSortOrder(prev => prev === "asc" ? "desc" : "asc");
+                                      } else {
+                                        setPromotionSortKey("deliverables");
+                                        setPromotionSortOrder("desc");
+                                      }
+                                    }}
+                                  >
+                                    <div className="flex items-center justify-center gap-1">
+                                      <span>Deliverables</span>
+                                      {promotionSortKey === "deliverables" && (promotionSortOrder === "asc" ? <ChevronUp className="w-3 h-3 text-blue-400" /> : <ChevronDown className="w-3 h-3 text-blue-400" />)}
+                                    </div>
+                                  </th>
+                                  <th 
+                                    className={`py-4 px-3 text-center cursor-pointer hover:bg-slate-800 transition-colors ${
+                                      promotionMode === "quiz" ? "bg-purple-950/60" : ""
+                                    }`}
+                                    onClick={() => {
+                                      if (promotionSortKey === "score") {
+                                        setPromotionSortOrder(prev => prev === "desc" ? "asc" : "desc");
+                                      } else {
+                                        setPromotionSortKey("score");
+                                        setPromotionSortOrder("desc");
+                                      }
+                                    }}
+                                    title="Click to sort by quiz score"
+                                  >
+                                    <div className="flex items-center justify-center gap-1.5">
+                                      <span className={promotionMode === "quiz" ? "text-purple-300 font-extrabold" : ""}>Online Quiz</span>
+                                      {promotionSortKey === "score" ? (
+                                        promotionSortOrder === "desc" ? <ChevronDown className="w-3.5 h-3.5 text-purple-400" /> : <ChevronUp className="w-3.5 h-3.5 text-purple-400" />
+                                      ) : (
+                                        <ChevronDown className="w-3 h-3 text-slate-500 opacity-60" />
+                                      )}
+                                    </div>
+                                  </th>
+                                  <th 
+                                    className={`py-4 px-3 text-center cursor-pointer hover:bg-slate-800 transition-colors ${
+                                      promotionMode === "jury" ? "bg-indigo-950/60" : ""
+                                    }`}
+                                    onClick={() => {
+                                      if (promotionSortKey === "jury") {
+                                        setPromotionSortOrder(prev => prev === "desc" ? "asc" : "desc");
+                                      } else {
+                                        setPromotionSortKey("jury");
+                                        setPromotionSortOrder("desc");
+                                      }
+                                    }}
+                                    title="Click to sort by jury evaluation score"
+                                  >
+                                    <div className="flex items-center justify-center gap-1.5">
+                                      <span className={promotionMode === "jury" ? "text-indigo-300 font-extrabold" : ""}>Jury Score</span>
+                                      {promotionSortKey === "jury" ? (
+                                        promotionSortOrder === "desc" ? <ChevronDown className="w-3.5 h-3.5 text-indigo-400" /> : <ChevronUp className="w-3.5 h-3.5 text-indigo-400" />
+                                      ) : (
+                                        <ChevronDown className="w-3 h-3 text-slate-500 opacity-60" />
+                                      )}
+                                    </div>
+                                  </th>
+                                  <th 
+                                    className="py-4 px-3 text-center cursor-pointer hover:bg-slate-800 transition-colors"
+                                    onClick={() => {
+                                      if (promotionSortKey === "round") {
+                                        setPromotionSortOrder(prev => prev === "asc" ? "desc" : "asc");
+                                      } else {
+                                        setPromotionSortKey("round");
+                                        setPromotionSortOrder("desc");
+                                      }
+                                    }}
+                                  >
+                                    <div className="flex items-center justify-center gap-1">
+                                      <span>Stage & Status</span>
+                                      {promotionSortKey === "round" && (promotionSortOrder === "asc" ? <ChevronUp className="w-3 h-3 text-blue-400" /> : <ChevronDown className="w-3 h-3 text-blue-400" />)}
+                                    </div>
+                                  </th>
                                   <th className="py-4 px-4 text-right">Quick Action</th>
                                 </tr>
                               </thead>
 
                               <tbody className="divide-y divide-slate-100 font-sans">
-                                {filteredRoster.map((team, idx) => {
+                                {sortedRoster.map((team, idx) => {
                                   const isSelected = selectedPromoteRegIds.includes(team.id);
                                   const isGroup = team.groupName && team.groupName !== "Individual RSVP";
                                   const displayTeamName = isGroup ? team.groupName : (team.teamLeadName || team.name || "Participant");
@@ -10349,13 +11026,15 @@ const EventManagementPage: React.FC = () => {
                                   const isAlreadyPromoted = team.currentTeamRound >= promoteToRound;
                                   const isUnpromotedFromPrev = team.currentTeamRound < promoteFromRound && !team.isEliminated;
 
-                                  const meetsQuizCutoff = isInSourceRound && (() => {
-                                    if (team.quizScore === null) return false;
+                                  const isTeamAboveCutoff = (() => {
+                                    if (team.quizScore === null || team.quizScore === undefined) return false;
                                     if (quizCutoffType === "score") return Number(team.quizScore) >= Number(quizCutoffScore);
                                     if (quizCutoffType === "percentage") return Number(team.quizPercentage ?? 0) >= Number(quizCutoffPercentage);
                                     if (quizCutoffType === "topN") return eligibleTeamIds.includes(team.id);
                                     return false;
                                   })();
+
+                                  const meetsQuizCutoff = isInSourceRound && isTeamAboveCutoff;
 
                                   return (
                                     <tr
@@ -10438,9 +11117,17 @@ const EventManagementPage: React.FC = () => {
                                             {displayTeamName.charAt(0).toUpperCase()}
                                           </div>
                                           <div>
-                                            <span className="font-black text-slate-900 text-xs block truncate max-w-[200px]" title={displayTeamName}>
-                                              {displayTeamName}
-                                            </span>
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                              <span className="font-black text-slate-900 text-xs block truncate max-w-[180px]" title={displayTeamName}>
+                                                {displayTeamName}
+                                              </span>
+                                              {excelMatchedTeamIds.includes(team.id) && (
+                                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.2 rounded-md bg-emerald-100 text-emerald-800 text-[9px] font-black border border-emerald-200">
+                                                  <FileSpreadsheet className="w-2.5 h-2.5" />
+                                                  <span>Excel</span>
+                                                </span>
+                                              )}
+                                            </div>
                                             <span className="text-[10px] font-bold text-slate-400 block mt-0.5">
                                               Lead: {team.teamLeadName || team.name} • {team.teamLeadStudentId || team.studentId || "ID: N/A"}
                                             </span>
@@ -10469,7 +11156,7 @@ const EventManagementPage: React.FC = () => {
                                         {team.quizScore !== null ? (
                                           <div className="inline-flex flex-col items-center gap-1">
                                             <span className={`px-2.5 py-1 rounded-xl text-[11px] font-black inline-flex items-center gap-1.5 border shadow-2xs ${
-                                              meetsQuizCutoff || (!isInSourceRound && Number(team.quizScore) >= Number(quizCutoffScore))
+                                              meetsQuizCutoff || (!isInSourceRound && isTeamAboveCutoff)
                                                 ? "bg-purple-50 text-purple-900 border-purple-200"
                                                 : "bg-rose-50 text-rose-900 border-rose-200"
                                             }`}>
@@ -10478,11 +11165,11 @@ const EventManagementPage: React.FC = () => {
                                               <span className="text-[9px] text-purple-700 font-extrabold">({team.quizPercentage}%)</span>
                                             </span>
                                             <span className={`text-[9px] font-bold px-2 py-0.5 rounded-full ${
-                                              meetsQuizCutoff || (!isInSourceRound && Number(team.quizScore) >= Number(quizCutoffScore))
+                                              meetsQuizCutoff || (!isInSourceRound && isTeamAboveCutoff)
                                                 ? "bg-emerald-50 text-emerald-700 border border-emerald-200/60"
                                                 : "bg-rose-50 text-rose-700 border border-rose-200/60"
                                             }`}>
-                                              {meetsQuizCutoff || (!isInSourceRound && Number(team.quizScore) >= Number(quizCutoffScore)) ? "✓ Qualified" : "Below Cutoff"}
+                                              {meetsQuizCutoff || (!isInSourceRound && isTeamAboveCutoff) ? "✓ Qualified" : "Below Cutoff"}
                                             </span>
                                           </div>
                                         ) : (
