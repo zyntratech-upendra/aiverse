@@ -72,13 +72,19 @@ import {
   Wand2,
   FileUp,
   Send,
-  GraduationCap
+  GraduationCap,
+  RotateCcw
 } from "lucide-react";
 import DatePicker from "../../components/ui/DatePicker";
 import TimePicker from "../../components/ui/TimePicker";
 import MemberSelectCombobox from "../../components/ui/MemberSelectCombobox";
 import { sendResendEmail } from "../../utils/resendEmailService";
-import { buildRoundPromotionEmail, buildCertificateEmail, buildRegistrationConfirmationEmail } from "../../utils/emailTemplates";
+import { 
+  buildRoundPromotionEmail, 
+  buildCertificateEmail, 
+  buildRegistrationConfirmationEmail,
+  buildResetPasswordEmail
+} from "../../utils/emailTemplates";
 import { dataCache } from "../../utils/dataCache";
 import { EventLaunchSplash, type EventLaunchData } from "../../components/common/EventLaunchSplash";
 import { 
@@ -460,6 +466,7 @@ const EventManagementPage: React.FC = () => {
   const [eventAccessSearchQuery, setEventAccessSearchQuery] = useState("");
   const [loginAccessSuccessMsg, setLoginAccessSuccessMsg] = useState<string | null>(null);
   const [isProvisioningLoginAccess, setIsProvisioningLoginAccess] = useState(false);
+  const [sendingResetEmailTeamId, setSendingResetEmailTeamId] = useState<string | null>(null);
   const [provisionedTeamIds, setProvisionedTeamIds] = useState<string[]>([]);
   const [authTargetRound, setAuthTargetRound] = useState<number>(1);
   const [eventRosterViewMode, setEventRosterViewMode] = useState<"teams" | "individuals">("teams");
@@ -3824,6 +3831,76 @@ const EventManagementPage: React.FC = () => {
       alert("Failed to grant login access for team.");
     } finally {
       setIsProvisioningLoginAccess(false);
+    }
+  };
+
+  const handleSendResetPasswordLink = async (reg: any) => {
+    const leadEmail = (
+      reg.teamLeadPersonalEmail ||
+      reg.personalEmail ||
+      reg.teamLeadEmail ||
+      reg.email ||
+      reg.teamLeadCollegeEmail ||
+      reg.collegeEmail ||
+      reg.userEmail ||
+      ""
+    ).trim();
+
+    const isGroup = reg.groupName && reg.groupName !== "Individual RSVP";
+    const leadName = reg.teamLeadName || reg.fullName || reg.name || "Participant Lead";
+    const displayTeam = isGroup ? reg.groupName : (reg.teamLeadName || reg.name || "Participant");
+    const eventTitle = eventAccessEvent?.title || reg.eventTitle || "AI Verse Event";
+
+    if (!leadEmail) {
+      await showAlert({
+        title: "Missing Email Address",
+        message: `No email address found for "${displayTeam}". Please ensure the team lead email is provided in registration details.`,
+        type: "danger"
+      });
+      return;
+    }
+
+    setSendingResetEmailTeamId(reg.id);
+
+    try {
+      const origin = window.location.origin;
+      const resetUrl = `${origin}/reset-password?email=${encodeURIComponent(leadEmail)}&team=${encodeURIComponent(displayTeam)}`;
+
+      const emailPayload = buildResetPasswordEmail({
+        recipientName: leadName,
+        teamName: displayTeam,
+        eventTitle,
+        resetUrl,
+        teamLeadEmail: leadEmail,
+      });
+
+      const res = await sendResendEmail({
+        to: leadEmail,
+        subject: emailPayload.subject,
+        html: emailPayload.html,
+        text: emailPayload.text,
+      });
+
+      if (res.success) {
+        setLoginAccessSuccessMsg(`🔑 Password reset link dispatched successfully to ${leadEmail} for "${displayTeam}".`);
+        setTimeout(() => setLoginAccessSuccessMsg(null), 6000);
+      } else {
+        console.warn("Email service warning:", res.error);
+        await showAlert({
+          title: "Email Dispatch Notice",
+          message: `Email could not be delivered automatically (${res.error || "Service unavailable"}). You can share this reset link directly with the participant lead:\n\n${resetUrl}`,
+          type: "warning"
+        });
+      }
+    } catch (err: any) {
+      console.error("Error sending reset password link:", err);
+      await showAlert({
+        title: "Error Sending Reset Link",
+        message: err?.message || "Failed to dispatch password reset link.",
+        type: "danger"
+      });
+    } finally {
+      setSendingResetEmailTeamId(null);
     }
   };
 
@@ -9493,58 +9570,80 @@ const EventManagementPage: React.FC = () => {
                                 </div>
 
                                 {/* Right Action Buttons */}
-                                <div className="flex items-center gap-2.5 shrink-0 self-end sm:self-center">
-                                  {/* Login Access Action */}
-                                  {!isConfirmed ? (
-                                    <button
-                                      onClick={() => navigate("/faculty/registrations")}
-                                      className="px-3 py-1.5 rounded-xl text-[10px] font-extrabold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-all cursor-pointer active:scale-95 shadow-2xs flex items-center gap-1"
-                                      title="Confirm registration in Registration Directory"
-                                    >
-                                      <Lock className="w-3 h-3 text-amber-600" />
-                                      <span>Confirm Reg</span>
-                                    </button>
-                                  ) : isProvisioned ? (
-                                    <div className="inline-flex items-center gap-1.5">
-                                      <span className="px-2.5 py-1 rounded-xl text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-200 inline-flex items-center gap-1 shadow-2xs">
-                                        <Check className="h-3 w-3 text-emerald-600" />
-                                        Granted
-                                      </span>
+                                <div className="flex flex-col sm:items-end gap-2 shrink-0 self-end sm:self-center">
+                                  <div className="flex items-center gap-2.5">
+                                    {/* Login Access Action */}
+                                    {!isConfirmed ? (
                                       <button
-                                        onClick={() => handleRevokeSingleTeamAccess(reg.id, displayTeamName)}
-                                        disabled={isProvisioningLoginAccess}
-                                        className="px-2.5 py-1 rounded-xl text-[10px] font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 transition-all cursor-pointer active:scale-95 shadow-2xs"
-                                        title="Revoke portal access for this team"
+                                        onClick={() => navigate("/faculty/registrations")}
+                                        className="px-3 py-1.5 rounded-xl text-[10px] font-extrabold bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-200 transition-all cursor-pointer active:scale-95 shadow-2xs flex items-center gap-1"
+                                        title="Confirm registration in Registration Directory"
                                       >
-                                        Revoke
+                                        <Lock className="w-3 h-3 text-amber-600" />
+                                        <span>Confirm Reg</span>
                                       </button>
-                                    </div>
-                                  ) : (
-                                    <button
-                                      onClick={() => handleGrantSingleTeamAccess(reg.id, displayTeamName)}
-                                      disabled={isProvisioningLoginAccess}
-                                      className="px-3 py-1.5 rounded-xl text-[10px] font-extrabold bg-blue-50 hover:bg-blue-100 text-[#2563EB] border border-blue-200 transition-all cursor-pointer active:scale-95 shadow-2xs flex items-center gap-1"
-                                      title="Allow login access for this team"
-                                    >
-                                      <Key className="w-3 h-3 text-[#2563EB]" />
-                                      <span>Allow Access</span>
-                                    </button>
-                                  )}
+                                    ) : isProvisioned ? (
+                                      <div className="inline-flex items-center gap-1.5">
+                                        <span className="px-2.5 py-1 rounded-xl text-[10px] font-black uppercase bg-emerald-100 text-emerald-800 border border-emerald-200 inline-flex items-center gap-1 shadow-2xs">
+                                          <Check className="h-3 w-3 text-emerald-600" />
+                                          Granted
+                                        </span>
+                                        <button
+                                          onClick={() => handleRevokeSingleTeamAccess(reg.id, displayTeamName)}
+                                          disabled={isProvisioningLoginAccess}
+                                          className="px-2.5 py-1 rounded-xl text-[10px] font-bold bg-red-50 hover:bg-red-100 text-red-600 border border-red-200 transition-all cursor-pointer active:scale-95 shadow-2xs"
+                                          title="Revoke portal access for this team"
+                                        >
+                                          Revoke
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      <button
+                                        onClick={() => handleGrantSingleTeamAccess(reg.id, displayTeamName)}
+                                        disabled={isProvisioningLoginAccess}
+                                        className="px-3 py-1.5 rounded-xl text-[10px] font-extrabold bg-blue-50 hover:bg-blue-100 text-[#2563EB] border border-blue-200 transition-all cursor-pointer active:scale-95 shadow-2xs flex items-center gap-1"
+                                        title="Allow login access for this team"
+                                      >
+                                        <Key className="w-3 h-3 text-[#2563EB]" />
+                                        <span>Allow Access</span>
+                                      </button>
+                                    )}
 
-                                  {/* Expand / Collapse Members Toggle */}
-                                  {isGroup ? (
-                                    <button
-                                      onClick={() => toggleTeamExpand(reg.id)}
-                                      className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer border shadow-2xs ${
-                                        isExpanded
-                                          ? "bg-blue-600 text-white border-blue-600 shadow-blue-500/20"
-                                          : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
-                                      }`}
-                                    >
-                                      <span>{isExpanded ? "Hide Members" : `Show ${totalMemberCount} Members`}</span>
-                                      {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                                    </button>
-                                  ) : null}
+                                    {/* Expand / Collapse Members Toggle */}
+                                    {isGroup ? (
+                                      <button
+                                        onClick={() => toggleTeamExpand(reg.id)}
+                                        className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer border shadow-2xs ${
+                                          isExpanded
+                                            ? "bg-blue-600 text-white border-blue-600 shadow-blue-500/20"
+                                            : "bg-slate-50 hover:bg-slate-100 text-slate-700 border-slate-200"
+                                        }`}
+                                      >
+                                        <span>{isExpanded ? "Hide Members" : `Show ${totalMemberCount} Members`}</span>
+                                        {isExpanded ? <ChevronUp className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
+                                      </button>
+                                    ) : null}
+                                  </div>
+
+                                  {/* Send Reset Password Link Button */}
+                                  <button
+                                    onClick={() => handleSendResetPasswordLink(reg)}
+                                    disabled={sendingResetEmailTeamId === reg.id}
+                                    className="px-3 py-1.5 rounded-xl text-[10px] font-black bg-indigo-50/90 hover:bg-indigo-100 active:scale-95 text-indigo-700 border border-indigo-200/90 transition-all cursor-pointer shadow-2xs flex items-center gap-1.5 disabled:opacity-50"
+                                    title={`Send password reset link to ${reg.teamLeadPersonalEmail || reg.personalEmail || reg.teamLeadEmail || reg.email || "lead email"}`}
+                                  >
+                                    {sendingResetEmailTeamId === reg.id ? (
+                                      <>
+                                        <Loader2 className="w-3 h-3 animate-spin text-indigo-600" />
+                                        <span>Sending Reset Link...</span>
+                                      </>
+                                    ) : (
+                                      <>
+                                        <RotateCcw className="w-3 h-3 text-indigo-600" />
+                                        <span>Send Reset Password Link</span>
+                                      </>
+                                    )}
+                                  </button>
                                 </div>
                               </div>
 

@@ -1197,5 +1197,155 @@ export function buildTeamCertificateEmail(data: TeamCertificateEmailData): {
   return { subject, html, text };
 }
 
+export interface ResetPasswordEmailData {
+  recipientName: string;
+  teamName?: string;
+  eventTitle?: string;
+  resetUrl: string;
+  teamLeadEmail: string;
+}
+
+/**
+ * Builds Password Reset Request Email for participants / team leads
+ */
+export function buildResetPasswordEmail(data: ResetPasswordEmailData): {
+  subject: string;
+  html: string;
+  text: string;
+} {
+  const {
+    recipientName,
+    teamName = "Your Team",
+    eventTitle = "AI Verse Event",
+    resetUrl,
+    teamLeadEmail,
+  } = data;
+
+  const subject = `Password Reset Request • ${teamName} • AI Verse`;
+
+  const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>${subject}</title>
+  <style type="text/css">
+    body { margin: 0; padding: 0; background-color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif; color: #1e293b; }
+    table { border-collapse: collapse; }
+    .btn:hover { background-color: #1d4ed8 !important; }
+  </style>
+</head>
+<body style="margin: 0; padding: 0; background-color: #f8fafc;">
+  <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f8fafc; padding: 40px 15px;">
+    <tr>
+      <td align="center">
+        <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 600px; background-color: #ffffff; border-radius: 20px; overflow: hidden; border: 1px solid #e2e8f0; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05);">
+          <!-- Top Header -->
+          <tr>
+            <td style="background: linear-gradient(135deg, #1E3A8A 0%, #2563EB 100%); padding: 36px 32px; text-align: center;">
+              <h1 style="color: #ffffff; margin: 0 0 8px 0; font-size: 24px; font-weight: 800; letter-spacing: -0.5px;">AI VERSE</h1>
+              <p style="color: #bfdbfe; margin: 0; font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 1px;">Portal Access & Security</p>
+            </td>
+          </tr>
+
+          <!-- Main Content -->
+          <tr>
+            <td style="padding: 36px 32px;">
+              <h2 style="font-size: 20px; font-weight: 800; color: #0f172a; margin: 0 0 16px 0;">Reset Your Portal Password</h2>
+              <p style="font-size: 15px; line-height: 1.6; color: #334155; margin: 0 0 20px 0;">
+                Hello <strong>${recipientName}</strong>,
+              </p>
+              <p style="font-size: 14px; line-height: 1.6; color: #475569; margin: 0 0 24px 0;">
+                A request was initiated by faculty to reset the portal login password for <strong>${teamName}</strong> participating in <strong>${eventTitle}</strong>.
+              </p>
+
+              <!-- Account Details Card -->
+              <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f1f5f9; border-radius: 12px; margin-bottom: 28px; border: 1px solid #cbd5e1;">
+                <tr>
+                  <td style="padding: 18px 22px;">
+                    <p style="margin: 0 0 8px 0; font-size: 12px; color: #64748b; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px;">Registered Account Details</p>
+                    <p style="margin: 0 0 6px 0; font-size: 14px; color: #1e293b;"><strong>Team / Participant:</strong> ${teamName}</p>
+                    <p style="margin: 0 0 6px 0; font-size: 14px; color: #1e293b;"><strong>Registered Lead Email:</strong> <span style="font-family: monospace; color: #2563EB;">${teamLeadEmail}</span></p>
+                    <p style="margin: 0; font-size: 14px; color: #1e293b;"><strong>Event:</strong> ${eventTitle}</p>
+                  </td>
+                </tr>
+              </table>
+
+              <!-- Steps Guide -->
+              <div style="background-color: #eff6ff; border-left: 4px solid #2563EB; border-radius: 4px; padding: 14px 18px; margin-bottom: 28px;">
+                <p style="margin: 0 0 6px 0; font-size: 13px; font-weight: 700; color: #1e40af;">How to complete your password reset:</p>
+                <ol style="margin: 0; padding-left: 20px; font-size: 13px; color: #1e3a8a; line-height: 1.6;">
+                  <li>Click the <strong>Reset Team Password</strong> button below.</li>
+                  <li>Confirm your participant lead email (<strong>${teamLeadEmail}</strong>).</li>
+                  <li>Enter your new password and submit.</li>
+                  <li>You will then be able to log in to the competition portal with your newly set password!</li>
+                </ol>
+              </div>
+
+              <!-- Reset Button CTA -->
+              <div style="text-align: center; margin: 32px 0;">
+                <a href="${resetUrl}" target="_blank" style="background-color: #2563EB; color: #ffffff; text-decoration: none; padding: 14px 32px; font-size: 15px; font-weight: 700; border-radius: 12px; display: inline-block; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);">
+                  Reset Team Password &rarr;
+                </a>
+              </div>
+
+              <p style="font-size: 12px; line-height: 1.5; color: #94a3b8; text-align: center; margin: 0 0 10px 0;">
+                Or copy and paste this link in your browser:
+              </p>
+              <p style="font-size: 12px; color: #2563EB; word-break: break-all; text-align: center; margin: 0 0 24px 0; font-family: monospace;">
+                ${resetUrl}
+              </p>
+
+              <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 28px 0;" />
+
+              <p style="font-size: 12px; color: #64748b; line-height: 1.5; margin: 0;">
+                If you did not request this password change or have questions, please reach out directly to the event faculty or student organizers.
+              </p>
+            </td>
+          </tr>
+
+          <!-- Footer -->
+          <tr>
+            <td style="background-color: #f8fafc; padding: 20px 32px; border-top: 1px solid #e2e8f0; text-align: center;">
+              <p style="font-size: 11px; color: #94a3b8; margin: 0; line-height: 1.5;">
+                AI Verse Portal • Vishnu Institute of Technology • Automated System Notification
+              </p>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>`;
+
+  const text = `
+RESET YOUR AI VERSE PORTAL PASSWORD
+=====================================
+Hello ${recipientName},
+
+A request was initiated by faculty to reset the portal login password for ${teamName} in ${eventTitle}.
+
+REGISTERED DETAILS:
+- Team: ${teamName}
+- Registered Lead Email: ${teamLeadEmail}
+- Event: ${eventTitle}
+
+HOW TO RESET:
+1. Open this reset link:
+${resetUrl}
+
+2. Enter and confirm your registered lead email (${teamLeadEmail}).
+3. Enter your new password and submit.
+4. Continue to portal login with your new password.
+
+Best regards,
+AI Verse Team
+Vishnu Institute of Technology
+`.trim();
+
+  return { subject, html, text };
+}
+
 
 

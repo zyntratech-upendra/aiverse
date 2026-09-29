@@ -497,6 +497,187 @@ router.put(
   })
 );
 
+// POST /api/auth/verify-reset-email - Verify if participant lead email exists in registrations or user database
+router.post(
+  '/verify-reset-email',
+  asyncHandler(async (req, res) => {
+    const { email } = req.body || {};
+    const cleanEmail = (email || '').toLowerCase().trim();
+
+    if (!cleanEmail) {
+      return res.status(400).json({ success: false, error: 'Email address is required' });
+    }
+
+    // Search in Registration collection
+    const regDoc = await Registration.findOne({
+      $or: [
+        { email: cleanEmail },
+        { personal_email: cleanEmail },
+        { personalEmail: cleanEmail },
+        { userEmail: cleanEmail },
+        { teamEmail: cleanEmail },
+        { teamLeadEmail: cleanEmail },
+        { teamLeadPersonalEmail: cleanEmail },
+        { leadPersonalEmail: cleanEmail },
+        { collegeEmail: cleanEmail },
+        { teamLeadCollegeEmail: cleanEmail },
+        { 'members.email': cleanEmail },
+      ],
+    }).lean();
+
+    // Search in User collection
+    const userDoc = await User.findOne({
+      $or: [{ email: cleanEmail }, { personal_email: cleanEmail }, { uid: cleanEmail }],
+    }).lean();
+
+    if (!regDoc && !userDoc) {
+      return res.status(404).json({
+        success: false,
+        error: 'No registered participant lead or account found matching this email address.',
+      });
+    }
+
+    const name =
+      (regDoc && (regDoc.fullName || regDoc.teamLeadName || regDoc.name)) ||
+      (userDoc && (userDoc.name || userDoc.displayName)) ||
+      cleanEmail.split('@')[0];
+    const teamName =
+      (regDoc && (regDoc.groupName || regDoc.teamName)) ||
+      (userDoc && (userDoc.team_name || userDoc.teamName)) ||
+      'Team Lead';
+    const eventTitle =
+      (regDoc && regDoc.eventTitle) ||
+      (userDoc && (userDoc.event_title || userDoc.eventTitle)) ||
+      'AI Verse Event';
+    const college =
+      (regDoc && (regDoc.collegeName || regDoc.college || regDoc.instituteName)) ||
+      (userDoc && (userDoc.collegeName || userDoc.college)) ||
+      '';
+    const rollNo =
+      (regDoc && (regDoc.teamLeadStudentId || regDoc.studentId)) ||
+      (userDoc && (userDoc.roll_number || userDoc.rollNumber || userDoc.studentId)) ||
+      '';
+
+    return res.json({
+      success: true,
+      verified: true,
+      email: cleanEmail,
+      name,
+      teamName,
+      eventTitle,
+      college,
+      rollNo,
+      registrationId: regDoc ? String(regDoc._id) : (userDoc && userDoc.registration_id ? String(userDoc.registration_id) : ''),
+    });
+  })
+);
+
+// POST /api/auth/reset-password - Reset password for participant
+router.post(
+  '/reset-password',
+  asyncHandler(async (req, res) => {
+    const { email, password, newPassword } = req.body || {};
+    const cleanEmail = (email || '').toLowerCase().trim();
+    const cleanPassword = (newPassword || password || '').trim();
+
+    if (!cleanEmail) {
+      return res.status(400).json({ success: false, error: 'Email address is required' });
+    }
+    if (!cleanPassword || cleanPassword.length < 4) {
+      return res.status(400).json({ success: false, error: 'Password must be at least 4 characters long' });
+    }
+
+    // Find all matching registrations
+    const matchingRegs = await Registration.find({
+      $or: [
+        { email: cleanEmail },
+        { personal_email: cleanEmail },
+        { personalEmail: cleanEmail },
+        { userEmail: cleanEmail },
+        { teamEmail: cleanEmail },
+        { teamLeadEmail: cleanEmail },
+        { teamLeadPersonalEmail: cleanEmail },
+        { leadPersonalEmail: cleanEmail },
+        { collegeEmail: cleanEmail },
+        { teamLeadCollegeEmail: cleanEmail },
+        { 'members.email': cleanEmail },
+      ],
+    });
+
+    // Check if user document exists
+    const existingUser = await User.findOne({
+      $or: [{ email: cleanEmail }, { personal_email: cleanEmail }, { uid: cleanEmail }],
+    });
+
+    if (matchingRegs.length === 0 && !existingUser) {
+      return res.status(404).json({
+        success: false,
+        error: 'No registered participant or account found for this email address.',
+      });
+    }
+
+    // Update registrations with new password
+    if (matchingRegs.length > 0) {
+      for (const reg of matchingRegs) {
+        reg.teamPassword = cleanPassword;
+        reg.password = cleanPassword;
+        await reg.save().catch(() => {});
+      }
+    }
+
+    // Update / Upsert User record
+    const primaryReg = matchingRegs[0];
+    const targetUid = existingUser?.uid || cleanEmail.replace(/[^a-z0-9]/g, '_');
+    const name =
+      (primaryReg && (primaryReg.fullName || primaryReg.teamLeadName || primaryReg.name)) ||
+      existingUser?.name ||
+      cleanEmail.split('@')[0];
+    const teamName =
+      (primaryReg && (primaryReg.groupName || primaryReg.teamName)) ||
+      existingUser?.team_name ||
+      existingUser?.teamName ||
+      '';
+    const eventTitle =
+      (primaryReg && primaryReg.eventTitle) ||
+      existingUser?.event_title ||
+      existingUser?.eventTitle ||
+      '';
+
+    await User.findOneAndUpdate(
+      { $or: [{ email: cleanEmail }, { uid: targetUid }, { _id: targetUid }] },
+      {
+        $set: {
+          password: cleanPassword,
+          requiresPasswordChange: false,
+          hasCustomPassword: true,
+          updated_at: Date.now(),
+          status: 'Active',
+          role: existingUser?.role || 'participant',
+          name: name,
+          team_name: teamName,
+          teamName: teamName,
+          event_title: eventTitle,
+          eventTitle: eventTitle,
+          registration_id: primaryReg ? String(primaryReg._id) : (existingUser?.registration_id || ''),
+        },
+        $setOnInsert: {
+          _id: targetUid,
+          uid: targetUid,
+          email: cleanEmail,
+          created_at: Date.now(),
+        },
+      },
+      { new: true, upsert: true }
+    );
+
+    return res.json({
+      success: true,
+      message: 'Password reset successfully. You can now log in with your new password.',
+    });
+  })
+);
+
+
 // GET /api/auth/me - Get current user profile from token
 router.get(
   '/me',

@@ -51,6 +51,7 @@ const ContactInquiriesPage = React.lazy(() => import("../pages/faculty/ContactIn
 
 // Participant & Quiz Pages (separate chunk for quiz takers)
 const ParticipantSetPasswordPage = React.lazy(() => import("../pages/auth/ParticipantSetPasswordPage"));
+const ResetPasswordPage = React.lazy(() => import("../pages/auth/ResetPasswordPage"));
 const ParticipantDashboardPage = React.lazy(() => import("../pages/participant/ParticipantDashboardPage"));
 const TeamReviewPage = React.lazy(() => import("../pages/participant/TeamReviewPage"));
 const QuizLobbyPage = React.lazy(() => import("../pages/participant/QuizLobbyPage"));
@@ -175,6 +176,8 @@ const AppRoutes: React.FC = () => {
         />
 
         {/* Participant Routes */}
+        <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/participant/reset-password" element={<ResetPasswordPage />} />
         <Route path="/participant/set-password" element={<ParticipantSetPasswordPage />} />
         <Route path="/set-password" element={<ParticipantSetPasswordPage />} />
         <Route
