@@ -1222,10 +1222,9 @@ export function buildResetPasswordEmail(data: ResetPasswordEmailData): {
   } = data;
 
   const rawResetUrl = (resetUrl || "").trim();
-  const cleanResetUrl = rawResetUrl.replace(
-    /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i,
-    "https://aiversevitb.in"
-  ) || "https://aiversevitb.in/reset-password";
+  const cleanResetUrl = rawResetUrl
+    .replace(/^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i, "https://aiverse-vishnu.vercel.app")
+    .replace(/^https?:\/\/(www\.)?aiversevitb\.in/i, "https://aiverse-vishnu.vercel.app") || "https://aiverse-vishnu.vercel.app/reset-password";
 
   const subject = `Password Reset Request • ${teamName} • AI Verse`;
 

@@ -3863,7 +3863,7 @@ const EventManagementPage: React.FC = () => {
     setSendingResetEmailTeamId(reg.id);
 
     try {
-      const siteBaseUrl = "https://aiversevitb.in";
+      const siteBaseUrl = "https://aiverse-vishnu.vercel.app";
       const resetUrl = `${siteBaseUrl}/reset-password?email=${encodeURIComponent(leadEmail)}&team=${encodeURIComponent(displayTeam)}`;
 
       const emailPayload = buildResetPasswordEmail({
