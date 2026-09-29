@@ -1221,6 +1221,12 @@ export function buildResetPasswordEmail(data: ResetPasswordEmailData): {
     teamLeadEmail,
   } = data;
 
+  const rawResetUrl = (resetUrl || "").trim();
+  const cleanResetUrl = rawResetUrl.replace(
+    /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?/i,
+    "https://aiversevitb.in"
+  ) || "https://aiversevitb.in/reset-password";
+
   const subject = `Password Reset Request • ${teamName} • AI Verse`;
 
   const html = `<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
@@ -1284,7 +1290,7 @@ export function buildResetPasswordEmail(data: ResetPasswordEmailData): {
 
               <!-- Reset Button CTA -->
               <div style="text-align: center; margin: 32px 0;">
-                <a href="${resetUrl}" target="_blank" style="background-color: #2563EB; color: #ffffff; text-decoration: none; padding: 14px 32px; font-size: 15px; font-weight: 700; border-radius: 12px; display: inline-block; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);">
+                <a href="${cleanResetUrl}" target="_blank" style="background-color: #2563EB; color: #ffffff; text-decoration: none; padding: 14px 32px; font-size: 15px; font-weight: 700; border-radius: 12px; display: inline-block; box-shadow: 0 4px 12px rgba(37, 99, 235, 0.25);">
                   Reset Team Password &rarr;
                 </a>
               </div>
@@ -1293,7 +1299,7 @@ export function buildResetPasswordEmail(data: ResetPasswordEmailData): {
                 Or copy and paste this link in your browser:
               </p>
               <p style="font-size: 12px; color: #2563EB; word-break: break-all; text-align: center; margin: 0 0 24px 0; font-family: monospace;">
-                ${resetUrl}
+                ${cleanResetUrl}
               </p>
 
               <hr style="border: none; border-top: 1px solid #e2e8f0; margin: 28px 0;" />
@@ -1333,7 +1339,7 @@ REGISTERED DETAILS:
 
 HOW TO RESET:
 1. Open this reset link:
-${resetUrl}
+${cleanResetUrl}
 
 2. Enter and confirm your registered lead email (${teamLeadEmail}).
 3. Enter your new password and submit.
