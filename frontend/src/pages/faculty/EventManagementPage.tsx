@@ -71,7 +71,8 @@ import {
   FileSpreadsheet,
   Wand2,
   FileUp,
-  Send
+  Send,
+  GraduationCap
 } from "lucide-react";
 import DatePicker from "../../components/ui/DatePicker";
 import TimePicker from "../../components/ui/TimePicker";
@@ -636,6 +637,7 @@ const EventManagementPage: React.FC = () => {
         "Team / Project Name": teamName,
         "Team Lead Name": reg.teamLeadName || reg.name || "",
         "Roll Number": reg.teamLeadStudentId || reg.studentId || "",
+        "College Name": reg.collegeName || reg.college || reg.institute || reg.institution || (Array.isArray(reg.members) && reg.members[0] && (reg.members[0].college || reg.members[0].collegeName)) || "",
         "Email Address": reg.teamLeadPersonalEmail || reg.personalEmail || reg.teamLeadEmail || reg.email || "",
         "Phone Number": reg.phoneNumber || "",
         "Branch": reg.branch || "CSE",
@@ -664,6 +666,129 @@ const EventManagementPage: React.FC = () => {
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
+  };
+
+  const handleExportSubmissionsExcel = (singleTeam?: any) => {
+    const cR = eventAccessEvent?.currentRound || 1;
+    const targetRound = matrixViewRound > 0 ? matrixViewRound : cR;
+    const rPrefix = `r${targetRound}_`;
+
+    const getFieldVal = (reg: any, fieldName: string) => {
+      if (matrixViewRound > 0 || targetRound > 1) {
+        const roundVal = (reg as any)[`${rPrefix}${fieldName}`];
+        if (roundVal !== undefined && roundVal !== "") return roundVal;
+        if (reg.submissionRound === targetRound) {
+          return (reg as any)[fieldName] || "";
+        }
+        return "";
+      }
+      return (reg as any)[`${rPrefix}${fieldName}`] || (reg as any)[fieldName] || "";
+    };
+
+    const targetList = singleTeam
+      ? [singleTeam]
+      : eventAccessRegistrations.filter((r) => {
+          if (targetRound === 1) return true;
+          const teamRound = Number(r.currentRound || r.promotedToRound || 1);
+          const elimRound = r.eliminatedInRound ? Number(r.eliminatedInRound) : null;
+          return teamRound >= targetRound || (elimRound !== null && elimRound >= targetRound);
+        });
+
+    if (targetList.length === 0) {
+      alert("No team submissions to export for this round.");
+      return;
+    }
+
+    const dataRows = targetList.map((reg, idx) => {
+      const isGroup = reg.groupName && reg.groupName !== "Individual RSVP";
+      const teamName = isGroup ? reg.groupName : (reg.teamLeadName || reg.name || "Individual Participant");
+
+      const isSub = (reg as any)[`${rPrefix}submissionStatus`] === "Submitted" ||
+        !!(reg as any)[`${rPrefix}submittedAt`] ||
+        (reg.submissionRound === targetRound && (reg.submissionStatus === "Submitted" || !!reg.submittedAt));
+      const isDraft = !isSub && !!(getFieldVal(reg, "problemStatement") || getFieldVal(reg, "selectedProblemStatementId"));
+      const status = isSub ? "Submitted" : isDraft ? "Draft" : "Not Started";
+
+      const college = reg.collegeName || reg.college || reg.institute || reg.institution ||
+        (Array.isArray(reg.members) && reg.members[0] && (reg.members[0].college || reg.members[0].collegeName)) || "";
+
+      const membersSummary = Array.isArray(reg.members) && reg.members.length > 0
+        ? reg.members.map((m: any) => `${m.name || "Member"} (${m.studentId || m.rollNo || "ID: N/A"})`).join("; ")
+        : "N/A";
+
+      const submittedTime = getFieldVal(reg, "submittedAt") || (isSub ? reg.submittedAt : "");
+
+      return {
+        "S.No": idx + 1,
+        "Team / Project Name": teamName,
+        "Round": `Round ${targetRound}`,
+        "Team Current Round": `Round ${Number(reg.currentRound || reg.promotedToRound || 1)}`,
+        "Round Status": reg.roundStatus || "Active",
+        "Team Lead Name": reg.teamLeadName || reg.name || "",
+        "Roll Number / Student ID": reg.teamLeadStudentId || reg.studentId || "",
+        "College Name": college,
+        "College Place": reg.collegePlace || "",
+        "Email Address": reg.teamLeadPersonalEmail || reg.personalEmail || reg.teamLeadEmail || reg.email || "",
+        "Phone Number": reg.phoneNumber || reg.teamLeadPhone || reg.phone || "",
+        "Branch": reg.branch || reg.department || "CSE",
+        "Section": reg.section || "",
+        "Team Size": reg.teamSize || (Array.isArray(reg.members) ? reg.members.length + 1 : 1),
+        "Team Members": membersSummary,
+        "Problem Statement ID": getFieldVal(reg, "selectedProblemStatementId") || reg.problemStatementCode || "",
+        "Problem Statement / Description": getFieldVal(reg, "problemStatement") || reg.selectedProblemStatement?.title || "",
+        "Submission Status": status,
+        "Submitted Timestamp": submittedTime ? new Date(submittedTime).toLocaleString() : "",
+        "Demo Video Link": getFieldVal(reg, "demoVideoUrl") || "",
+        "GitHub Repo URL": getFieldVal(reg, "repoUrl") || getFieldVal(reg, "githubUrl") || "",
+        "Prototype Link": getFieldVal(reg, "prototypeUrl") || "",
+        "SRS Document Name": getFieldVal(reg, "srsFileName") || "",
+        "Presentation File Name": getFieldVal(reg, "presentationFileName") || "",
+        "Key Features / Summary": getFieldVal(reg, "keyFeatures") || ""
+      };
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(dataRows);
+
+    worksheet["!cols"] = [
+      { wch: 6 },  // S.No
+      { wch: 26 }, // Team Name
+      { wch: 10 }, // Round
+      { wch: 18 }, // Team Current Round
+      { wch: 14 }, // Round Status
+      { wch: 22 }, // Lead Name
+      { wch: 18 }, // Roll No
+      { wch: 32 }, // College Name
+      { wch: 18 }, // College Place
+      { wch: 28 }, // Email
+      { wch: 15 }, // Phone
+      { wch: 10 }, // Branch
+      { wch: 10 }, // Section
+      { wch: 10 }, // Team Size
+      { wch: 35 }, // Team Members
+      { wch: 22 }, // Problem Statement ID
+      { wch: 40 }, // Problem Statement
+      { wch: 16 }, // Status
+      { wch: 22 }, // Submitted At
+      { wch: 35 }, // Demo Video Link
+      { wch: 35 }, // GitHub Repo
+      { wch: 35 }, // Prototype Link
+      { wch: 25 }, // SRS Document
+      { wch: 25 }, // Presentation
+      { wch: 45 }  // Key Features
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    const sheetName = singleTeam
+      ? `${(singleTeam.groupName || singleTeam.teamLeadName || "Team").slice(0, 20)} R${targetRound}`
+      : `Submissions R${targetRound}`;
+    XLSX.utils.book_append_sheet(workbook, worksheet, sheetName);
+
+    const cleanTitle = (eventAccessEvent?.title || "event").replace(/[^a-zA-Z0-9]/g, "_");
+    const filename = singleTeam
+      ? `${cleanTitle}_${(singleTeam.groupName || singleTeam.teamLeadName || "team").replace(/[^a-zA-Z0-9]/g, "_")}_Round_${targetRound}_submission.xlsx`
+      : `${cleanTitle}_Round_${targetRound}_submissions.xlsx`;
+
+    XLSX.writeFile(workbook, filename);
   };
 
   const handleUnlockSingleTeamSubmission = async (regId: string, teamName: string) => {
@@ -9354,6 +9479,15 @@ const EventManagementPage: React.FC = () => {
                                       <span className="text-slate-600">
                                         {reg.branch || "CSE"} {reg.section ? `(${reg.section})` : ""}
                                       </span>
+                                      {(reg.collegeName || reg.college) && (
+                                        <>
+                                          <span>•</span>
+                                          <span className="text-indigo-600 font-bold inline-flex items-center gap-1" title={reg.collegeName || reg.college}>
+                                            <GraduationCap className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                            <span className="truncate max-w-[200px]">{reg.collegeName || reg.college}</span>
+                                          </span>
+                                        </>
+                                      )}
                                     </div>
                                   </div>
                                 </div>
@@ -12243,6 +12377,16 @@ const EventManagementPage: React.FC = () => {
 
               <button
                 type="button"
+                onClick={() => handleExportSubmissionsExcel()}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 transition-all cursor-pointer border border-emerald-400/40 shadow-xs"
+                title="Download all submission records in Excel (.xlsx) format"
+              >
+                <FileSpreadsheet className="w-4 h-4" />
+                <span className="hidden sm:inline">Export Excel</span>
+              </button>
+
+              <button
+                type="button"
                 onClick={() => setIsSubmissionsModalOpen(false)}
                 className="w-10 h-10 rounded-xl bg-white/10 hover:bg-white/25 active:scale-95 text-white flex items-center justify-center transition-all border border-white/20 cursor-pointer shadow-xs"
                 title="Close Full Page"
@@ -12416,7 +12560,7 @@ const EventManagementPage: React.FC = () => {
                   <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
                   <input
                     type="text"
-                    placeholder="Search team, student ID, problem statement..."
+                    placeholder="Search team, student ID, college, problem statement..."
                     value={submissionsSearchQuery}
                     onChange={(e) => setSubmissionsSearchQuery(e.target.value)}
                     className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-[#2563EB]"
@@ -12453,7 +12597,8 @@ const EventManagementPage: React.FC = () => {
                     (reg.groupName || "").toLowerCase().includes(submissionsSearchQuery.toLowerCase()) ||
                     (reg.teamLeadName || reg.name || "").toLowerCase().includes(submissionsSearchQuery.toLowerCase()) ||
                     (reg.problemStatement || "").toLowerCase().includes(submissionsSearchQuery.toLowerCase()) ||
-                    (reg.teamLeadStudentId || reg.studentId || "").toLowerCase().includes(submissionsSearchQuery.toLowerCase());
+                    (reg.teamLeadStudentId || reg.studentId || "").toLowerCase().includes(submissionsSearchQuery.toLowerCase()) ||
+                    (reg.collegeName || reg.college || "").toLowerCase().includes(submissionsSearchQuery.toLowerCase());
 
                   const isPresent = isTeamPresentInViewRound(reg);
                   const isSubmitted = isRegSubmittedForRound(reg);
@@ -12484,7 +12629,7 @@ const EventManagementPage: React.FC = () => {
                       <thead>
                         {/* Upper Squares Column Headers */}
                         <tr className="bg-slate-900 text-white text-left">
-                          <th className="py-5 px-6 font-black uppercase text-[11px] tracking-wider w-[280px] border-b border-slate-800 bg-slate-950">
+                          <th className="py-5 px-6 font-black uppercase text-[11px] tracking-wider w-[320px] min-w-[300px] border-b border-slate-800 bg-slate-950">
                             <div className="flex items-center gap-2">
                               <Users className="w-4 h-4 text-blue-400" />
                               <span>Team Name & Status</span>
@@ -12665,6 +12810,22 @@ const EventManagementPage: React.FC = () => {
                             </>
                           )}
 
+                          {/* Download Excel Column in place of the red box */}
+                          <th className="py-4 px-3 border-b border-slate-800 text-center w-[160px]">
+                            <button
+                              type="button"
+                              onClick={() => handleExportSubmissionsExcel()}
+                              className="p-3 rounded-2xl border border-emerald-500/50 bg-emerald-950/80 hover:bg-emerald-900 active:scale-95 text-white inline-flex items-center justify-center gap-2 w-full text-center transition-all cursor-pointer shadow-md shadow-emerald-950/50 hover:border-emerald-400 group/btn"
+                              title="Download all submissions for this round in Excel (.xlsx) format"
+                            >
+                              <FileSpreadsheet className="w-5 h-5 text-emerald-400 group-hover/btn:scale-110 transition-transform shrink-0" />
+                              <div className="text-left">
+                                <span className="text-[11px] font-black text-white block leading-tight">Download Excel</span>
+                                <span className="text-[8px] font-bold text-emerald-300 block uppercase tracking-wider">.xlsx Format</span>
+                              </div>
+                            </button>
+                          </th>
+
                           {/* Action Column */}
                           <th className="py-4 px-6 border-b border-slate-800 text-right w-[120px]">
                             <span className="text-[10px] font-black uppercase text-slate-400 tracking-wider">Inspect</span>
@@ -12676,6 +12837,15 @@ const EventManagementPage: React.FC = () => {
                         {filteredList.map((reg, idx) => {
                           const isGroup = reg.groupName && reg.groupName !== "Individual RSVP";
                           const displayTeamName = isGroup ? reg.groupName : (reg.teamLeadName || reg.name || "Individual Participant");
+                          const teamCollege = (
+                            reg.collegeName || 
+                            reg.college || 
+                            reg.institute || 
+                            reg.institution || 
+                            reg.leadCollegeName || 
+                            (Array.isArray(reg.members) && (reg.members[0]?.college || reg.members[0]?.collegeName)) || 
+                            ""
+                          ).trim();
 
                           // Determine which data fields to read based on matrixViewRound
                           const viewingPastRound = matrixViewRound > 0;
@@ -12723,7 +12893,7 @@ const EventManagementPage: React.FC = () => {
                                   </div>
                                   <div className="text-left min-w-0">
                                     <div className="flex items-center gap-1.5 flex-wrap">
-                                      <span className="font-extrabold text-slate-900 text-sm truncate max-w-[170px]" title={displayTeamName}>
+                                      <span className="font-extrabold text-slate-900 text-sm truncate max-w-[190px]" title={displayTeamName}>
                                         {displayTeamName}
                                       </span>
                                       {isEliminated ? (
@@ -12747,6 +12917,12 @@ const EventManagementPage: React.FC = () => {
                                     <span className="text-[10px] font-bold text-slate-400 block mt-0.5">
                                       {isGroup ? `Lead: ${reg.teamLeadName || reg.name}` : "Individual"} • {reg.teamLeadStudentId || reg.studentId || "N/A"}
                                     </span>
+                                    {teamCollege && (
+                                      <div className="flex items-center gap-1 mt-0.5 text-[10px] font-extrabold text-indigo-600/90 truncate max-w-[240px]" title={teamCollege}>
+                                        <GraduationCap className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                        <span className="truncate">{teamCollege}</span>
+                                      </div>
+                                    )}
                                   </div>
                                 </div>
                               </td>
@@ -12892,6 +13068,19 @@ const EventManagementPage: React.FC = () => {
                                   </td>
                                 </>
                               )}
+
+                              {/* Download Excel Column for Single Team */}
+                              <td className="py-5 px-3 text-center">
+                                <button
+                                  type="button"
+                                  onClick={() => handleExportSubmissionsExcel(reg)}
+                                  className="px-3.5 py-2 bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200/90 font-black text-xs rounded-xl transition-all inline-flex items-center gap-1.5 cursor-pointer shadow-2xs hover:scale-105 active:scale-95"
+                                  title={`Download ${displayTeamName}'s submission as Excel (.xlsx)`}
+                                >
+                                  <FileSpreadsheet className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                                  <span className="font-extrabold text-[11px]">Download</span>
+                                </button>
+                              </td>
 
                               {/* Action Column */}
                               <td className="py-5 px-6 text-right">
@@ -13062,6 +13251,7 @@ SLIDE 1: TITLE & TEAM
 - Project Name : ${psTitle}
 - Team Name    : ${teamTitle}
 - Team Lead    : ${selectedTeamSubmission?.teamLeadName || selectedTeamSubmission?.name || "N/A"}
+- College      : ${selectedTeamSubmission?.collegeName || selectedTeamSubmission?.college || "N/A"}
 
 SLIDE 2: PROBLEM STATEMENT
 - ${dProblemStatement || activePs?.description || psTitle}
@@ -13114,6 +13304,24 @@ AI Verse Competition Platform • Faculty Review Engine
                         <p className="text-xs text-slate-500 font-medium">
                           Lead: {selectedTeamSubmission.teamLeadName || selectedTeamSubmission.name} • Contact: {selectedTeamSubmission.teamLeadEmail || selectedTeamSubmission.email}
                         </p>
+                        {(() => {
+                          const dCollege = (
+                            selectedTeamSubmission.collegeName || 
+                            selectedTeamSubmission.college || 
+                            selectedTeamSubmission.institute || 
+                            selectedTeamSubmission.institution || 
+                            selectedTeamSubmission.leadCollegeName ||
+                            (Array.isArray(selectedTeamSubmission.members) && (selectedTeamSubmission.members[0]?.college || selectedTeamSubmission.members[0]?.collegeName)) || 
+                            ""
+                          ).trim();
+                          if (!dCollege) return null;
+                          return (
+                            <p className="text-xs text-indigo-700 font-bold flex items-center gap-1.5 mt-0.5">
+                              <GraduationCap className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                              <span>{dCollege}</span>
+                            </p>
+                          );
+                        })()}
                       </div>
                     </div>
                     <button
@@ -13311,13 +13519,24 @@ AI Verse Competition Platform • Faculty Review Engine
                 <span className="text-[11px] font-bold text-slate-400">Team can edit deliverables</span>
               )}
 
-              <button
-                type="button"
-                onClick={() => setSelectedTeamSubmission(null)}
-                className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs rounded-xl transition-colors cursor-pointer shadow-xs"
-              >
-                Done
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleExportSubmissionsExcel(selectedTeamSubmission)}
+                  className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white font-extrabold text-xs rounded-xl transition-all cursor-pointer shadow-xs flex items-center gap-1.5 active:scale-95"
+                  title="Download this team's submission details as an Excel spreadsheet (.xlsx)"
+                >
+                  <FileSpreadsheet className="w-4 h-4" />
+                  <span>Download Excel</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedTeamSubmission(null)}
+                  className="px-6 py-2.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold text-xs rounded-xl transition-colors cursor-pointer shadow-xs active:scale-95"
+                >
+                  Done
+                </button>
+              </div>
             </div>
           </div>
         </div>,
