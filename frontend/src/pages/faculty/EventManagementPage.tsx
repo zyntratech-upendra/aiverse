@@ -82,6 +82,8 @@ import { sendResendEmail } from "../../utils/resendEmailService";
 import { 
   buildRoundPromotionEmail, 
   buildCertificateEmail, 
+  buildTeamCertificateEmail,
+  type TeamMemberCertItem,
   buildRegistrationConfirmationEmail,
   buildResetPasswordEmail
 } from "../../utils/emailTemplates";
@@ -855,6 +857,10 @@ const EventManagementPage: React.FC = () => {
     currentEmail: string;
     successCount: number;
     failCount: number;
+    batchNumber?: number;
+    totalBatches?: number;
+    batchSize?: number;
+    isRateLimitPause?: boolean;
     errorMsg?: string;
   } | null>(null);
   const [testCertEmail, setTestCertEmail] = useState<string>("");
@@ -1153,51 +1159,140 @@ const EventManagementPage: React.FC = () => {
     return list;
   }, [eventAccessRegistrations, eventAccessEvent, certType]);
 
-  // Filtered recipients based on Audience Tab and Search Query
-  const filteredCertRecipients = useMemo(() => {
-    let result = flattenedCertRecipients;
+
+
+  // 👥 Team-Level Registrations for Certificates Hub (1 row per team, Lead email only)
+  const certTeams = useMemo(() => {
+    return (eventAccessRegistrations || []).map((reg: any) => {
+      const regId = (reg.id || reg._id || "").toString();
+      const isGroup = !!reg.groupName && reg.groupName !== "Individual RSVP";
+      const teamName = isGroup ? reg.groupName : (reg.teamLeadName || reg.fullName || reg.name || "Individual Participant");
+      const leadName = reg.teamLeadName || reg.fullName || reg.name || "Participant";
+
+      const leadPersonalEmail = (reg.teamLeadPersonalEmail || reg.personalEmail || "").trim().toLowerCase();
+      const leadCollegeEmail = (reg.teamLeadCollegeEmail || reg.collegeEmail || "").trim().toLowerCase();
+      const genericLeadEmail = (reg.teamLeadEmail || reg.userEmail || reg.leadEmail || reg.email || "").trim().toLowerCase();
+
+      // Collect team lead emails only (either personal email or college email, or generic)
+      const leadEmails = Array.from(new Set([
+        leadPersonalEmail,
+        leadCollegeEmail,
+        genericLeadEmail
+      ].filter(Boolean)));
+
+      const leadEmail = leadPersonalEmail || leadCollegeEmail || genericLeadEmail;
+      const leadStudentId = reg.teamLeadStudentId || reg.studentId || "";
+      const leadPhone = reg.teamLeadPhone || reg.phone || "";
+
+      const members = (Array.isArray(reg.members) ? reg.members : []).map((m: any, mIdx: number) => ({
+        name: m.name || `Member #${mIdx + 1}`,
+        studentId: m.studentId || m.rollNo || "",
+        email: (m.email || m.personalEmail || "").trim().toLowerCase(),
+        phone: m.phone || "",
+        certificateIssued: !!(m.certificateIssued || (reg.certificateIssued && m.certificateIssued !== false)),
+        certificateId: m.certificateId || `AIV-${regId.slice(-4).toUpperCase()}-M${mIdx + 1}`,
+        certificateSentAt: m.certificateSentAt || reg.certificateSentAt || null,
+        certificateType: m.certificateType || reg.certificateType || certType,
+      }));
+
+      const teamSize = reg.teamSize || (members.length + 1);
+      const currentRound = Number(reg.currentRound || reg.promotedToRound) || 1;
+      const isEliminated = reg.roundStatus === "Eliminated" || Boolean(reg.eliminatedInRound && reg.eliminatedInRound <= currentRound);
+      const roundStatus = isEliminated ? "Eliminated" : (reg.roundStatus || (currentRound > 1 ? "Qualified" : "Active"));
+      const isPromoted = currentRound > 1 || reg.roundStatus === "Qualified";
+      const isWinner = Boolean(reg.isWinner || reg.rank || (reg.roundStatus === "Qualified" && currentRound >= (eventAccessEvent?.totalRounds || 3)));
+      const attendanceMarked = !!reg.attendanceMarked;
+      const submissionStatus = reg.submissionStatus === "Submitted" || !!reg.submittedAt ? "Submitted" : (reg.submissionStatus || "Draft");
+
+      const certificateIssued = !!reg.certificateIssued;
+      const certificateId = reg.certificateId || `AIV-${regId.slice(-6).toUpperCase()}-L`;
+      const certificateSentAt = reg.certificateSentAt || null;
+      const certificateType = reg.certificateType || certType;
+
+      return {
+        key: regId,
+        regId,
+        isGroup,
+        teamName,
+        leadName,
+        leadEmail,
+        leadPersonalEmail,
+        leadCollegeEmail,
+        leadEmails,
+        leadStudentId,
+        leadPhone,
+        members,
+        teamSize,
+        currentRound,
+        roundStatus,
+        isEliminated,
+        isPromoted,
+        isWinner,
+        attendanceMarked,
+        submissionStatus,
+        certificateIssued,
+        certificateId,
+        certificateSentAt,
+        certificateType,
+        rawRegistration: reg,
+      };
+    });
+  }, [eventAccessRegistrations, eventAccessEvent, certType]);
+
+  // Filtered teams based on Audience Tab and Search Query
+  const filteredCertTeams = useMemo(() => {
+    let result = certTeams;
 
     // Audience Filter
-    if (certAudienceFilter === "promoted" || certAudienceFilter === "promoted_r2") {
-      result = result.filter(r => (r.currentRound || 1) >= 2 || r.isPromoted);
-    } else if (certAudienceFilter === "all_r2") {
-      result = result.filter(r => (r.currentRound || 1) >= 2);
-    } else if (certAudienceFilter === "promoted_r3") {
-      result = result.filter(r => (r.currentRound || 1) >= 3 || ((r.currentRound || 1) === 2 && r.roundStatus === "Qualified"));
-    } else if (certAudienceFilter === "all_r3") {
-      result = result.filter(r => (r.currentRound || 1) >= 3);
-    } else if (certAudienceFilter === "attended") {
-      result = result.filter(r => r.attendanceMarked);
-    } else if (certAudienceFilter === "submitted") {
-      result = result.filter(r => r.submissionStatus === "Submitted");
-    } else if (certAudienceFilter === "winners") {
-      result = result.filter(r => r.isWinner);
-    } else if (certAudienceFilter === "unsent") {
-      result = result.filter(r => !r.certificateIssued);
+    if (certAudienceFilter === "round_1") {
+      result = result.filter(t => (t.currentRound === 1 || !t.currentRound) && !t.isEliminated);
+    } else if (certAudienceFilter === "round_2") {
+      result = result.filter(t => t.currentRound === 2 && !t.isEliminated);
+    } else if (certAudienceFilter === "round_3") {
+      result = result.filter(t => (t.currentRound === 3 || (t.currentRound || 1) >= 3) && !t.isEliminated);
     }
 
     // Search Query Filter
     if (certSearchQuery.trim()) {
       const q = certSearchQuery.toLowerCase().trim();
-      result = result.filter(r =>
-        r.name.toLowerCase().includes(q) ||
-        r.email.toLowerCase().includes(q) ||
-        r.studentId.toLowerCase().includes(q) ||
-        r.teamName.toLowerCase().includes(q) ||
-        (r.certificateId && r.certificateId.toLowerCase().includes(q))
+      result = result.filter(t =>
+        t.teamName.toLowerCase().includes(q) ||
+        t.leadName.toLowerCase().includes(q) ||
+        t.leadEmail.toLowerCase().includes(q) ||
+        t.leadStudentId.toLowerCase().includes(q) ||
+        (t.certificateId && t.certificateId.toLowerCase().includes(q)) ||
+        t.members.some((m: any) =>
+          (m.name && m.name.toLowerCase().includes(q)) ||
+          (m.studentId && m.studentId.toLowerCase().includes(q)) ||
+          (m.email && m.email.toLowerCase().includes(q))
+        )
       );
     }
 
     return result;
-  }, [flattenedCertRecipients, certAudienceFilter, certSearchQuery]);
+  }, [certTeams, certAudienceFilter, certSearchQuery]);
+
+  // Auto-switch filter and select present round teams for Certificate Hub
+  const handleCertAudienceFilterChange = (newFilter: string) => {
+    setCertAudienceFilter(newFilter);
+    let targetTeams = certTeams;
+    if (newFilter === "round_1") {
+      targetTeams = certTeams.filter(t => (t.currentRound === 1 || !t.currentRound) && !t.isEliminated);
+    } else if (newFilter === "round_2") {
+      targetTeams = certTeams.filter(t => t.currentRound === 2 && !t.isEliminated);
+    } else if (newFilter === "round_3") {
+      targetTeams = certTeams.filter(t => (t.currentRound === 3 || (t.currentRound || 1) >= 3) && !t.isEliminated);
+    }
+    setSelectedCertRecipients(targetTeams.map(t => t.key));
+  };
 
   const handleOpenCertificateModal = () => {
     setCertAudienceFilter("all");
     setCertSearchQuery("");
     setCertSendingProgress(null);
     setTestEmailFeedback(null);
-    // Select all recipients by default
-    setSelectedCertRecipients(flattenedCertRecipients.map(r => r.key));
+    // Select all teams by default
+    setSelectedCertRecipients(certTeams.map(t => t.key));
 
     // Hydrate template configuration from event if exists
     const cfg = eventAccessEvent?.certificateConfig || {};
@@ -1230,8 +1325,8 @@ const EventManagementPage: React.FC = () => {
   };
 
   const handleToggleSelectAllCertRecipients = () => {
-    const currentFilteredKeys = filteredCertRecipients.map(r => r.key);
-    const allFilteredSelected = currentFilteredKeys.every(k => selectedCertRecipients.includes(k));
+    const currentFilteredKeys = filteredCertTeams.map(t => t.key);
+    const allFilteredSelected = currentFilteredKeys.length > 0 && currentFilteredKeys.every(k => selectedCertRecipients.includes(k));
 
     if (allFilteredSelected) {
       setSelectedCertRecipients(prev => prev.filter(k => !currentFilteredKeys.includes(k)));
@@ -1246,23 +1341,35 @@ const EventManagementPage: React.FC = () => {
     );
   };
 
-  // Bulk Dispatch Certificates via Email
+  // Bulk Dispatch Certificates via Email (Team Order, Team Lead Mails Only, Resend 10 req/s rate-limit safe)
   const handleSendCertificatesBatch = async () => {
-    const recipientsToSend = flattenedCertRecipients.filter(r => selectedCertRecipients.includes(r.key));
+    const teamsToSend = filteredCertTeams.filter(t => selectedCertRecipients.includes(t.key));
 
-    if (recipientsToSend.length === 0) {
+    if (teamsToSend.length === 0) {
       await showAlert({
-        title: "No Recipients Selected",
-        message: "Please select at least one participant to send certificates.",
+        title: "No Teams Selected",
+        message: "Please select at least one team to dispatch certificates.",
         type: "warning",
       });
       return;
     }
 
+    const totalAttendeesInBatch = teamsToSend.reduce((acc, t) => acc + (t.teamSize || (t.members.length + 1)), 0);
+    const BATCH_SIZE = 9;
+    const totalBatches = Math.ceil(teamsToSend.length / BATCH_SIZE);
+
+    const roundLabel = certAudienceFilter === "round_1"
+      ? "Round 1"
+      : certAudienceFilter === "round_2"
+      ? "Round 2"
+      : certAudienceFilter === "round_3"
+      ? "Round 3"
+      : "Selected";
+
     const confirmed = await showConfirm({
-      title: `Dispatch ${recipientsToSend.length} Certificate(s)?`,
-      message: `You are about to email official "${certType}" certificates directly to ${recipientsToSend.length} participant(s). Would you like to proceed?`,
-      confirmText: `🚀 Send ${recipientsToSend.length} Certificates`,
+      title: `Dispatch Certificates to ${teamsToSend.length} ${roundLabel} Team(s)?`,
+      message: `You are about to email official "${certType}" certificates directly to the Team Lead of ${teamsToSend.length} team(s) (${totalAttendeesInBatch} total participants).\n\n⚡ Rate Limit Strategy:\n• Sending 9 teams at the same time (parallel)\n• 1.2s cooldown between batches to stay under Resend's 10 req/s rate limit\n• Total: ${totalBatches} batch${totalBatches > 1 ? "es" : ""}\n\nWould you like to proceed?`,
+      confirmText: `🚀 Send to ${teamsToSend.length} Team(s)`,
       cancelText: "Cancel",
       type: "primary",
     });
@@ -1271,145 +1378,239 @@ const EventManagementPage: React.FC = () => {
     setIsSendingCertificates(true);
     setCertSendingProgress({
       current: 0,
-      total: recipientsToSend.length,
-      currentName: "",
-      currentEmail: "",
+      total: teamsToSend.length,
+      currentName: `Preparing Batch 1 of ${totalBatches}...`,
+      currentEmail: `Dispatching ${Math.min(BATCH_SIZE, teamsToSend.length)} teams simultaneously`,
       successCount: 0,
       failCount: 0,
+      batchNumber: 1,
+      totalBatches,
+      batchSize: Math.min(BATCH_SIZE, teamsToSend.length),
+      isRateLimitPause: false,
     });
 
     const siteBaseUrl = "https://aiversevitb.in";
     let successCount = 0;
     let failCount = 0;
+    let processedCount = 0;
 
-    for (let i = 0; i < recipientsToSend.length; i++) {
-      const recipient = recipientsToSend[i];
-      const certId = recipient.certificateId || `AIV-${Date.now().toString(36).toUpperCase()}-${i + 1}`;
-      const certUrl = `${siteBaseUrl}/certificate/${certId}?name=${encodeURIComponent(recipient.name)}&event=${encodeURIComponent(eventAccessEvent?.title || "AI Verse Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(recipient.studentId)}&team=${encodeURIComponent(recipient.teamName)}&mode=${encodeURIComponent(certTemplateMode)}&nameX=${encodeURIComponent(certNamePosX)}&nameY=${encodeURIComponent(certNamePosY)}&nameSize=${encodeURIComponent(certNameFontSize)}&nameColor=${encodeURIComponent(certNameColor)}&teamX=${encodeURIComponent(certTeamPosX)}&teamY=${encodeURIComponent(certTeamPosY)}&teamSize=${encodeURIComponent(certTeamFontSize)}&teamColor=${encodeURIComponent(certTeamColor)}&showTeam=${certShowTeamName}&rollX=${encodeURIComponent(certRollPosX)}&rollY=${encodeURIComponent(certRollPosY)}&rollSize=${encodeURIComponent(certRollFontSize)}&rollColor=${encodeURIComponent(certRollColor)}&showRoll=${certShowRollNo}&showQr=${certShowQrCode}`;
+    for (let batchIndex = 0; batchIndex < totalBatches; batchIndex++) {
+      const batchStart = batchIndex * BATCH_SIZE;
+      const batch = teamsToSend.slice(batchStart, batchStart + BATCH_SIZE);
+      const batchNumber = batchIndex + 1;
 
+      // Update progress for starting this batch of 9 teams in parallel
       setCertSendingProgress({
-        current: i + 1,
-        total: recipientsToSend.length,
-        currentName: recipient.name,
-        currentEmail: recipient.email,
+        current: processedCount,
+        total: teamsToSend.length,
+        currentName: `Batch ${batchNumber}: ${batch.map(t => t.teamName).slice(0, 3).join(", ")}${batch.length > 3 ? ` +${batch.length - 3} more` : ""}`,
+        currentEmail: `Dispatching ${batch.length} team lead emails simultaneously...`,
         successCount,
         failCount,
+        batchNumber,
+        totalBatches,
+        batchSize: batch.length,
+        isRateLimitPause: false,
       });
 
-      try {
-        const emailData = buildCertificateEmail({
-          recipientName: recipient.name,
-          eventTitle: eventAccessEvent?.title || "AI Verse Event",
-          certificateType: certType,
-          groupName: recipient.teamName,
-          studentId: recipient.studentId,
-          certificateId: certId,
-          issueDate: certIssueDate,
-          collegeName: certCollegeName,
-          certificateUrl: certUrl,
-        });
-
-        const emailRes = await sendResendEmail({
-          to: recipient.email,
-          subject: emailData.subject,
-          text: emailData.text,
-          html: emailData.html,
-        });
-
-        if (emailRes.success) {
-          successCount++;
-          const now = Date.now();
-
-          // Persist status to Database
+      // Dispatch all 9 teams in this batch AT THE SAME TIME (concurrently in parallel)
+      await Promise.all(
+        batch.map(async (team) => {
           try {
-            if (recipient.isLead) {
-              await updateRegistration(recipient.regId, {
-                certificateIssued: true,
-                certificateId: certId,
-                certificateType: certType,
-                certificateSentAt: now,
-                certificateTemplateMode: certTemplateMode,
-                certificateNamePosX: certNamePosX,
-                certificateNamePosY: certNamePosY,
-                certificateNameFontSize: certNameFontSize,
-                certificateNameColor: certNameColor,
-                certificateTeamPosX: certTeamPosX,
-                certificateTeamPosY: certTeamPosY,
-                certificateTeamFontSize: certTeamFontSize,
-                certificateTeamColor: certTeamColor,
-                certificateShowTeamName: certShowTeamName,
-                certificateRollPosX: certRollPosX,
-                certificateRollPosY: certRollPosY,
-                certificateRollFontSize: certRollFontSize,
-                certificateRollColor: certRollColor,
-                certificateShowRollNo: certShowRollNo,
-                certificateShowQrCode: certShowQrCode,
-                updatedAt: now,
-              });
-            } else {
-              // Update specific member inside members array
-              const regDoc = (eventAccessRegistrations || []).find((r: any) => (r.id || r._id) === recipient.regId);
-              if (regDoc && Array.isArray(regDoc.members)) {
-                const updatedMembers = [...regDoc.members];
-                if (updatedMembers[recipient.memberIndex]) {
-                  updatedMembers[recipient.memberIndex] = {
-                    ...updatedMembers[recipient.memberIndex],
-                    certificateIssued: true,
-                    certificateId: certId,
-                    certificateSentAt: now,
-                  };
-                  await updateRegistration(recipient.regId, {
-                    members: updatedMembers,
-                    certificateIssued: true,
-                    updatedAt: now,
-                  });
-                }
-              }
+            const leadCertId = team.certificateId || `AIV-${team.regId.slice(-6).toUpperCase()}-L`;
+            const leadCertUrl = `${siteBaseUrl}/certificate/${leadCertId}?name=${encodeURIComponent(team.leadName)}&event=${encodeURIComponent(eventAccessEvent?.title || "AI Verse Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(team.leadStudentId)}&team=${encodeURIComponent(team.teamName)}&mode=${encodeURIComponent(certTemplateMode)}&nameX=${encodeURIComponent(certNamePosX)}&nameY=${encodeURIComponent(certNamePosY)}&nameSize=${encodeURIComponent(certNameFontSize)}&nameColor=${encodeURIComponent(certNameColor)}&teamX=${encodeURIComponent(certTeamPosX)}&teamY=${encodeURIComponent(certTeamPosY)}&teamSize=${encodeURIComponent(certTeamFontSize)}&teamColor=${encodeURIComponent(certTeamColor)}&showTeam=${certShowTeamName}&rollX=${encodeURIComponent(certRollPosX)}&rollY=${encodeURIComponent(certRollPosY)}&rollSize=${encodeURIComponent(certRollFontSize)}&rollColor=${encodeURIComponent(certRollColor)}&showRoll=${certShowRollNo}&showQr=${certShowQrCode}`;
+
+            // Build member certificates list if team
+            const memberCertificates: TeamMemberCertItem[] = [
+              {
+                name: team.leadName,
+                studentId: team.leadStudentId,
+                role: "Team Lead",
+                isLead: true,
+                certificateId: leadCertId,
+                certificateUrl: leadCertUrl,
+              },
+              ...team.members.map((m: any, mIdx: number) => {
+                const mCertId = m.certificateId || `AIV-${team.regId.slice(-4).toUpperCase()}-M${mIdx + 1}`;
+                const mCertUrl = `${siteBaseUrl}/certificate/${mCertId}?name=${encodeURIComponent(m.name)}&event=${encodeURIComponent(eventAccessEvent?.title || "AI Verse Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(m.studentId)}&team=${encodeURIComponent(team.teamName)}&mode=${encodeURIComponent(certTemplateMode)}&nameX=${encodeURIComponent(certNamePosX)}&nameY=${encodeURIComponent(certNamePosY)}&nameSize=${encodeURIComponent(certNameFontSize)}&nameColor=${encodeURIComponent(certNameColor)}&teamX=${encodeURIComponent(certTeamPosX)}&teamY=${encodeURIComponent(certTeamPosY)}&teamSize=${encodeURIComponent(certTeamFontSize)}&teamColor=${encodeURIComponent(certTeamColor)}&showTeam=${certShowTeamName}&rollX=${encodeURIComponent(certRollPosX)}&rollY=${encodeURIComponent(certRollPosY)}&rollSize=${encodeURIComponent(certRollFontSize)}&rollColor=${encodeURIComponent(certRollColor)}&showRoll=${certShowRollNo}&showQr=${certShowQrCode}`;
+                return {
+                  name: m.name,
+                  studentId: m.studentId,
+                  role: "Member",
+                  isLead: false,
+                  certificateId: mCertId,
+                  certificateUrl: mCertUrl,
+                };
+              })
+            ];
+
+            // Send strictly to the team lead's email(s) only (either personal mail or college mail)
+            const recipientEmails = (Array.isArray(team.leadEmails) && team.leadEmails.length > 0)
+              ? team.leadEmails
+              : Array.from(new Set([
+                  team.leadPersonalEmail,
+                  team.leadCollegeEmail,
+                  team.leadEmail,
+                ].filter(Boolean)));
+
+            if (recipientEmails.length === 0) {
+              failCount++;
+              console.warn(`[Certificates] Skipping team ${team.teamName} - no valid lead email found.`);
+              return;
             }
 
-            // Sync local state
-            setEventAccessRegistrations((prev: any[]) =>
-              prev.map(r => {
-                if ((r.id || r._id) === recipient.regId) {
-                  if (recipient.isLead) {
-                    return { ...r, certificateIssued: true, certificateId: certId, certificateSentAt: now, certificateType: certType };
-                  } else {
-                    const newMembers = Array.isArray(r.members) ? [...r.members] : [];
-                    if (newMembers[recipient.memberIndex]) {
-                      newMembers[recipient.memberIndex] = {
-                        ...newMembers[recipient.memberIndex],
+            let emailData;
+            if (team.isGroup && team.members.length > 0) {
+              emailData = buildTeamCertificateEmail({
+                teamLeadName: team.leadName,
+                teamLeadEmail: team.leadEmail,
+                eventTitle: eventAccessEvent?.title || "AI Verse Event",
+                groupName: team.teamName,
+                certificateType: certType,
+                issueDate: certIssueDate,
+                collegeName: certCollegeName,
+                teamHubUrl: `${siteBaseUrl}/team/${team.regId}`,
+                members: memberCertificates,
+              });
+            } else {
+              emailData = buildCertificateEmail({
+                recipientName: team.leadName,
+                eventTitle: eventAccessEvent?.title || "AI Verse Event",
+                certificateType: certType,
+                groupName: team.isGroup ? team.teamName : undefined,
+                studentId: team.leadStudentId,
+                certificateId: leadCertId,
+                issueDate: certIssueDate,
+                collegeName: certCollegeName,
+                certificateUrl: leadCertUrl,
+              });
+            }
+
+            let emailRes = await sendResendEmail({
+              to: recipientEmails,
+              subject: emailData.subject,
+              text: emailData.text,
+              html: emailData.html,
+            });
+
+            // 🛡️ Automatic Rate Limit Retry: If Resend responds with 429/rate-limit, pause 1.5s and retry once
+            if (!emailRes.success && (
+              emailRes.error?.toLowerCase().includes("rate") ||
+              emailRes.error?.toLowerCase().includes("limit") ||
+              emailRes.error?.includes("429")
+            )) {
+              console.warn(`[Resend Rate Limit] 429 encountered for certificate to ${team.teamName}. Cooling down 1.5s and retrying...`);
+              await new Promise(r => setTimeout(r, 1500));
+              emailRes = await sendResendEmail({
+                to: recipientEmails,
+                subject: emailData.subject,
+                text: emailData.text,
+                html: emailData.html,
+              });
+            }
+
+            if (emailRes.success) {
+              successCount++;
+              const now = Date.now();
+
+              // Persist status to Database
+              try {
+                const updatedMembers = (team.members || []).map((m: any, mIdx: number) => ({
+                  ...m,
+                  certificateIssued: true,
+                  certificateId: m.certificateId || `AIV-${team.regId.slice(-4).toUpperCase()}-M${mIdx + 1}`,
+                  certificateSentAt: now,
+                }));
+
+                await updateRegistration(team.regId, {
+                  certificateIssued: true,
+                  certificateId: leadCertId,
+                  certificateType: certType,
+                  certificateSentAt: now,
+                  certificateTemplateMode: certTemplateMode,
+                  certificateNamePosX: certNamePosX,
+                  certificateNamePosY: certNamePosY,
+                  certificateNameFontSize: certNameFontSize,
+                  certificateNameColor: certNameColor,
+                  certificateTeamPosX: certTeamPosX,
+                  certificateTeamPosY: certTeamPosY,
+                  certificateTeamFontSize: certTeamFontSize,
+                  certificateTeamColor: certTeamColor,
+                  certificateShowTeamName: certShowTeamName,
+                  certificateRollPosX: certRollPosX,
+                  certificateRollPosY: certRollPosY,
+                  certificateRollFontSize: certRollFontSize,
+                  certificateRollColor: certRollColor,
+                  certificateShowRollNo: certShowRollNo,
+                  certificateShowQrCode: certShowQrCode,
+                  members: updatedMembers.length > 0 ? updatedMembers : (team.rawRegistration?.members || []),
+                  updatedAt: now,
+                });
+
+                // Sync local state
+                setEventAccessRegistrations((prev: any[]) =>
+                  prev.map(r => {
+                    if ((r.id || r._id) === team.regId) {
+                      return {
+                        ...r,
                         certificateIssued: true,
-                        certificateId: certId,
+                        certificateId: leadCertId,
                         certificateSentAt: now,
+                        certificateType: certType,
+                        members: updatedMembers.length > 0 ? updatedMembers : r.members,
                       };
                     }
-                    return { ...r, members: newMembers, certificateIssued: true };
-                  }
-                }
-                return r;
-              })
-            );
-          } catch (dbErr) {
-            console.warn("Could not update Firestore certificate status:", dbErr);
+                    return r;
+                  })
+                );
+              } catch (dbErr) {
+                console.warn("Could not update Firestore certificate status:", dbErr);
+              }
+            } else {
+              failCount++;
+              console.error(`Failed to send certificate to team ${team.teamName}:`, emailRes.error);
+            }
+          } catch (sendErr) {
+            failCount++;
+            console.error(`Exception sending certificate to team ${team.teamName}:`, sendErr);
+          } finally {
+            processedCount++;
+            // Live update progress after each team completes in the batch
+            setCertSendingProgress(prev => prev ? {
+              ...prev,
+              current: processedCount,
+              successCount,
+              failCount,
+              currentName: team.teamName,
+              currentEmail: team.leadEmail,
+            } : null);
           }
-        } else {
-          failCount++;
-          console.error(`Failed to send certificate to ${recipient.email}:`, emailRes.error);
-        }
-      } catch (sendErr) {
-        failCount++;
-        console.error(`Exception sending certificate to ${recipient.email}:`, sendErr);
-      }
+        })
+      );
 
-      // Small delay between mail deliveries for smooth queue dispatch
-      if (i < recipientsToSend.length - 1) {
-        await new Promise(r => setTimeout(r, 200));
+      // If more batches remain, pause 1.2s to cleanly reset Resend's 10 req/s rate limit window
+      if (batchIndex + 1 < totalBatches) {
+        setCertSendingProgress(prev => prev ? {
+          ...prev,
+          current: processedCount,
+          successCount,
+          failCount,
+          isRateLimitPause: true,
+        } : null);
+
+        // 1.2s cooldown guarantees <= 9 requests per second
+        await new Promise(resolve => setTimeout(resolve, 1200));
+
+        setCertSendingProgress(prev => prev ? {
+          ...prev,
+          isRateLimitPause: false,
+        } : null);
       }
     }
 
     setIsSendingCertificates(false);
-    setCertSuccessToast(`Successfully sent ${successCount} certificate(s) via email!${failCount > 0 ? ` (${failCount} failed)` : ""}`);
-    setTimeout(() => setCertSuccessToast(null), 5000);
+    setCertSuccessToast(`🎉 Finished! Successfully dispatched certificates to ${successCount} team(s)!${failCount > 0 ? ` (${failCount} failed)` : ""}`);
+    setTimeout(() => setCertSuccessToast(null), 6000);
   };
 
   // Send Single Test Certificate Email
@@ -1460,26 +1661,29 @@ const EventManagementPage: React.FC = () => {
 
   // Export Certificate Issuance Log CSV
   const handleExportCertificateLogsCsv = () => {
-    if (flattenedCertRecipients.length === 0) {
-      alert("No participant records found.");
+    const listToExport = filteredCertTeams.length > 0 ? filteredCertTeams : certTeams;
+    if (listToExport.length === 0) {
+      alert("No team records found.");
       return;
     }
 
     const siteBaseUrl = "https://aiversevitb.in";
 
-    const exportData = flattenedCertRecipients.map((r, idx) => ({
+    const exportData = listToExport.map((t, idx) => ({
       "S.No": idx + 1,
-      "Certificate ID": r.certificateId || `AIV-${r.regId.slice(-6).toUpperCase()}`,
-      "Participant Name": r.name,
-      "Email Address": r.email,
-      "Roll / Student ID": r.studentId || "N/A",
-      "Team Name": r.teamName || "Individual",
-      "Role": r.isLead ? "Team Lead" : "Member",
+      "Certificate ID": t.certificateId || `AIV-${t.regId.slice(-6).toUpperCase()}-L`,
+      "Team Name": t.teamName,
+      "Type": t.isGroup ? `Team (${t.teamSize} members)` : "Solo",
+      "Team Lead Name": t.leadName,
+      "Team Lead Email": t.leadEmail,
+      "Team Lead Roll / ID": t.leadStudentId || "N/A",
+      "Team Members": (t.members || []).map((m: any) => `${m.name} (${m.studentId || "No ID"})`).join("; ") || "None",
       "Event Title": eventAccessEvent?.title || "Event",
-      "Certificate Type": r.certificateType || certType,
-      "Issuance Status": r.certificateIssued ? "Issued & Emailed" : "Pending",
-      "Dispatched Timestamp": r.certificateSentAt ? new Date(r.certificateSentAt).toLocaleString() : "Not Sent",
-      "Online Verification URL": `${siteBaseUrl}/certificate/${r.certificateId || `AIV-${r.regId.slice(-6).toUpperCase()}`}`,
+      "Round / Stage": `Round ${t.currentRound || 1}${t.isPromoted ? " (Qualified)" : ""}`,
+      "Certificate Type": t.certificateType || certType,
+      "Issuance Status": t.certificateIssued ? "Issued & Emailed" : "Pending",
+      "Dispatched Timestamp": t.certificateSentAt ? new Date(t.certificateSentAt).toLocaleString() : "Not Sent",
+      "Online Verification URL": `${siteBaseUrl}/certificate/${t.certificateId || `AIV-${t.regId.slice(-6).toUpperCase()}-L`}`,
     }));
 
     const csv = Papa.unparse(exportData);
@@ -1487,7 +1691,7 @@ const EventManagementPage: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `Certificates_Log_${(eventAccessEvent?.title || "Event").replace(/[^a-zA-Z0-9]/g, "_")}.csv`);
+    link.setAttribute("download", `Certificates_Teams_Log_${(eventAccessEvent?.title || "Event").replace(/[^a-zA-Z0-9]/g, "_")}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -1566,35 +1770,157 @@ const EventManagementPage: React.FC = () => {
 
   // 🎟️ TICKET MANAGEMENT & PASSES EMAIL DISPATCH STATE & HANDLERS
   const [isTicketModalOpen, setIsTicketModalOpen] = useState(false);
-  const [ticketTab, setTicketTab] = useState<"distribution" | "preview" | "logs">("distribution");
+  const [ticketTab, setTicketTab] = useState<"distribution" | "preview" | "studio" | "logs">("distribution");
   const [ticketAudienceFilter, setTicketAudienceFilter] = useState<string>("all");
   const [ticketSearchQuery, setTicketSearchQuery] = useState<string>("");
-  const [selectedTicketRecipients, setSelectedTicketRecipients] = useState<string[]>([]);
-  const [isSendingTickets, setIsSendingTickets] = useState<boolean>(false);
-  const [ticketSendingProgress, setTicketSendingProgress] = useState<{
-    current: number;
-    total: number;
-    currentName: string;
-    currentEmail: string;
-    successCount: number;
-    failCount: number;
-  } | null>(null);
-  const [testTicketEmail, setTestTicketEmail] = useState<string>("");
-  const [isSendingTestTicketEmail, setIsSendingTestTicketEmail] = useState<boolean>(false);
-  const [testTicketEmailFeedback, setTestTicketEmailFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
-  const [ticketSuccessToast, setTicketSuccessToast] = useState<string | null>(null);
-  const [selectedPreviewTicket, setSelectedPreviewTicket] = useState<any | null>(null);
+  const [selectedTicketTeams, setSelectedTicketTeams] = useState<string[]>([]);
+  const [previewMemberIdx, setPreviewMemberIdx] = useState<number>(-1);
 
-  // Flattened list of all individual recipients (Lead + all Team Members) for Tickets
+  // 👥 Team-Level Registrations List (Consolidates Lead + Members into a single Team record)
+  const ticketTeams = useMemo(() => {
+    return (eventAccessRegistrations || []).map((reg: any) => {
+      const regId = (reg.id || reg._id || "").toString();
+      const isGroup = !!reg.groupName && reg.groupName !== "Individual RSVP";
+      const teamName = isGroup ? reg.groupName : (reg.teamLeadName || reg.fullName || reg.name || "Individual Participant");
+      const leadName = reg.teamLeadName || reg.fullName || reg.name || "Participant";
+      
+      const leadPersonalEmail = (reg.teamLeadPersonalEmail || reg.personalEmail || "").trim().toLowerCase();
+      const leadCollegeEmail = (reg.teamLeadCollegeEmail || reg.collegeEmail || "").trim().toLowerCase();
+      const genericLeadEmail = (reg.teamLeadEmail || reg.userEmail || reg.leadEmail || reg.email || "").trim().toLowerCase();
+
+      // Collect team lead emails only (either personal email or college email, or both if available)
+      const leadEmails = Array.from(new Set([
+        leadPersonalEmail,
+        leadCollegeEmail,
+        genericLeadEmail
+      ].filter(Boolean)));
+
+      const leadEmail = leadPersonalEmail || leadCollegeEmail || genericLeadEmail;
+      const leadStudentId = reg.teamLeadStudentId || reg.studentId || "";
+      const leadPhone = reg.teamLeadPhone || reg.phone || "";
+      const members = (Array.isArray(reg.members) ? reg.members : []).map((m: any, mIdx: number) => ({
+        name: m.name || `Member #${mIdx + 1}`,
+        studentId: m.studentId || m.rollNo || "",
+        email: (m.email || m.personalEmail || "").trim().toLowerCase(),
+        phone: m.phone || "",
+      }));
+      const teamSize = reg.teamSize || (members.length + 1);
+      const ticketSent = !!reg.ticketSent;
+      const ticketSentAt = reg.ticketSentAt || null;
+      const paymentStatus = reg.paymentStatus || reg.status || "Confirmed";
+      const transactionId = reg.transactionId || reg.paymentReference || "";
+
+      const currentRound = Number(reg.currentRound || reg.promotedToRound) || 1;
+      const isEliminated = reg.roundStatus === "Eliminated" || Boolean(reg.eliminatedInRound && reg.eliminatedInRound <= currentRound);
+      const roundStatus = isEliminated ? "Eliminated" : (reg.roundStatus || (currentRound > 1 ? "Qualified" : "Active"));
+
+      return {
+        key: regId,
+        regId,
+        isGroup,
+        teamName,
+        leadName,
+        leadEmail,
+        leadPersonalEmail,
+        leadCollegeEmail,
+        leadEmails,
+        leadStudentId,
+        leadPhone,
+        members,
+        teamSize,
+        transactionId,
+        paymentStatus,
+        ticketSent,
+        ticketSentAt,
+        ticketDeliveryStatus: reg.ticketDeliveryStatus || (ticketSent ? "Sent" : "Pending"),
+        rawRegistration: reg,
+        currentRound,
+        roundStatus,
+        isEliminated,
+        // Compatibility properties for pass renderer:
+        name: leadName,
+        email: leadEmail,
+        studentId: leadStudentId,
+      };
+    });
+  }, [eventAccessRegistrations]);
+
+  // 👥 Filtered Teams based on Audience / Round Filter and Search Query
+  const filteredTicketTeams = useMemo(() => {
+    let result = ticketTeams;
+
+    // Audience & Round Filter
+    if (ticketAudienceFilter === "round_1") {
+      result = result.filter(t => (t.currentRound === 1 || !t.currentRound) && !t.isEliminated);
+    } else if (ticketAudienceFilter === "round_2") {
+      result = result.filter(t => t.currentRound === 2 && !t.isEliminated);
+    } else if (ticketAudienceFilter === "round_3") {
+      result = result.filter(t => t.currentRound === 3 && !t.isEliminated);
+    } else if (ticketAudienceFilter === "unsent") {
+      result = result.filter(t => !t.ticketSent);
+    } else if (ticketAudienceFilter === "sent") {
+      result = result.filter(t => t.ticketSent);
+    } else if (ticketAudienceFilter === "groups") {
+      result = result.filter(t => t.isGroup);
+    } else if (ticketAudienceFilter === "individual") {
+      result = result.filter(t => !t.isGroup);
+    }
+
+    // Search Query (matches team name, lead name, studentId, leadEmail, member name/id/email, regId)
+    if (ticketSearchQuery.trim()) {
+      const q = ticketSearchQuery.toLowerCase().trim();
+      result = result.filter(t =>
+        (t.teamName && t.teamName.toLowerCase().includes(q)) ||
+        (t.leadName && t.leadName.toLowerCase().includes(q)) ||
+        (t.leadStudentId && t.leadStudentId.toLowerCase().includes(q)) ||
+        (t.leadEmail && t.leadEmail.toLowerCase().includes(q)) ||
+        (t.regId && t.regId.toLowerCase().includes(q)) ||
+        t.members.some((m: any) =>
+          (m.name && m.name.toLowerCase().includes(q)) ||
+          (m.studentId && m.studentId.toLowerCase().includes(q)) ||
+          (m.email && m.email.toLowerCase().includes(q))
+        )
+      );
+    }
+
+    return result;
+  }, [ticketTeams, ticketAudienceFilter, ticketSearchQuery]);
+
+  // Auto-switch filter and select present round teams
+  const handleAudienceFilterChange = (newFilter: string) => {
+    setTicketAudienceFilter(newFilter);
+    let targetTeams = ticketTeams;
+    if (newFilter === "round_1") {
+      targetTeams = ticketTeams.filter(t => (t.currentRound === 1 || !t.currentRound) && !t.isEliminated);
+    } else if (newFilter === "round_2") {
+      targetTeams = ticketTeams.filter(t => t.currentRound === 2 && !t.isEliminated);
+    } else if (newFilter === "round_3") {
+      targetTeams = ticketTeams.filter(t => t.currentRound === 3 && !t.isEliminated);
+    } else if (newFilter === "unsent") {
+      targetTeams = ticketTeams.filter(t => !t.ticketSent);
+    } else if (newFilter === "sent") {
+      targetTeams = ticketTeams.filter(t => t.ticketSent);
+    }
+    setSelectedTicketTeams(targetTeams.map(t => t.key));
+  };
+
+  // Total Participants across all registered teams
+  const totalParticipantsCount = useMemo(() => {
+    return ticketTeams.reduce((acc, t) => acc + (t.teamSize || (t.members.length + 1)), 0);
+  }, [ticketTeams]);
+
+  // 🎟️ Flattened list of individual ticket recipients (kept for pass preview & individual exports)
   const flattenedTicketRecipients = useMemo(() => {
     const list: any[] = [];
     (eventAccessRegistrations || []).forEach((reg: any) => {
       const regId = reg.id || reg._id;
       const isGroup = !!reg.groupName && reg.groupName !== "Individual RSVP";
-      const teamName = isGroup ? reg.groupName : "";
+      const teamName = isGroup ? reg.groupName : "Individual Participant";
       const leadEmail = (reg.teamLeadPersonalEmail || reg.userEmail || reg.personalEmail || reg.teamLeadEmail || reg.email || "").trim().toLowerCase();
       const leadName = reg.teamLeadName || reg.fullName || reg.name || "Participant";
       const leadStudentId = reg.teamLeadStudentId || reg.studentId || "";
+      const teamSize = reg.teamSize || (Array.isArray(reg.members) ? reg.members.length + 1 : 1);
+      const transactionId = reg.transactionId || reg.paymentReference || "";
 
       // 1. Team Lead / Individual Registrant
       if (leadEmail) {
@@ -1606,16 +1932,12 @@ const EventManagementPage: React.FC = () => {
           name: leadName,
           email: leadEmail,
           studentId: leadStudentId,
-          teamName: teamName || "Individual Participant",
-          phone: reg.phoneNumber || reg.phone || "—",
-          currentRound: reg.currentRound || 1,
-          roundStatus: reg.roundStatus || "Active",
+          teamName,
+          teamSize,
+          transactionId,
           ticketSent: !!reg.ticketSent,
           ticketSentAt: reg.ticketSentAt || null,
-          paymentStatus: reg.paymentStatus || (reg.fee === 0 || !reg.transactionId ? "Free" : "Confirmed"),
-          transactionId: reg.transactionId || "",
-          teamSize: reg.teamSize || ((reg.members?.length || 0) + 1),
-          registeredAt: reg.createdAt || reg.timestamp || Date.now(),
+          ticketDeliveryStatus: reg.ticketDeliveryStatus || (reg.ticketSent ? "Sent" : "Pending"),
           rawRegistration: reg,
         });
       }
@@ -1633,16 +1955,12 @@ const EventManagementPage: React.FC = () => {
               name: m.name,
               email: mEmail,
               studentId: m.studentId || m.rollNo || "",
-              teamName: teamName || "Team Member",
-              phone: m.phone || reg.phoneNumber || "—",
-              currentRound: reg.currentRound || 1,
-              roundStatus: reg.roundStatus || "Active",
-              ticketSent: !!(m.ticketSent || reg.ticketSent),
+              teamName,
+              teamSize,
+              transactionId,
+              ticketSent: !!(m.ticketSent || (reg.ticketSent && m.ticketSent !== false)),
               ticketSentAt: m.ticketSentAt || reg.ticketSentAt || null,
-              paymentStatus: reg.paymentStatus || (reg.fee === 0 || !reg.transactionId ? "Free" : "Confirmed"),
-              transactionId: reg.transactionId || "",
-              teamSize: reg.teamSize || ((reg.members?.length || 0) + 1),
-              registeredAt: reg.createdAt || reg.timestamp || Date.now(),
+              ticketDeliveryStatus: m.ticketDeliveryStatus || (m.ticketSent ? "Sent" : "Pending"),
               rawRegistration: reg,
             });
           }
@@ -1652,79 +1970,606 @@ const EventManagementPage: React.FC = () => {
     return list;
   }, [eventAccessRegistrations]);
 
-  // Filtered recipients based on Audience Tab and Search Query for Tickets
-  const filteredTicketRecipients = useMemo(() => {
-    let result = flattenedTicketRecipients;
 
-    if (ticketAudienceFilter === "unsent") {
-      result = result.filter(r => !r.ticketSent);
-    } else if (ticketAudienceFilter === "sent") {
-      result = result.filter(r => r.ticketSent);
-    } else if (ticketAudienceFilter === "leads") {
-      result = result.filter(r => r.isLead);
-    } else if (ticketAudienceFilter === "members") {
-      result = result.filter(r => !r.isLead);
+  const [isSendingTickets, setIsSendingTickets] = useState<boolean>(false);
+  const [ticketSendingProgress, setTicketSendingProgress] = useState<{
+    current: number;
+    total: number;
+    currentName: string;
+    currentEmail: string;
+    successCount: number;
+    failCount: number;
+    batchNumber?: number;
+    totalBatches?: number;
+    isRateLimitPause?: boolean;
+  } | null>(null);
+  const [testTicketEmail, setTestTicketEmail] = useState<string>("");
+  const [isSendingTestTicketEmail, setIsSendingTestTicketEmail] = useState<boolean>(false);
+  const [testTicketEmailFeedback, setTestTicketEmailFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
+  const [ticketSuccessToast, setTicketSuccessToast] = useState<string | null>(null);
+  const [selectedPreviewTicket, setSelectedPreviewTicket] = useState<any | null>(null);
+
+  // 🎨 Custom Ticket Design & Studio State
+  const [ticketCustomTemplateUrl, setTicketCustomTemplateUrl] = useState<string>("");
+  const [ticketCustomTemplateFilename, setTicketCustomTemplateFilename] = useState<string>("");
+  const [ticketQrPosition, setTicketQrPosition] = useState<string>("bottom-right");
+  const [ticketQrX, setTicketQrX] = useState<number>(75);
+  const [ticketQrY, setTicketQrY] = useState<number>(75);
+  const [ticketQrWidthPercent, setTicketQrWidthPercent] = useState<number>(22);
+  const [ticketQrBg, setTicketQrBg] = useState<"white" | "transparent" | "glow">("white");
+
+  const [ticketShowAttendeeName, setTicketShowAttendeeName] = useState<boolean>(true);
+  const [ticketNamePosX, setTicketNamePosX] = useState<number>(20);
+  const [ticketNamePosY, setTicketNamePosY] = useState<number>(72);
+  const [ticketNameFontSize, setTicketNameFontSize] = useState<number>(24);
+  const [ticketNameColor, setTicketNameColor] = useState<string>("#FFFFFF");
+
+  const [ticketShowTeamName, setTicketShowTeamName] = useState<boolean>(true);
+  const [ticketTeamPosX, setTicketTeamPosX] = useState<number>(20);
+  const [ticketTeamPosY, setTicketTeamPosY] = useState<number>(81);
+  const [ticketTeamFontSize, setTicketTeamFontSize] = useState<number>(16);
+  const [ticketTeamColor, setTicketTeamColor] = useState<string>("#93C5FD");
+
+  const [ticketShowRollNo, setTicketShowRollNo] = useState<boolean>(true);
+  const [ticketRollPosX, setTicketRollPosX] = useState<number>(20);
+  const [ticketRollPosY, setTicketRollPosY] = useState<number>(89);
+  const [ticketRollFontSize, setTicketRollFontSize] = useState<number>(13);
+  const [ticketRollColor, setTicketRollColor] = useState<string>("#CBD5E1");
+
+  const [ticketShowAttendeeText, setTicketShowAttendeeText] = useState<boolean>(false);
+  const [ticketTextX, setTicketTextX] = useState<number>(20);
+  const [ticketTextY, setTicketTextY] = useState<number>(80);
+  const [ticketTextColor, setTicketTextColor] = useState<string>("#FFFFFF");
+
+  const [isSavingTicketTemplate, setIsSavingTicketTemplate] = useState<boolean>(false);
+  const [ticketTemplateSaveSuccess, setTicketTemplateSaveSuccess] = useState<string | null>(null);
+
+  const ticketFileInputRef = React.useRef<HTMLInputElement>(null);
+
+  const handleTicketTemplateUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    if (!file.type.startsWith("image/")) {
+      alert("Please upload a valid image file (PNG, JPG, JPEG, WEBP).");
+      return;
     }
 
-    if (ticketSearchQuery.trim()) {
-      const q = ticketSearchQuery.toLowerCase().trim();
-      result = result.filter(r =>
-        r.name.toLowerCase().includes(q) ||
-        r.email.toLowerCase().includes(q) ||
-        r.studentId.toLowerCase().includes(q) ||
-        r.teamName.toLowerCase().includes(q) ||
-        r.regId.toLowerCase().includes(q)
+    if (file.size > 10 * 1024 * 1024) {
+      alert("File size exceeds 10MB limit. Please choose an image smaller than 10MB.");
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = (uploadEvent) => {
+      const dataUrl = uploadEvent.target?.result as string;
+      if (dataUrl) {
+        setTicketCustomTemplateUrl(dataUrl);
+        setTicketCustomTemplateFilename(file.name);
+        setTicketTemplateSaveSuccess(`Template "${file.name}" uploaded! Adjust placement below and click Save.`);
+        setTimeout(() => setTicketTemplateSaveSuccess(null), 5000);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveTicketTemplate = () => {
+    setTicketCustomTemplateUrl("");
+    setTicketCustomTemplateFilename("");
+    if (ticketFileInputRef.current) ticketFileInputRef.current.value = "";
+  };
+
+  const handleDownloadBlankTicketGuide = () => {
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    const W = 1600;
+    const H = 800;
+    canvas.width = W;
+    canvas.height = H;
+
+    // Background
+    ctx.fillStyle = "#0B0F19";
+    ctx.fillRect(0, 0, W, H);
+
+    // Subtle grid
+    ctx.strokeStyle = "rgba(59, 130, 246, 0.15)";
+    ctx.lineWidth = 1;
+    for (let x = 0; x < W; x += 80) {
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+    }
+    for (let y = 0; y < H; y += 80) {
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+
+    // Border
+    ctx.strokeStyle = "#3B82F6";
+    ctx.lineWidth = 6;
+    ctx.strokeRect(30, 30, W - 60, H - 60);
+
+    // Guide Typography
+    ctx.fillStyle = "#FFFFFF";
+    ctx.font = "bold 44px -apple-system, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("AI VERSE TICKET DESIGN CANVAS", W / 2, 220);
+
+    ctx.fillStyle = "#93C5FD";
+    ctx.font = "bold 24px -apple-system, sans-serif";
+    ctx.fillText("Standard 1600 × 800 Resolution (2:1 Ratio)", W / 2, 280);
+
+    ctx.fillStyle = "#94A3B8";
+    ctx.font = "18px -apple-system, sans-serif";
+    ctx.fillText("Place your event logo, branding, and graphics here in Canva/Photoshop.", W / 2, 340);
+    ctx.fillText("Leave room on the right or bottom for the live attendee QR code and name stamp.", W / 2, 375);
+
+    const link = document.createElement("a");
+    link.download = "Ticket_Design_Canvas_Guide_1600x800.png";
+    link.href = canvas.toDataURL("image/png");
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
+
+  const handleSaveTicketDesignConfig = async () => {
+    if (!eventAccessEvent?.id) {
+      alert("No active event selected.");
+      return;
+    }
+
+    setIsSavingTicketTemplate(true);
+    setTicketTemplateSaveSuccess(null);
+
+    try {
+      let resolvedTemplateUrl = ticketCustomTemplateUrl || "";
+
+      // If user uploaded a new local base64 template image, upload to Cloudinary/server or compress
+      if (resolvedTemplateUrl && resolvedTemplateUrl.startsWith("data:image/")) {
+        try {
+          const uploadRes = await uploadImage(resolvedTemplateUrl, "ai_verse_tickets");
+          if (uploadRes?.secure_url || uploadRes?.url) {
+            resolvedTemplateUrl = uploadRes.secure_url || uploadRes.url;
+            setTicketCustomTemplateUrl(resolvedTemplateUrl);
+          }
+        } catch (uploadErr) {
+          console.warn("Cloudinary upload notice, compressing base64 for reliable persistence:", uploadErr);
+          if (resolvedTemplateUrl.length > 350000) {
+            try {
+              const compressed = await compressBase64Image(resolvedTemplateUrl, 1600, 0.78);
+              resolvedTemplateUrl = compressed;
+              setTicketCustomTemplateUrl(resolvedTemplateUrl);
+            } catch (compErr) {
+              console.warn("Base64 compression fallback warning:", compErr);
+            }
+          }
+        }
+      }
+
+      const ticketDesignObj = {
+        bgPreview: resolvedTemplateUrl,
+        bgFilename: ticketCustomTemplateFilename || "custom_ticket_template.png",
+        qrPosition: ticketQrPosition || "custom",
+        qrX: ticketQrX,
+        qrY: ticketQrY,
+        qrWidthPercent: ticketQrWidthPercent,
+        qrBg: ticketQrBg,
+        showAttendeeName: ticketShowAttendeeName,
+        namePosX: ticketNamePosX,
+        namePosY: ticketNamePosY,
+        nameFontSize: ticketNameFontSize,
+        nameColor: ticketNameColor,
+        showTeamName: ticketShowTeamName,
+        teamPosX: ticketTeamPosX,
+        teamPosY: ticketTeamPosY,
+        teamFontSize: ticketTeamFontSize,
+        teamColor: ticketTeamColor,
+        showRollNo: ticketShowRollNo,
+        rollPosX: ticketRollPosX,
+        rollPosY: ticketRollPosY,
+        rollFontSize: ticketRollFontSize,
+        rollColor: ticketRollColor,
+        showAttendeeText: ticketShowAttendeeText,
+        textX: ticketTextX,
+        textY: ticketTextY,
+        textColor: ticketTextColor,
+        updatedAt: Date.now(),
+      };
+
+      // 1. Update event in Database
+      await updateEvent(eventAccessEvent.id, {
+        ticketDesign: ticketDesignObj,
+        updatedAt: Date.now(),
+      });
+
+      // 2. Sync local state
+      setEventAccessEvent((prev: any) => ({
+        ...prev,
+        ticketDesign: ticketDesignObj,
+      }));
+
+      setEvents((prev) =>
+        prev.map((e) =>
+          e.id === eventAccessEvent.id ? { ...e, ticketDesign: ticketDesignObj } : e
+        )
       );
-    }
 
-    return result;
-  }, [flattenedTicketRecipients, ticketAudienceFilter, ticketSearchQuery]);
+      setTicketTemplateSaveSuccess("✅ Custom ticket design & positions saved permanently for this event!");
+      setTimeout(() => setTicketTemplateSaveSuccess(null), 6000);
+    } catch (err: any) {
+      console.error("Error saving ticket design:", err);
+      alert(`Failed to save ticket design configuration: ${err?.message || "Unknown error"}`);
+    } finally {
+      setIsSavingTicketTemplate(false);
+    }
+  };
+
+  const renderTicketToDataUrl = async (recipient: any, overrideDesign?: any): Promise<string> => {
+    return new Promise((resolve) => {
+      try {
+        const design = overrideDesign || {
+          bgPreview: ticketCustomTemplateUrl || eventAccessEvent?.ticketDesign?.bgPreview,
+          qrX: ticketQrX,
+          qrY: ticketQrY,
+          qrWidthPercent: ticketQrWidthPercent,
+          qrBg: ticketQrBg,
+          showAttendeeName: ticketShowAttendeeName,
+          namePosX: ticketNamePosX,
+          namePosY: ticketNamePosY,
+          nameFontSize: ticketNameFontSize,
+          nameColor: ticketNameColor,
+          showTeamName: ticketShowTeamName,
+          teamPosX: ticketTeamPosX,
+          teamPosY: ticketTeamPosY,
+          teamFontSize: ticketTeamFontSize,
+          teamColor: ticketTeamColor,
+          showRollNo: ticketShowRollNo,
+          rollPosX: ticketRollPosX,
+          rollPosY: ticketRollPosY,
+          rollFontSize: ticketRollFontSize,
+          rollColor: ticketRollColor,
+          showAttendeeText: ticketShowAttendeeText,
+          textX: ticketTextX,
+          textY: ticketTextY,
+          textColor: ticketTextColor,
+        };
+
+        const templateUrl = design.bgPreview || ticketCustomTemplateUrl || eventAccessEvent?.ticketDesign?.bgPreview;
+        const regId = recipient?.regId || recipient?.id || "PASS";
+        const ticketFullUrl = `https://aiversevitb.in/ticket/${regId}`;
+        const qrApiUrl = `https://api.qrserver.com/v1/create-qr-code/?size=500x500&data=${encodeURIComponent(ticketFullUrl)}`;
+
+        const qrImg = new Image();
+        qrImg.crossOrigin = "anonymous";
+
+        if (templateUrl) {
+          const bgImg = new Image();
+          bgImg.crossOrigin = "anonymous";
+
+          let loaded = 0;
+          const finish = () => {
+            loaded++;
+            if (loaded < 2) return;
+
+            try {
+              const canvas = document.createElement("canvas");
+              const ctx = canvas.getContext("2d");
+              if (!ctx) return resolve(templateUrl);
+
+              const origW = bgImg.naturalWidth || 1600;
+              const origH = bgImg.naturalHeight || 800;
+              canvas.width = origW;
+              canvas.height = origH;
+
+              // 1. Draw custom background
+              ctx.drawImage(bgImg, 0, 0, origW, origH);
+
+              // 2. QR code coordinates
+              const qrWidth = origW * ((design.qrWidthPercent ?? 22) / 100);
+              const qrHeight = qrWidth;
+              const qrCenterX = origW * ((design.qrX ?? 75) / 100);
+              const qrCenterY = origH * ((design.qrY ?? 75) / 100);
+              const qrLeft = qrCenterX - qrWidth / 2;
+              const qrTop = qrCenterY - qrHeight / 2;
+
+              // QR background container
+              if (design.qrBg === "white" || !design.qrBg) {
+                const pad = qrWidth * 0.08;
+                ctx.fillStyle = "#FFFFFF";
+                ctx.shadowColor = "rgba(0, 0, 0, 0.35)";
+                ctx.shadowBlur = 18;
+                if (ctx.roundRect) {
+                  ctx.beginPath();
+                  ctx.roundRect(qrLeft - pad, qrTop - pad, qrWidth + pad * 2, qrHeight + pad * 2, 16);
+                  ctx.fill();
+                } else {
+                  ctx.fillRect(qrLeft - pad, qrTop - pad, qrWidth + pad * 2, qrHeight + pad * 2);
+                }
+                ctx.shadowColor = "transparent";
+              } else if (design.qrBg === "glow") {
+                const pad = qrWidth * 0.08;
+                ctx.fillStyle = "#0B0F19";
+                ctx.strokeStyle = "#22D3EE";
+                ctx.lineWidth = 4;
+                if (ctx.roundRect) {
+                  ctx.beginPath();
+                  ctx.roundRect(qrLeft - pad, qrTop - pad, qrWidth + pad * 2, qrHeight + pad * 2, 16);
+                  ctx.fill();
+                  ctx.stroke();
+                } else {
+                  ctx.fillRect(qrLeft - pad, qrTop - pad, qrWidth + pad * 2, qrHeight + pad * 2);
+                  ctx.strokeRect(qrLeft - pad, qrTop - pad, qrWidth + pad * 2, qrHeight + pad * 2);
+                }
+              }
+
+              // Draw QR code
+              ctx.drawImage(qrImg, qrLeft, qrTop, qrWidth, qrHeight);
+
+              // 3. Attendee Name Overlay
+              if (design.showAttendeeName !== false && recipient?.name) {
+                const nameX = origW * ((design.namePosX ?? 20) / 100);
+                const nameY = origH * ((design.namePosY ?? 72) / 100);
+                ctx.fillStyle = design.nameColor || "#FFFFFF";
+                ctx.textAlign = "left";
+                ctx.textBaseline = "middle";
+                const scaleFont = Math.max(16, Math.round((design.nameFontSize ?? 24) * (origW / 1000)));
+                ctx.font = `900 ${scaleFont}px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
+                ctx.shadowColor = "rgba(0,0,0,0.75)";
+                ctx.shadowBlur = 8;
+                ctx.fillText(recipient.name, nameX, nameY);
+                ctx.shadowColor = "transparent";
+              }
+
+              // 4. Team Name Overlay
+              if (design.showTeamName !== false && recipient?.teamName) {
+                const teamX = origW * ((design.teamPosX ?? 20) / 100);
+                const teamY = origH * ((design.teamPosY ?? 81) / 100);
+                ctx.fillStyle = design.teamColor || "#93C5FD";
+                ctx.textAlign = "left";
+                ctx.textBaseline = "middle";
+                const scaleTeamFont = Math.max(12, Math.round((design.teamFontSize ?? 16) * (origW / 1000)));
+                ctx.font = `800 ${scaleTeamFont}px -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif`;
+                ctx.shadowColor = "rgba(0,0,0,0.75)";
+                ctx.shadowBlur = 6;
+                ctx.fillText(recipient.teamName, teamX, teamY);
+                ctx.shadowColor = "transparent";
+              }
+
+              // 5. Roll No / Student ID Overlay
+              if (design.showRollNo !== false && recipient?.studentId) {
+                const rollX = origW * ((design.rollPosX ?? 20) / 100);
+                const rollY = origH * ((design.rollPosY ?? 89) / 100);
+                ctx.fillStyle = design.rollColor || "#CBD5E1";
+                ctx.textAlign = "left";
+                ctx.textBaseline = "middle";
+                const scaleRollFont = Math.max(10, Math.round((design.rollFontSize ?? 13) * (origW / 1000)));
+                ctx.font = `700 ${scaleRollFont}px monospace`;
+                ctx.shadowColor = "rgba(0,0,0,0.75)";
+                ctx.shadowBlur = 5;
+                ctx.fillText(recipient.studentId, rollX, rollY);
+                ctx.shadowColor = "transparent";
+              }
+
+              // 6. Optional Attendee Text Overlay
+              if (design.showAttendeeText) {
+                const textCenterX = origW * ((design.textX ?? 20) / 100);
+                const textCenterY = origH * ((design.textY ?? 80) / 100);
+                ctx.fillStyle = design.textColor || "#FFFFFF";
+                ctx.textAlign = "center";
+                ctx.textBaseline = "middle";
+                const scaleTxtFont = Math.max(12, Math.round(18 * (origW / 1000)));
+                ctx.font = `bold ${scaleTxtFont}px sans-serif`;
+                ctx.fillText(`${recipient?.teamName || "Attendee"} • AV-${regId.slice(-6).toUpperCase()}`, textCenterX, textCenterY);
+              }
+
+              resolve(canvas.toDataURL("image/png"));
+            } catch (err) {
+              console.error("Canvas draw error:", err);
+              resolve(templateUrl);
+            }
+          };
+
+          bgImg.onload = finish;
+          bgImg.onerror = () => resolve(templateUrl);
+          qrImg.onload = finish;
+          qrImg.onerror = () => finish();
+
+          bgImg.src = templateUrl;
+          qrImg.src = qrApiUrl;
+        } else {
+          // Default Boarding Pass
+          const scale = 2;
+          const w = 840;
+          const h = 380;
+          const canvas = document.createElement("canvas");
+          canvas.width = w * scale;
+          canvas.height = h * scale;
+          const ctx = canvas.getContext("2d");
+          if (!ctx) return resolve("");
+          ctx.scale(scale, scale);
+
+          ctx.fillStyle = "#FFFFFF";
+          if (ctx.roundRect) {
+            ctx.beginPath();
+            ctx.roundRect(0, 0, w, h, 24);
+            ctx.fill();
+          } else {
+            ctx.fillRect(0, 0, w, h);
+          }
+          ctx.fillStyle = "#2563EB";
+          ctx.fillRect(0, 0, w, 10);
+
+          ctx.fillStyle = "#0F172A";
+          ctx.font = "900 18px sans-serif";
+          ctx.textAlign = "left";
+          ctx.fillText("AI VERSE", 36, 46);
+          ctx.fillStyle = "#2563EB";
+          ctx.font = "800 10px sans-serif";
+          const passBadgeText = (recipient?.currentRound || 1) > 1 
+            ? `OFFICIAL ROUND ${recipient?.currentRound} PASS` 
+            : "OFFICIAL EVENT PASS";
+          ctx.fillText(passBadgeText, 36, 62);
+
+          ctx.fillStyle = "#0F172A";
+          ctx.font = "900 22px sans-serif";
+          const title = eventAccessEvent?.title || "AI Verse Event";
+          ctx.fillText(title.length > 34 ? title.substring(0, 34) + "..." : title, 36, 115);
+
+          ctx.fillStyle = "#64748B";
+          ctx.font = "800 9px sans-serif";
+          ctx.fillText("ATTENDEE NAME", 36, 160);
+          ctx.fillText("TEAM / ROLE", 240, 160);
+          ctx.fillText("ROUND / VENUE", 420, 160);
+
+          ctx.fillStyle = "#0F172A";
+          ctx.font = "800 14px sans-serif";
+          ctx.fillText(recipient?.name || "Participant", 36, 180);
+          ctx.fillText(recipient?.teamName || "Individual Participant", 240, 180);
+          const roundNameStr = `Round ${recipient?.currentRound || 1}`;
+          ctx.fillText(`${roundNameStr} • ${eventAccessEvent?.location || "Auditorium"}`, 420, 180);
+
+          qrImg.onload = () => {
+            ctx.drawImage(qrImg, 620, 100, 180, 180);
+            ctx.fillStyle = "#0F172A";
+            ctx.font = "bold 11px monospace";
+            ctx.textAlign = "center";
+            ctx.fillText(`AV-${regId.slice(-6).toUpperCase()}`, 710, 305);
+            resolve(canvas.toDataURL("image/png"));
+          };
+          qrImg.onerror = () => resolve(canvas.toDataURL("image/png"));
+          qrImg.src = qrApiUrl;
+        }
+      } catch (err) {
+        console.error("renderTicketToDataUrl failed:", err);
+        resolve("");
+      }
+    });
+  };
+
+  const handleDownloadSampleTicketPng = async (recipientParam?: any) => {
+    const targetRecipient = recipientParam || selectedPreviewTicket || flattenedTicketRecipients[0] || {
+      name: "Participant Name",
+      teamName: "CodeCrafters",
+      studentId: "23PA1A0501",
+      regId: "SAMPLE"
+    };
+
+    try {
+      const dataUrl = await renderTicketToDataUrl(targetRecipient);
+      if (!dataUrl) {
+        alert("Failed to render ticket image.");
+        return;
+      }
+      const link = document.createElement("a");
+      link.download = `Official_Ticket_${targetRecipient.name.replace(/[^a-zA-Z0-9_-]/g, "_")}.png`;
+      link.href = dataUrl;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    } catch (e: any) {
+      alert(`Download error: ${e?.message || e}`);
+    }
+  };
 
   const handleOpenTicketModal = () => {
     setTicketAudienceFilter("all");
     setTicketSearchQuery("");
     setTicketSendingProgress(null);
     setTestTicketEmailFeedback(null);
-    setSelectedTicketRecipients(flattenedTicketRecipients.map(r => r.key));
-    if (flattenedTicketRecipients.length > 0) {
+    setSelectedTicketTeams(ticketTeams.map(t => t.key));
+    if (ticketTeams.length > 0) {
+      setSelectedPreviewTicket(ticketTeams[0]);
+      setPreviewMemberIdx(-1);
+    } else if (flattenedTicketRecipients.length > 0) {
       setSelectedPreviewTicket(flattenedTicketRecipients[0]);
     }
+
+    // Hydrate template configuration from event if exists
+    const td = eventAccessEvent?.ticketDesign || {};
+    if (td.bgPreview) {
+      setTicketCustomTemplateUrl(td.bgPreview);
+      setTicketCustomTemplateFilename(td.bgFilename || "custom_ticket_template.png");
+      setTicketTab("preview");
+    } else {
+      setTicketCustomTemplateUrl("");
+      setTicketCustomTemplateFilename("");
+      setTicketTab("distribution");
+    }
+    setTicketQrPosition(td.qrPosition || "bottom-right");
+    setTicketQrX(td.qrX !== undefined ? td.qrX : 75);
+    setTicketQrY(td.qrY !== undefined ? td.qrY : 75);
+    setTicketQrWidthPercent(td.qrWidthPercent !== undefined ? td.qrWidthPercent : 22);
+    setTicketQrBg(td.qrBg || "white");
+    setTicketShowAttendeeName(td.showAttendeeName !== undefined ? td.showAttendeeName : true);
+    setTicketNamePosX(td.namePosX !== undefined ? td.namePosX : 20);
+    setTicketNamePosY(td.namePosY !== undefined ? td.namePosY : 72);
+    setTicketNameFontSize(td.nameFontSize !== undefined ? td.nameFontSize : 24);
+    setTicketNameColor(td.nameColor || "#FFFFFF");
+    setTicketShowTeamName(td.showTeamName !== undefined ? td.showTeamName : true);
+    setTicketTeamPosX(td.teamPosX !== undefined ? td.teamPosX : 20);
+    setTicketTeamPosY(td.teamPosY !== undefined ? td.teamPosY : 81);
+    setTicketTeamFontSize(td.teamFontSize !== undefined ? td.teamFontSize : 16);
+    setTicketTeamColor(td.teamColor || "#93C5FD");
+    setTicketShowRollNo(td.showRollNo !== undefined ? td.showRollNo : true);
+    setTicketRollPosX(td.rollPosX !== undefined ? td.rollPosX : 20);
+    setTicketRollPosY(td.rollPosY !== undefined ? td.rollPosY : 89);
+    setTicketRollFontSize(td.rollFontSize !== undefined ? td.rollFontSize : 13);
+    setTicketRollColor(td.rollColor || "#CBD5E1");
+    setTicketShowAttendeeText(td.showAttendeeText !== undefined ? td.showAttendeeText : false);
+    setTicketTextX(td.textX !== undefined ? td.textX : 20);
+    setTicketTextY(td.textY !== undefined ? td.textY : 80);
+    setTicketTextColor(td.textColor || "#FFFFFF");
+
     setIsTicketModalOpen(true);
   };
 
-  const handleToggleSelectAllTicketRecipients = () => {
-    const currentFilteredKeys = filteredTicketRecipients.map(r => r.key);
-    const allFilteredSelected = currentFilteredKeys.every(k => selectedTicketRecipients.includes(k));
+  // 👥 Team Selection Toggles
+  const handleToggleSelectAllTicketTeams = () => {
+    const currentFilteredKeys = filteredTicketTeams.map(t => t.key);
+    const allFilteredSelected = currentFilteredKeys.length > 0 && currentFilteredKeys.every(k => selectedTicketTeams.includes(k));
 
     if (allFilteredSelected) {
-      setSelectedTicketRecipients(prev => prev.filter(k => !currentFilteredKeys.includes(k)));
+      setSelectedTicketTeams(prev => prev.filter(k => !currentFilteredKeys.includes(k)));
     } else {
-      setSelectedTicketRecipients(prev => Array.from(new Set([...prev, ...currentFilteredKeys])));
+      setSelectedTicketTeams(prev => Array.from(new Set([...prev, ...currentFilteredKeys])));
     }
   };
 
-  const handleToggleSelectTicketRecipient = (key: string) => {
-    setSelectedTicketRecipients(prev =>
+  const handleToggleSelectTicketTeam = (key: string) => {
+    setSelectedTicketTeams(prev =>
       prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
     );
   };
 
+  // 🚀 Dispatch Tickets to Selected Teams
   const handleSendTicketsBatch = async () => {
-    const recipientsToSend = flattenedTicketRecipients.filter(r => selectedTicketRecipients.includes(r.key));
+    // Strictly restrict to teams in the present filtered round that are selected
+    const teamsToSend = filteredTicketTeams.filter(t => selectedTicketTeams.includes(t.key));
 
-    if (recipientsToSend.length === 0) {
+    if (teamsToSend.length === 0) {
       await showAlert({
-        title: "No Recipients Selected",
-        message: "Please select at least one participant to send tickets.",
+        title: "No Teams Selected",
+        message: "Please select at least one team from the current round to send tickets.",
         type: "warning",
       });
       return;
     }
 
+    const totalAttendeesInBatch = teamsToSend.reduce((acc, t) => acc + (t.teamSize || (t.members.length + 1)), 0);
+
+    const roundLabel = ticketAudienceFilter === "round_1"
+      ? "Round 1"
+      : ticketAudienceFilter === "round_2"
+      ? "Round 2"
+      : ticketAudienceFilter === "round_3"
+      ? "Round 3"
+      : "Selected";
+
+    const BATCH_SIZE = 9;
+    const totalBatches = Math.ceil(teamsToSend.length / BATCH_SIZE);
+
     const confirmed = await showConfirm({
-      title: `Dispatch ${recipientsToSend.length} Ticket(s)?`,
-      message: `You are about to email official event entry tickets with QR check-in codes directly to ${recipientsToSend.length} participant(s). Would you like to proceed?`,
-      confirmText: `🚀 Send ${recipientsToSend.length} Tickets`,
+      title: `Dispatch Tickets to ${teamsToSend.length} ${roundLabel} Team(s)?`,
+      message: `You are about to email official ${roundLabel} entry tickets directly to the Team Lead of ${teamsToSend.length} team(s) (${totalAttendeesInBatch} total participants). Due to Resend's 10 req/s rate limit, emails will dispatch in batches of 9 teams with a 1.2s cooldown between batches (${totalBatches} batch${totalBatches > 1 ? "es" : ""}). Would you like to proceed?`,
+      confirmText: `🚀 Send Tickets to ${teamsToSend.length} Team(s)`,
       cancelText: "Cancel",
       type: "primary",
     });
@@ -1733,28 +2578,35 @@ const EventManagementPage: React.FC = () => {
     setIsSendingTickets(true);
     setTicketSendingProgress({
       current: 0,
-      total: recipientsToSend.length,
+      total: teamsToSend.length,
       currentName: "",
       currentEmail: "",
       successCount: 0,
       failCount: 0,
+      batchNumber: 1,
+      totalBatches,
+      isRateLimitPause: false,
     });
 
     const siteBaseUrl = "https://aiversevitb.in";
     let successCount = 0;
     let failCount = 0;
 
-    for (let i = 0; i < recipientsToSend.length; i++) {
-      const recipient = recipientsToSend[i];
-      const ticketUrl = `${siteBaseUrl}/ticket/${recipient.regId}`;
+    for (let i = 0; i < teamsToSend.length; i++) {
+      const team = teamsToSend[i];
+      const batchNumber = Math.floor(i / BATCH_SIZE) + 1;
+      const ticketUrl = `${siteBaseUrl}/ticket/${team.regId}`;
 
       setTicketSendingProgress({
         current: i + 1,
-        total: recipientsToSend.length,
-        currentName: recipient.name,
-        currentEmail: recipient.email,
+        total: teamsToSend.length,
+        currentName: team.teamName,
+        currentEmail: team.leadEmail,
         successCount,
         failCount,
+        batchNumber,
+        totalBatches,
+        isRateLimitPause: false,
       });
 
       try {
@@ -1763,27 +2615,101 @@ const EventManagementPage: React.FC = () => {
           (eventAccessEvent as any)?.whatsappGroupLink || 
           (eventAccessEvent as any)?.whatsappGroupUrl || 
           (eventAccessEvent as any)?.whatsappLink || 
-          recipient.rawRegistration?.whatsGroupLink || 
+          team.rawRegistration?.whatsGroupLink || 
           "";
 
+        // Generate customized ticket pass image for the entire team (single ticket QR for the team)
+        let ticketImgDataUrl = "";
+        try {
+          ticketImgDataUrl = await renderTicketToDataUrl({
+            name: team.leadName,
+            teamName: team.teamName,
+            studentId: team.leadStudentId,
+            regId: team.regId,
+            currentRound: team.currentRound || 1,
+          });
+        } catch (e) {
+          console.warn("Failed rendering ticket image for team:", e);
+        }
+
+        const safeTeamName = (team.isGroup ? team.teamName : (team.leadName || "Participant")).replace(/[^a-zA-Z0-9_-]/g, "_");
+        const attachments: any[] = [];
+        let hostedPassUrl: string | undefined = undefined;
+
+        if (ticketImgDataUrl && ticketImgDataUrl.startsWith("data:image/")) {
+          // Exactly ONE official QR pass attachment for the entire team
+          attachments.push({
+            filename: `${safeTeamName}_Round${team.currentRound || 1}_Official_Pass.png`,
+            content: ticketImgDataUrl.split(",")[1],
+            encoding: "base64",
+            contentType: "image/png"
+          });
+
+          // Upload real stamped pass (with QR) to CDN if possible, but NEVER fallback to un-stamped raw template
+          try {
+            const uploadRes = await uploadImage(ticketImgDataUrl, "ai_verse_tickets");
+            if (uploadRes?.secure_url || uploadRes?.url) {
+              hostedPassUrl = uploadRes.secure_url || uploadRes.url;
+            }
+          } catch {
+            hostedPassUrl = undefined;
+          }
+        }
+
+        const roundTitleSuffix = (team.currentRound || 1) > 1 ? ` (Round ${team.currentRound})` : "";
         const emailData = buildRegistrationConfirmationEmail({
-          teamLeadName: recipient.name,
-          eventTitle: eventAccessEvent?.title || "AI Verse Event",
-          groupName: recipient.teamName !== "Individual Participant" ? recipient.teamName : undefined,
-          teamLeadStudentId: recipient.studentId,
-          teamSize: recipient.teamSize,
-          transactionId: recipient.transactionId,
-          members: recipient.rawRegistration?.members,
+          teamLeadName: team.leadName,
+          eventTitle: `${eventAccessEvent?.title || "AI Verse Event"}${roundTitleSuffix}`,
+          groupName: team.isGroup ? team.teamName : undefined,
+          teamLeadStudentId: team.leadStudentId,
+          teamSize: team.teamSize,
+          transactionId: team.transactionId,
+          members: team.members,
           ticketUrl: ticketUrl,
+          ticketImageUrl: hostedPassUrl, // Only show if real stamped pass with QR is uploaded; never blank template
           whatsGroupLink: resolvedEventWhatsLink,
         });
 
-        const emailRes = await sendResendEmail({
-          to: recipient.email,
-          subject: `🎟️ Entry Ticket & Pass: ${eventAccessEvent?.title || "AI Verse Event"}`,
+        // Send strictly to the team lead's email(s) only (either personal mail or college mail) - NOT to other team members
+        const recipientEmails = (Array.isArray(team.leadEmails) && team.leadEmails.length > 0)
+          ? team.leadEmails
+          : Array.from(new Set([
+              team.leadPersonalEmail,
+              team.leadCollegeEmail,
+              team.leadEmail,
+            ].filter(Boolean)));
+
+        if (recipientEmails.length === 0) {
+          failCount++;
+          continue;
+        }
+
+        const teamDisplayName = team.isGroup ? team.teamName : team.leadName;
+        const roundSubjectTag = (team.currentRound || 1) > 1 ? `[Round ${team.currentRound} Pass] ` : "";
+        let emailRes = await sendResendEmail({
+          to: recipientEmails,
+          subject: `🎟️ ${roundSubjectTag}Official Team Pass: ${teamDisplayName} | ${eventAccessEvent?.title || "AI Verse Event"}`,
           text: emailData.text,
           html: emailData.html,
+          attachments: attachments.length > 0 ? attachments : undefined,
         });
+
+        // 🛡️ Automatic Rate Limit Retry: If Resend responds with 429/rate-limit, pause 1.5s and retry once
+        if (!emailRes.success && (
+          emailRes.error?.toLowerCase().includes("rate") ||
+          emailRes.error?.toLowerCase().includes("limit") ||
+          emailRes.error?.includes("429")
+        )) {
+          console.warn(`[Resend Rate Limit] 429 encountered for ${team.teamName}. Cooling down 1.5s and retrying...`);
+          await new Promise(r => setTimeout(r, 1500));
+          emailRes = await sendResendEmail({
+            to: recipientEmails,
+            subject: `🎟️ ${roundSubjectTag}Official Team Pass: ${teamDisplayName} | ${eventAccessEvent?.title || "AI Verse Event"}`,
+            text: emailData.text,
+            html: emailData.html,
+            attachments: attachments.length > 0 ? attachments : undefined,
+          });
+        }
 
         if (emailRes.success) {
           successCount++;
@@ -1791,49 +2717,18 @@ const EventManagementPage: React.FC = () => {
 
           // Persist status to Database
           try {
-            if (recipient.isLead) {
-              await updateRegistration(recipient.regId, {
-                ticketSent: true,
-                ticketSentAt: now,
-                ticketDeliveryStatus: "Sent",
-                updatedAt: now,
-              });
-            } else {
-              const regDoc = (eventAccessRegistrations || []).find((r: any) => (r.id || r._id) === recipient.regId);
-              if (regDoc && Array.isArray(regDoc.members)) {
-                const updatedMembers = [...regDoc.members];
-                if (updatedMembers[recipient.memberIndex]) {
-                  updatedMembers[recipient.memberIndex] = {
-                    ...updatedMembers[recipient.memberIndex],
-                    ticketSent: true,
-                    ticketSentAt: now,
-                  };
-                  await updateRegistration(recipient.regId, {
-                    members: updatedMembers,
-                    ticketSent: true,
-                    updatedAt: now,
-                  });
-                }
-              }
-            }
+            await updateRegistration(team.regId, {
+              ticketSent: true,
+              ticketSentAt: now,
+              ticketDeliveryStatus: "Sent",
+              updatedAt: now,
+            });
 
             // Sync local state
             setEventAccessRegistrations((prev: any[]) =>
               prev.map(r => {
-                if ((r.id || r._id) === recipient.regId) {
-                  if (recipient.isLead) {
-                    return { ...r, ticketSent: true, ticketSentAt: now, ticketDeliveryStatus: "Sent" };
-                  } else {
-                    const newMembers = Array.isArray(r.members) ? [...r.members] : [];
-                    if (newMembers[recipient.memberIndex]) {
-                      newMembers[recipient.memberIndex] = {
-                        ...newMembers[recipient.memberIndex],
-                        ticketSent: true,
-                        ticketSentAt: now,
-                      };
-                    }
-                    return { ...r, members: newMembers, ticketSent: true };
-                  }
+                if ((r.id || r._id) === team.regId) {
+                  return { ...r, ticketSent: true, ticketSentAt: now, ticketDeliveryStatus: "Sent" };
                 }
                 return r;
               })
@@ -1843,26 +2738,50 @@ const EventManagementPage: React.FC = () => {
           }
         } else {
           failCount++;
-          console.error(`Failed to send ticket to ${recipient.email}:`, emailRes.error);
+          console.error(`Failed to send tickets to team ${team.teamName}:`, emailRes.error);
         }
       } catch (sendErr) {
         failCount++;
-        console.error(`Exception sending ticket to ${recipient.email}:`, sendErr);
+        console.error(`Exception sending tickets to team ${team.teamName}:`, sendErr);
       }
 
-      if (i < recipientsToSend.length - 1) {
-        await new Promise(r => setTimeout(r, 200));
+      // ⏱️ Resend Rate Limit Management:
+      // Resend allows 10 req/s. We send in batches of 9 teams,
+      // then pause for 1200ms before dispatching the next batch.
+      const isEndOfBatch = (i + 1) % BATCH_SIZE === 0;
+      const hasMoreTeams = i + 1 < teamsToSend.length;
+
+      if (isEndOfBatch && hasMoreTeams) {
+        setTicketSendingProgress(prev => prev ? {
+          ...prev,
+          current: i + 1,
+          successCount,
+          failCount,
+          isRateLimitPause: true,
+        } : null);
+
+        // Pause 1.2s to cleanly reset the per-second rate limit window
+        await new Promise(resolve => setTimeout(resolve, 1200));
+
+        setTicketSendingProgress(prev => prev ? {
+          ...prev,
+          isRateLimitPause: false,
+        } : null);
+      } else if (hasMoreTeams) {
+        // Safe buffer between emails within the same batch
+        await new Promise(r => setTimeout(r, 120));
       }
     }
 
     setIsSendingTickets(false);
-    setTicketSuccessToast(`Successfully emailed ${successCount} ticket(s)!${failCount > 0 ? ` (${failCount} failed)` : ""}`);
+    setTicketSuccessToast(`Successfully emailed tickets to ${successCount} team(s)!${failCount > 0 ? ` (${failCount} failed)` : ""}`);
     setTimeout(() => setTicketSuccessToast(null), 5000);
   };
 
-  const handleSendSingleTicketEmail = async (recipient: any) => {
+  // 🚀 Dispatch Tickets to a Single Team
+  const handleSendSingleTicketEmail = async (team: any) => {
     const siteBaseUrl = "https://aiversevitb.in";
-    const ticketUrl = `${siteBaseUrl}/ticket/${recipient.regId}`;
+    const ticketUrl = `${siteBaseUrl}/ticket/${team.regId}`;
 
     try {
       const resolvedEventWhatsLink = 
@@ -1870,31 +2789,92 @@ const EventManagementPage: React.FC = () => {
         (eventAccessEvent as any)?.whatsappGroupLink || 
         (eventAccessEvent as any)?.whatsappGroupUrl || 
         (eventAccessEvent as any)?.whatsappLink || 
-        recipient.rawRegistration?.whatsGroupLink || 
+        team.rawRegistration?.whatsGroupLink || 
         "";
 
+      // Render customized ticket pass image for the entire team (single ticket QR for the team)
+      let ticketImgDataUrl = "";
+      try {
+        ticketImgDataUrl = await renderTicketToDataUrl({
+          name: team.leadName,
+          teamName: team.teamName,
+          studentId: team.leadStudentId,
+          regId: team.regId,
+          currentRound: team.currentRound || 1,
+        });
+      } catch (e) {
+        console.warn("Failed rendering ticket image for team:", e);
+      }
+
+      const safeTeamName = (team.isGroup ? team.teamName : (team.leadName || "Participant")).replace(/[^a-zA-Z0-9_-]/g, "_");
+      const attachments: any[] = [];
+      let hostedPassUrl: string | undefined = undefined;
+
+      if (ticketImgDataUrl && ticketImgDataUrl.startsWith("data:image/")) {
+        // Exactly ONE official QR pass attachment for the entire team
+        attachments.push({
+          filename: `${safeTeamName}_Round${team.currentRound || 1}_Official_Pass.png`,
+          content: ticketImgDataUrl.split(",")[1],
+          encoding: "base64",
+          contentType: "image/png"
+        });
+
+        // Upload real stamped pass (with QR) to CDN if possible, but NEVER fallback to un-stamped raw template
+        try {
+          const uploadRes = await uploadImage(ticketImgDataUrl, "ai_verse_tickets");
+          if (uploadRes?.secure_url || uploadRes?.url) {
+            hostedPassUrl = uploadRes.secure_url || uploadRes.url;
+          }
+        } catch {
+          hostedPassUrl = undefined;
+        }
+      }
+
+      const roundTitleSuffix = (team.currentRound || 1) > 1 ? ` (Round ${team.currentRound})` : "";
       const emailData = buildRegistrationConfirmationEmail({
-        teamLeadName: recipient.name,
-        eventTitle: eventAccessEvent?.title || "AI Verse Event",
-        groupName: recipient.teamName !== "Individual Participant" ? recipient.teamName : undefined,
-        teamLeadStudentId: recipient.studentId,
-        teamSize: recipient.teamSize,
-        transactionId: recipient.transactionId,
-        members: recipient.rawRegistration?.members,
+        teamLeadName: team.leadName,
+        eventTitle: `${eventAccessEvent?.title || "AI Verse Event"}${roundTitleSuffix}`,
+        groupName: team.isGroup ? team.teamName : undefined,
+        teamLeadStudentId: team.leadStudentId,
+        teamSize: team.teamSize,
+        transactionId: team.transactionId,
+        members: team.members,
         ticketUrl: ticketUrl,
+        ticketImageUrl: hostedPassUrl, // Only show if real stamped pass with QR is uploaded; never blank template
         whatsGroupLink: resolvedEventWhatsLink,
       });
 
+      // Send strictly to the team lead's email(s) only (either personal mail or college mail) - NOT to other team members
+      const recipientEmails = (Array.isArray(team.leadEmails) && team.leadEmails.length > 0)
+        ? team.leadEmails
+        : Array.from(new Set([
+            team.leadPersonalEmail,
+            team.leadCollegeEmail,
+            team.leadEmail,
+          ].filter(Boolean)));
+
+      if (recipientEmails.length === 0) {
+        await showAlert({
+          title: "No Email Address",
+          message: `Team "${team.teamName}" does not have any team lead email address (personal or college) on file.`,
+          type: "danger",
+        });
+        return;
+      }
+
+      const teamDisplayName = team.isGroup ? team.teamName : team.leadName;
+      const roundSubjectTag = (team.currentRound || 1) > 1 ? `[Round ${team.currentRound} Pass] ` : "";
       const res = await sendResendEmail({
-        to: recipient.email,
-        subject: `🎟️ Entry Ticket & Pass: ${eventAccessEvent?.title || "AI Verse Event"}`,
+        to: recipientEmails,
+        subject: `🎟️ ${roundSubjectTag}Official Team Pass: ${teamDisplayName} | ${eventAccessEvent?.title || "AI Verse Event"}`,
         text: emailData.text,
         html: emailData.html,
+        attachments: attachments.length > 0 ? attachments : undefined,
       });
 
       if (res.success) {
         const now = Date.now();
-        await updateRegistration(recipient.regId, {
+        await updateRegistration(team.regId, {
           ticketSent: true,
           ticketSentAt: now,
           ticketDeliveryStatus: "Sent",
@@ -1903,16 +2883,16 @@ const EventManagementPage: React.FC = () => {
 
         setEventAccessRegistrations((prev: any[]) =>
           prev.map(r => {
-            if ((r.id || r._id) === recipient.regId) {
-              return { ...r, ticketSent: true, ticketSentAt: now };
+            if ((r.id || r._id) === team.regId) {
+              return { ...r, ticketSent: true, ticketSentAt: now, ticketDeliveryStatus: "Sent" };
             }
             return r;
           })
         );
 
         await showAlert({
-          title: "Ticket Sent!",
-          message: `Official ticket pass has been successfully emailed to ${recipient.name} (${recipient.email}).`,
+          title: "Tickets Sent!",
+          message: `Official ticket pass has been successfully emailed to team "${team.teamName}" (${recipientEmails.join(", ")}).`,
           type: "success",
         });
       } else {
@@ -1944,6 +2924,44 @@ const EventManagementPage: React.FC = () => {
     const sampleRegId = eventAccessRegistrations[0]?.id || "sample_ticket_pass";
     const ticketUrl = `${siteBaseUrl}/ticket/${sampleRegId}`;
 
+    const sampleRecipient = {
+      name: "Faculty Coordinator (Test Recipient)",
+      teamName: "CodeCrafters Test Team",
+      studentId: "23PA1A0501",
+      regId: sampleRegId,
+      email: testTicketEmail.trim().toLowerCase(),
+    };
+
+    let ticketImgDataUrl = "";
+    try {
+      ticketImgDataUrl = await renderTicketToDataUrl(sampleRecipient);
+    } catch (e) {
+      console.warn("Failed rendering test ticket image:", e);
+    }
+
+    const attachments: any[] = [];
+    let hostedPassUrl: string | undefined = undefined;
+
+    if (ticketImgDataUrl && ticketImgDataUrl.startsWith("data:image/")) {
+      attachments.push({
+        filename: `Test_Ticket_Entry_Pass.png`,
+        content: ticketImgDataUrl.split(",")[1],
+        encoding: "base64",
+        contentType: "image/png"
+      });
+
+      try {
+        const uploadRes = await uploadImage(ticketImgDataUrl, "ai_verse_tickets");
+        if (uploadRes?.secure_url || uploadRes?.url) {
+          hostedPassUrl = uploadRes.secure_url || uploadRes.url;
+        }
+      } catch {
+        hostedPassUrl = undefined;
+      }
+    } else {
+      hostedPassUrl = undefined;
+    }
+
     try {
       const resolvedEventWhatsLink = 
         eventAccessEvent?.whatsGroupLink || 
@@ -1960,6 +2978,7 @@ const EventManagementPage: React.FC = () => {
         teamSize: 3,
         transactionId: "TXN_TEST_9999",
         ticketUrl: ticketUrl,
+        ticketImageUrl: hostedPassUrl,
         whatsGroupLink: resolvedEventWhatsLink,
         members: [
           { name: "Sample Member 1", studentId: "23PA1A0502", email: "member1@test.com" },
@@ -1972,6 +2991,7 @@ const EventManagementPage: React.FC = () => {
         subject: `[TEST PREVIEW] 🎟️ Entry Ticket: ${eventAccessEvent?.title || "AI Verse Event"}`,
         text: emailData.text,
         html: emailData.html,
+        attachments: attachments.length > 0 ? attachments : undefined,
       });
 
       if (res.success) {
@@ -1986,28 +3006,34 @@ const EventManagementPage: React.FC = () => {
     }
   };
 
+  // 📄 Export Teams Roster CSV
   const handleExportTicketsCsv = () => {
-    if (flattenedTicketRecipients.length === 0) {
-      alert("No participant records found to export.");
+    const listToExport = filteredTicketTeams.length > 0 ? filteredTicketTeams : ticketTeams;
+    if (listToExport.length === 0) {
+      alert("No team registration records found to export.");
       return;
     }
 
     const siteBaseUrl = "https://aiversevitb.in";
 
-    const exportData = flattenedTicketRecipients.map((r, idx) => ({
+    const exportData = listToExport.map((t, idx) => ({
       "S.No": idx + 1,
-      "Registration ID": r.regId,
-      "Participant Name": r.name,
-      "Email Address": r.email,
-      "Roll / Student ID": r.studentId || "N/A",
-      "Team / Group Name": r.teamName || "Individual Entry",
-      "Role": r.isLead ? "Team Lead / Registrant" : "Team Member",
-      "Phone Number": r.phone || "N/A",
-      "Payment Status": r.paymentStatus,
-      "Transaction ID": r.transactionId || "N/A",
-      "Ticket Status": r.ticketSent ? "Emailed & Active" : "Pending Dispatch",
-      "Emailed Timestamp": r.ticketSentAt ? new Date(r.ticketSentAt).toLocaleString() : "Not Dispatched",
-      "Ticket URL": `${siteBaseUrl}/ticket/${r.regId}`,
+      "Registration ID": t.regId,
+      "Team / Group Name": t.teamName,
+      "Current Round": `Round ${t.currentRound || 1}`,
+      "Round Status": t.roundStatus || "Active",
+      "Team Type": t.isGroup ? "Group Team" : "Individual Entry",
+      "Team Size": t.teamSize,
+      "Team Lead Name": t.leadName,
+      "Team Lead Student ID": t.leadStudentId || "N/A",
+      "Team Lead Email": t.leadEmail,
+      "Team Lead Phone": t.leadPhone || "N/A",
+      "Registered Members": t.members.map((m: any) => `${m.name}${m.studentId ? ` (${m.studentId})` : ""}`).join("; ") || "None",
+      "Payment Status": t.paymentStatus,
+      "Transaction ID": t.transactionId || "N/A",
+      "Ticket Status": t.ticketSent ? "Emailed & Active" : "Pending Dispatch",
+      "Emailed Timestamp": t.ticketSentAt ? new Date(t.ticketSentAt).toLocaleString() : "Not Dispatched",
+      "Ticket URL": `${siteBaseUrl}/ticket/${t.regId}`,
     }));
 
     const csv = Papa.unparse(exportData);
@@ -2015,7 +3041,7 @@ const EventManagementPage: React.FC = () => {
     const url = URL.createObjectURL(blob);
     const link = document.createElement("a");
     link.setAttribute("href", url);
-    link.setAttribute("download", `Tickets_Dispatch_Roster_${(eventAccessEvent?.title || "Event").replace(/[^a-zA-Z0-9]/g, "_")}.csv`);
+    link.setAttribute("download", `Teams_Ticket_Roster_${(eventAccessEvent?.title || "Event").replace(/[^a-zA-Z0-9]/g, "_")}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -13674,15 +14700,15 @@ AI Verse Competition Platform • Faculty Review Engine
               <div className="hidden md:flex items-center gap-3 bg-white/10 px-4 py-2 rounded-2xl border border-white/15 text-xs font-black">
                 <span className="text-emerald-400 flex items-center gap-1">
                   <CheckCircle2 className="w-3.5 h-3.5" />
-                  {flattenedCertRecipients.filter(r => r.certificateIssued).length} Issued & Sent
+                  {certTeams.filter(t => t.certificateIssued).length} Issued &amp; Sent
                 </span>
                 <span className="text-white/30">|</span>
                 <span className="text-amber-300 flex items-center gap-1">
                   <Award className="w-3.5 h-3.5" />
-                  {flattenedCertRecipients.filter(r => !r.certificateIssued).length} Pending
+                  {certTeams.filter(t => !t.certificateIssued).length} Pending
                 </span>
                 <span className="text-white/30">|</span>
-                <span className="text-slate-200">Total: {flattenedCertRecipients.length} Recipients</span>
+                <span className="text-slate-200">Total: {certTeams.length} Teams ({flattenedCertRecipients.length} Recipients)</span>
               </div>
 
               <button
@@ -13742,7 +14768,7 @@ AI Verse Competition Platform • Faculty Review Engine
                   <span className={`px-2 py-0.5 rounded-full text-[10px] font-black ${
                     certTab === "distribution" ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700"
                   }`}>
-                    {selectedCertRecipients.length}
+                    {certTeams.length}
                   </span>
                 </button>
 
@@ -13756,7 +14782,7 @@ AI Verse Competition Platform • Faculty Review Engine
                   }`}
                 >
                   <Award className="w-4 h-4" />
-                  <span>Certificate Studio & Templates</span>
+                  <span>Certificate Studio &amp; Templates</span>
                 </button>
 
                 <button
@@ -13771,7 +14797,7 @@ AI Verse Competition Platform • Faculty Review Engine
                   <FileSpreadsheet className="w-4 h-4" />
                   <span>Issuance Logs</span>
                   <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-slate-200 text-slate-700">
-                    {flattenedCertRecipients.filter(r => r.certificateIssued).length}
+                    {certTeams.filter(t => t.certificateIssued).length}
                   </span>
                 </button>
               </div>
@@ -13803,35 +14829,20 @@ AI Verse Competition Platform • Faculty Review Engine
                     <div className="relative w-full sm:w-80">
                       <select
                         value={certAudienceFilter}
-                        onChange={(e) => setCertAudienceFilter(e.target.value)}
+                        onChange={(e) => handleCertAudienceFilterChange(e.target.value)}
                         className="w-full pl-4 pr-10 py-2.5 bg-slate-50 hover:bg-slate-100/80 border border-slate-200 rounded-2xl text-xs font-black text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs cursor-pointer transition-all appearance-none"
                       >
                         <option value="all">
-                          👥 All Round 1 Participants ({flattenedCertRecipients.length})
+                          👥 All Teams ({certTeams.length})
                         </option>
-                        <option value="promoted_r2">
-                          🏆 Promoted to Round 2 ({flattenedCertRecipients.filter(r => (r.currentRound || 1) >= 2 || r.isPromoted).length})
+                        <option value="round_1">
+                          🎯 Only Round One ({certTeams.filter(t => (t.currentRound === 1 || !t.currentRound) && !t.isEliminated).length})
                         </option>
-                        <option value="all_r2">
-                          👥 All Round 2 Participants ({flattenedCertRecipients.filter(r => (r.currentRound || 1) >= 2).length})
+                        <option value="round_2">
+                          🚀 Only Round Two ({certTeams.filter(t => t.currentRound === 2 && !t.isEliminated).length})
                         </option>
-                        <option value="promoted_r3">
-                          🏆 Promoted to Round 3 ({flattenedCertRecipients.filter(r => (r.currentRound || 1) >= 3 || ((r.currentRound || 1) === 2 && r.roundStatus === "Qualified")).length})
-                        </option>
-                        <option value="all_r3">
-                          👥 All Round 3 Participants ({flattenedCertRecipients.filter(r => (r.currentRound || 1) >= 3).length})
-                        </option>
-                        <option value="winners">
-                          ✨ Winners / Finals ({flattenedCertRecipients.filter(r => r.isWinner).length})
-                        </option>
-                        <option value="attended">
-                          👤 Attended ({flattenedCertRecipients.filter(r => r.attendanceMarked).length})
-                        </option>
-                        <option value="submitted">
-                          📄 Submitted ({flattenedCertRecipients.filter(r => r.submissionStatus === "Submitted").length})
-                        </option>
-                        <option value="unsent">
-                          ⏳ Unsent Only ({flattenedCertRecipients.filter(r => !r.certificateIssued).length})
+                        <option value="round_3">
+                          🏆 Only Round Three ({certTeams.filter(t => (t.currentRound === 3 || (t.currentRound || 1) >= 3) && !t.isEliminated).length})
                         </option>
                       </select>
                       <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
@@ -13846,7 +14857,7 @@ AI Verse Competition Platform • Faculty Review Engine
                         type="text"
                         value={certSearchQuery}
                         onChange={(e) => setCertSearchQuery(e.target.value)}
-                        placeholder="Search student, roll, team..."
+                        placeholder="Search team, lead, roll, member..."
                         className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs"
                       />
                     </div>
@@ -13854,7 +14865,7 @@ AI Verse Competition Platform • Faculty Review Engine
                     <button
                       type="button"
                       onClick={handleSendCertificatesBatch}
-                      disabled={selectedCertRecipients.length === 0 || isSendingCertificates}
+                      disabled={filteredCertTeams.filter(t => selectedCertRecipients.includes(t.key)).length === 0 || isSendingCertificates}
                       className="px-6 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 active:scale-95 text-white font-black text-xs sm:text-sm rounded-2xl transition-all shadow-md shadow-blue-500/20 flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed border border-blue-400/20 whitespace-nowrap shrink-0"
                     >
                       {isSendingCertificates ? (
@@ -13863,7 +14874,15 @@ AI Verse Competition Platform • Faculty Review Engine
                         <Send className="w-4 h-4" />
                       )}
                       <span>
-                        {isSendingCertificates ? "Dispatching..." : `Send to Selected (${selectedCertRecipients.length})`}
+                        {isSendingCertificates
+                          ? "Dispatching..."
+                          : certAudienceFilter === "round_1"
+                          ? `Send to Round 1 (${filteredCertTeams.filter(t => selectedCertRecipients.includes(t.key)).length} Teams)`
+                          : certAudienceFilter === "round_2"
+                          ? `Send to Round 2 (${filteredCertTeams.filter(t => selectedCertRecipients.includes(t.key)).length} Teams)`
+                          : certAudienceFilter === "round_3"
+                          ? `Send to Round 3 (${filteredCertTeams.filter(t => selectedCertRecipients.includes(t.key)).length} Teams)`
+                          : `Send to Selected (${filteredCertTeams.filter(t => selectedCertRecipients.includes(t.key)).length} Teams)`}
                       </span>
                     </button>
                   </div>
@@ -13871,44 +14890,66 @@ AI Verse Competition Platform • Faculty Review Engine
 
                 {/* Live Dispatch Progress Banner */}
                 {isSendingCertificates && certSendingProgress && (
-                  <div className="bg-gradient-to-r from-blue-900 to-indigo-900 text-white p-5 rounded-3xl shadow-xl border border-blue-700/50 space-y-3 animate-in slide-in-from-top-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-3">
-                        <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center">
-                          <Loader2 className="w-5 h-5 text-blue-300 animate-spin" />
+                  <div className="bg-gradient-to-r from-blue-900 via-indigo-900 to-slate-900 text-white p-5 rounded-3xl shadow-xl border border-blue-700/50 space-y-3.5 animate-in slide-in-from-top-2">
+                    <div className="flex items-center justify-between flex-wrap gap-4">
+                      <div className="flex items-center gap-3.5">
+                        <div className="w-11 h-11 rounded-2xl bg-white/10 flex items-center justify-center shrink-0 border border-white/15 shadow-inner">
+                          {certSendingProgress.isRateLimitPause ? (
+                            <Clock className="w-5 h-5 text-amber-300 animate-pulse" />
+                          ) : (
+                            <Loader2 className="w-5 h-5 text-blue-300 animate-spin" />
+                          )}
                         </div>
                         <div>
-                          <h4 className="text-sm font-black text-white">
-                            Dispatching Certificate {certSendingProgress.current} of {certSendingProgress.total}...
-                          </h4>
-                          <p className="text-xs text-blue-200">
-                            Recipient: <strong className="text-white">{certSendingProgress.currentName}</strong> ({certSendingProgress.currentEmail})
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <h4 className="text-sm font-black text-white">
+                              {certSendingProgress.isRateLimitPause
+                                ? `⏸️ Resend Rate Limit Safe Cooldown (Batch ${certSendingProgress.batchNumber} of ${certSendingProgress.totalBatches})`
+                                : `🚀 Dispatching Batch ${certSendingProgress.batchNumber || 1} of ${certSendingProgress.totalBatches || 1} (9 Teams Concurrently)`}
+                            </h4>
+                            <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-white/10 text-blue-200 border border-white/15">
+                              ⚡ 9 Teams / sec rate limit
+                            </span>
+                          </div>
+                          <p className="text-xs text-blue-200 mt-0.5">
+                            {certSendingProgress.isRateLimitPause
+                              ? `Pausing 1.2s to cleanly reset per-second rate limit window... Next batch starting momentarily.`
+                              : `Currently Sending: ${certSendingProgress.currentName || "9 teams concurrently in parallel..."}`}
                           </p>
                         </div>
                       </div>
 
-                      <div className="flex items-center gap-3 text-xs font-black">
-                        <span className="text-emerald-400">✓ {certSendingProgress.successCount} Success</span>
+                      <div className="flex items-center gap-3 text-xs font-black flex-wrap">
+                        <div className="bg-white/10 px-3.5 py-1.5 rounded-xl border border-white/15 flex items-center gap-2">
+                          <span className="text-blue-200 font-semibold">Sent:</span>
+                          <span className="text-white font-extrabold">{certSendingProgress.current} / {certSendingProgress.total}</span>
+                          <span className="text-blue-300 text-[11px]">({Math.max(0, certSendingProgress.total - certSendingProgress.current)} remaining)</span>
+                        </div>
+                        <span className="text-emerald-400 bg-emerald-500/10 px-2.5 py-1 rounded-xl border border-emerald-500/20">
+                          ✓ {certSendingProgress.successCount} Delivered
+                        </span>
                         {certSendingProgress.failCount > 0 && (
-                          <span className="text-red-400">✗ {certSendingProgress.failCount} Failed</span>
+                          <span className="text-rose-400 bg-rose-500/10 px-2.5 py-1 rounded-xl border border-rose-500/20">
+                            ✗ {certSendingProgress.failCount} Failed
+                          </span>
                         )}
-                        <span className="text-blue-200">
-                          {Math.round((certSendingProgress.current / certSendingProgress.total) * 100)}%
+                        <span className="px-3 py-1 rounded-xl bg-blue-500/20 text-blue-100 border border-blue-400/30 font-black">
+                          {certSendingProgress.total > 0 ? Math.round((certSendingProgress.current / certSendingProgress.total) * 100) : 0}%
                         </span>
                       </div>
                     </div>
 
                     {/* Progress Bar */}
-                    <div className="w-full bg-black/30 h-2.5 rounded-full overflow-hidden p-0.5">
+                    <div className="w-full bg-black/40 h-2.5 rounded-full overflow-hidden p-0.5 border border-white/10">
                       <div
-                        className="bg-gradient-to-r from-emerald-400 to-blue-400 h-full rounded-full transition-all duration-300"
-                        style={{ width: `${(certSendingProgress.current / certSendingProgress.total) * 100}%` }}
+                        className="bg-gradient-to-r from-emerald-400 via-blue-400 to-indigo-400 h-full rounded-full transition-all duration-300"
+                        style={{ width: `${certSendingProgress.total > 0 ? (certSendingProgress.current / certSendingProgress.total) * 100 : 0}%` }}
                       />
                     </div>
                   </div>
                 )}
 
-                {/* Recipients Table */}
+                {/* Teams Table */}
                 <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden flex-1 flex flex-col">
                   <div className="p-4 bg-slate-50/80 border-b border-slate-200 flex items-center justify-between gap-4">
                     <div className="flex items-center gap-3">
@@ -13919,11 +14960,11 @@ AI Verse Competition Platform • Faculty Review Engine
                       >
                         <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
                         <span>
-                          {filteredCertRecipients.every(r => selectedCertRecipients.includes(r.key)) ? "Deselect Filtered" : "Select All Filtered"}
+                          {filteredCertTeams.length > 0 && filteredCertTeams.every(t => selectedCertRecipients.includes(t.key)) ? "Deselect Filtered" : "Select All Filtered"}
                         </span>
                       </button>
                       <span className="text-xs font-bold text-slate-500">
-                        Showing {filteredCertRecipients.length} participants ({selectedCertRecipients.length} selected)
+                        Showing {filteredCertTeams.length} {certAudienceFilter === "round_1" ? "Round 1 " : certAudienceFilter === "round_2" ? "Round 2 " : certAudienceFilter === "round_3" ? "Round 3 " : ""}teams ({filteredCertTeams.filter(t => selectedCertRecipients.includes(t.key)).length} selected)
                       </span>
                     </div>
 
@@ -13939,13 +14980,14 @@ AI Verse Competition Platform • Faculty Review Engine
                           <th className="py-3.5 px-4 w-12 text-center">
                             <input
                               type="checkbox"
-                              checked={filteredCertRecipients.length > 0 && filteredCertRecipients.every(r => selectedCertRecipients.includes(r.key))}
+                              checked={filteredCertTeams.length > 0 && filteredCertTeams.every(t => selectedCertRecipients.includes(t.key))}
                               onChange={handleToggleSelectAllCertRecipients}
                               className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
                             />
                           </th>
-                          <th className="py-3.5 px-4">Participant & ID</th>
-                          <th className="py-3.5 px-4">Team / Role</th>
+                          <th className="py-3.5 px-4">Team Name &amp; ID</th>
+                          <th className="py-3.5 px-4">Team Lead / Contact</th>
+                          <th className="py-3.5 px-4">Registered Members</th>
                           <th className="py-3.5 px-4">Email Address</th>
                           <th className="py-3.5 px-4">Stage / Status</th>
                           <th className="py-3.5 px-4">Certificate Status</th>
@@ -13953,21 +14995,21 @@ AI Verse Competition Platform • Faculty Review Engine
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-medium">
-                        {filteredCertRecipients.length === 0 ? (
+                        {filteredCertTeams.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="text-center py-12 text-slate-400">
+                            <td colSpan={8} className="text-center py-12 text-slate-400">
                               <Award className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-                              <p className="font-bold text-sm text-slate-600">No participants found</p>
+                              <p className="font-bold text-sm text-slate-600">No teams found</p>
                               <p className="text-xs text-slate-400 mt-0.5">Try clearing filters or search queries.</p>
                             </td>
                           </tr>
                         ) : (
-                          filteredCertRecipients.map((recipient) => {
-                            const isSelected = selectedCertRecipients.includes(recipient.key);
+                          filteredCertTeams.map((team) => {
+                            const isSelected = selectedCertRecipients.includes(team.key);
                             return (
                               <tr
-                                key={recipient.key}
-                                onClick={() => handleToggleSelectCertRecipient(recipient.key)}
+                                key={team.key}
+                                onClick={() => handleToggleSelectCertRecipient(team.key)}
                                 className={`hover:bg-blue-50/50 transition-colors cursor-pointer ${
                                   isSelected ? "bg-blue-50/30" : ""
                                 }`}
@@ -13976,52 +15018,152 @@ AI Verse Competition Platform • Faculty Review Engine
                                   <input
                                     type="checkbox"
                                     checked={isSelected}
-                                    onChange={() => handleToggleSelectCertRecipient(recipient.key)}
+                                    onChange={() => handleToggleSelectCertRecipient(team.key)}
                                     className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
                                   />
                                 </td>
 
                                 <td className="py-4 px-4">
-                                  <div className="font-bold text-slate-900 text-sm">{recipient.name}</div>
-                                  <div className="text-[11px] font-mono text-slate-400">
-                                    {recipient.studentId || "Student"}
-                                  </div>
-                                </td>
-
-                                <td className="py-4 px-4">
-                                  <div className="font-bold text-slate-800">
-                                    {recipient.teamName || "Individual Entry"}
-                                  </div>
-                                  <span className={`text-[10px] font-extrabold uppercase tracking-wider px-2 py-0.5 rounded-md ${
-                                    recipient.isLead ? "bg-blue-50 text-blue-700" : "bg-slate-100 text-slate-600"
-                                  }`}>
-                                    {recipient.isLead ? "Team Lead" : "Member"}
-                                  </span>
-                                </td>
-
-                                <td className="py-4 px-4 font-mono text-slate-700 text-xs">
-                                  {recipient.email}
-                                </td>
-
-                                <td className="py-4 px-4">
-                                  <div className="flex items-center gap-1.5">
-                                    <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-slate-100 text-slate-700">
-                                      Round {recipient.currentRound}
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <span className="font-black text-slate-900 text-sm">{team.teamName}</span>
+                                    <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                      team.isGroup
+                                        ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
+                                        : "bg-slate-100 text-slate-600"
+                                    }`}>
+                                      {team.isGroup ? `👥 ${team.teamSize} Members` : "👤 Solo"}
                                     </span>
-                                    {recipient.isPromoted && (
-                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700">
-                                        Qualified
+                                    {team.isEliminated ? (
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
+                                        Eliminated
+                                      </span>
+                                    ) : (
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                        team.currentRound === 3
+                                          ? "bg-amber-100 text-amber-800 border border-amber-300"
+                                          : team.currentRound === 2
+                                          ? "bg-purple-100 text-purple-800 border border-purple-300"
+                                          : "bg-blue-50 text-blue-700 border border-blue-200"
+                                      }`}>
+                                        Round {team.currentRound || 1}
                                       </span>
                                     )}
                                   </div>
+                                  <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                    ID: AIV-{team.regId.slice(-8).toUpperCase()}
+                                  </div>
                                 </td>
 
                                 <td className="py-4 px-4">
-                                  {recipient.certificateIssued ? (
-                                    <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 w-fit">
-                                      <CheckCircle2 className="w-3 h-3 text-emerald-600" />
-                                      Issued & Sent
+                                  <div className="font-black text-slate-900 text-sm">{team.leadName}</div>
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <span className="text-[11px] text-slate-400 font-mono">
+                                      {team.leadStudentId || "No Student ID"}
                                     </span>
+                                    <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold uppercase bg-amber-50 text-amber-700 border border-amber-200">
+                                      👑 Lead
+                                    </span>
+                                  </div>
+                                </td>
+
+                                <td className="py-4 px-4">
+                                  {team.members && team.members.length > 0 ? (
+                                    <div className="space-y-1.5 max-w-xs">
+                                      {team.members.map((m: any, mIdx: number) => {
+                                        const mCertId = m.certificateId || `AIV-${team.regId.slice(-4).toUpperCase()}-M${mIdx + 1}`;
+                                        const mCertUrl = `/certificate/${mCertId}?name=${encodeURIComponent(m.name)}&event=${encodeURIComponent(eventAccessEvent?.title || "Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(m.studentId)}&team=${encodeURIComponent(team.teamName)}`;
+                                        return (
+                                          <div key={mIdx} className="flex items-center justify-between gap-1.5 text-xs text-slate-700 bg-slate-50/80 hover:bg-slate-100/80 px-2 py-1 rounded-lg transition-colors">
+                                            <div className="flex items-center gap-1.5 truncate">
+                                              <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
+                                              <span className="font-bold text-slate-800 truncate max-w-[120px]">{m.name}</span>
+                                              {m.studentId && (
+                                                <span className="font-mono text-[10px] text-slate-400 shrink-0">
+                                                  ({m.studentId})
+                                                </span>
+                                              )}
+                                            </div>
+                                            <a
+                                              href={mCertUrl}
+                                              target="_blank"
+                                              rel="noreferrer"
+                                              onClick={(e) => e.stopPropagation()}
+                                              className="text-blue-600 hover:text-blue-800 shrink-0 p-0.5 hover:bg-blue-50 rounded"
+                                              title={`Preview ${m.name}'s Certificate`}
+                                            >
+                                              <ExternalLink className="w-3 h-3" />
+                                            </a>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  ) : (
+                                    <span className="text-slate-400 text-xs italic">Solo Participant</span>
+                                  )}
+                                </td>
+
+                                <td className="py-4 px-4 font-mono text-slate-700 text-xs">
+                                  <div className="font-semibold text-slate-900">{team.leadEmail || "No Email"}</div>
+                                  {team.leadCollegeEmail && team.leadCollegeEmail !== team.leadEmail && (
+                                    <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                                      🎓 {team.leadCollegeEmail}
+                                    </div>
+                                  )}
+                                  {team.leadPersonalEmail && team.leadPersonalEmail !== team.leadEmail && (
+                                    <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                                      ✉️ {team.leadPersonalEmail}
+                                    </div>
+                                  )}
+                                  <span className="text-[10px] font-sans font-bold text-amber-600 block mt-0.5">
+                                    👑 Team Lead Mail Only
+                                  </span>
+                                </td>
+
+                                <td className="py-4 px-4">
+                                  <div className="flex flex-col gap-1">
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-slate-100 text-slate-700">
+                                        Round {team.currentRound}
+                                      </span>
+                                      {team.isPromoted && (
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-emerald-50 text-emerald-700 border border-emerald-200">
+                                          Qualified
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                      {team.attendanceMarked && (
+                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-blue-50 text-blue-700 border border-blue-200">
+                                          Attended
+                                        </span>
+                                      )}
+                                      {team.submissionStatus === "Submitted" && (
+                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-purple-50 text-purple-700 border border-purple-200">
+                                          Submitted
+                                        </span>
+                                      )}
+                                      {team.isWinner && (
+                                        <span className="px-1.5 py-0.2 rounded text-[9px] font-bold bg-amber-50 text-amber-700 border border-amber-200">
+                                          🏆 Winner
+                                        </span>
+                                      )}
+                                    </div>
+                                  </div>
+                                </td>
+
+                                <td className="py-4 px-4">
+                                  {team.certificateIssued ? (
+                                    <div className="space-y-0.5">
+                                      <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 flex items-center gap-1 w-fit">
+                                        <CheckCircle2 className="w-3 h-3 text-emerald-600" />
+                                        Issued &amp; Sent
+                                      </span>
+                                      {team.certificateSentAt && (
+                                        <p className="text-[10px] text-slate-400 font-mono">
+                                          {new Date(team.certificateSentAt).toLocaleDateString([], { month: "short", day: "numeric" })}
+                                        </p>
+                                      )}
+                                    </div>
                                   ) : (
                                     <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 border border-slate-200 flex items-center gap-1 w-fit">
                                       <Clock className="w-3 h-3 text-slate-400" />
@@ -14031,9 +15173,9 @@ AI Verse Competition Platform • Faculty Review Engine
                                 </td>
 
                                 <td className="py-4 px-4 text-right" onClick={(e) => e.stopPropagation()}>
-                                  <div className="flex items-center justify-end gap-2">
+                                  <div className="flex items-center justify-end gap-2 flex-wrap">
                                     <a
-                                      href={`/certificate/${recipient.certificateId}?name=${encodeURIComponent(recipient.name)}&event=${encodeURIComponent(eventAccessEvent?.title || "Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(recipient.studentId)}&team=${encodeURIComponent(recipient.teamName)}`}
+                                      href={`/certificate/${team.certificateId}?name=${encodeURIComponent(team.leadName)}&event=${encodeURIComponent(eventAccessEvent?.title || "Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(team.leadStudentId)}&team=${encodeURIComponent(team.teamName)}`}
                                       target="_blank"
                                       rel="noreferrer"
                                       className="p-2 bg-slate-100 hover:bg-blue-100 text-slate-700 hover:text-blue-700 rounded-xl transition-all font-bold text-xs flex items-center gap-1"
@@ -14853,7 +15995,7 @@ AI Verse Competition Platform • Faculty Review Engine
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100 font-medium">
-                      {flattenedCertRecipients.filter(r => r.certificateIssued).length === 0 ? (
+                      {certTeams.filter(t => t.certificateIssued).length === 0 ? (
                         <tr>
                           <td colSpan={7} className="text-center py-12 text-slate-400">
                             <Clock className="w-10 h-10 mx-auto mb-2 text-slate-300" />
@@ -14862,19 +16004,22 @@ AI Verse Competition Platform • Faculty Review Engine
                           </td>
                         </tr>
                       ) : (
-                        flattenedCertRecipients.filter(r => r.certificateIssued).map((r, idx) => (
-                          <tr key={r.key} className="hover:bg-slate-50 transition-colors">
+                        certTeams.filter(t => t.certificateIssued).map((t, idx) => (
+                          <tr key={t.key} className="hover:bg-slate-50 transition-colors">
                             <td className="py-3.5 px-4 text-slate-400">{idx + 1}</td>
-                            <td className="py-3.5 px-4 font-mono font-bold text-blue-700">{r.certificateId}</td>
-                            <td className="py-3.5 px-4 font-bold text-slate-900">{r.name}</td>
-                            <td className="py-3.5 px-4 font-mono text-slate-600">{r.email}</td>
-                            <td className="py-3.5 px-4 font-bold text-indigo-700">{r.certificateType || certType}</td>
+                            <td className="py-3.5 px-4 font-mono font-bold text-blue-700">{t.certificateId}</td>
+                            <td className="py-3.5 px-4 font-bold text-slate-900">
+                              <div>{t.leadName}</div>
+                              <div className="text-[11px] text-slate-400 font-sans font-normal">{t.teamName} ({t.teamSize} pax)</div>
+                            </td>
+                            <td className="py-3.5 px-4 font-mono text-slate-600">{t.leadEmail}</td>
+                            <td className="py-3.5 px-4 font-bold text-indigo-700">{t.certificateType || certType}</td>
                             <td className="py-3.5 px-4 text-slate-500">
-                              {r.certificateSentAt ? new Date(r.certificateSentAt).toLocaleString() : "Issued"}
+                              {t.certificateSentAt ? new Date(t.certificateSentAt).toLocaleString() : "Issued"}
                             </td>
                             <td className="py-3.5 px-4 text-right">
                               <a
-                                href={`/certificate/${r.certificateId}?name=${encodeURIComponent(r.name)}&event=${encodeURIComponent(eventAccessEvent?.title || "Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(r.studentId)}`}
+                                href={`/certificate/${t.certificateId}?name=${encodeURIComponent(t.leadName)}&event=${encodeURIComponent(eventAccessEvent?.title || "Event")}&type=${encodeURIComponent(certType)}&college=${encodeURIComponent(certCollegeName)}&date=${encodeURIComponent(certIssueDate)}&studentId=${encodeURIComponent(t.leadStudentId)}&team=${encodeURIComponent(t.teamName)}`}
                                 target="_blank"
                                 rel="noreferrer"
                                 className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 font-bold rounded-lg text-xs transition-all inline-flex items-center gap-1"
@@ -14926,15 +16071,18 @@ AI Verse Competition Platform • Faculty Review Engine
                 <div className="flex items-center bg-blue-950/60 p-1 rounded-xl border border-white/15">
                   <button
                     type="button"
-                    onClick={() => setTicketTab("distribution")}
+                    onClick={() => setTicketTab("studio")}
                     className={`px-3 sm:px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
-                      ticketTab === "distribution"
+                      ticketTab === "studio"
                         ? "bg-blue-600 text-white shadow-xs"
                         : "text-blue-200 hover:text-white"
                     }`}
                   >
-                    <Mail className="w-3.5 h-3.5" />
-                    <span>Email Dispatch</span>
+                    <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                    <span>Design Studio</span>
+                    {(ticketCustomTemplateUrl || eventAccessEvent?.ticketDesign?.bgPreview) && (
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+                    )}
                   </button>
                   <button
                     type="button"
@@ -14947,6 +16095,18 @@ AI Verse Competition Platform • Faculty Review Engine
                   >
                     <Ticket className="w-3.5 h-3.5" />
                     <span>Pass Preview</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setTicketTab("distribution")}
+                    className={`px-3 sm:px-4 py-1.5 rounded-lg text-xs font-bold transition-all flex items-center gap-1.5 cursor-pointer ${
+                      ticketTab === "distribution"
+                        ? "bg-blue-600 text-white shadow-xs"
+                        : "text-blue-200 hover:text-white"
+                    }`}
+                  >
+                    <Mail className="w-3.5 h-3.5" />
+                    <span>Email Dispatch</span>
                   </button>
                   <button
                     type="button"
@@ -14994,8 +16154,11 @@ AI Verse Competition Platform • Faculty Review Engine
                         <Users className="w-6 h-6" />
                       </div>
                       <div>
-                        <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Participants</p>
-                        <h4 className="text-xl font-black text-slate-900">{flattenedTicketRecipients.length}</h4>
+                        <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Total Teams</p>
+                        <h4 className="text-xl font-black text-slate-900">{ticketTeams.length}</h4>
+                        <p className="text-[10px] font-bold text-blue-600 mt-0.5">
+                          👥 {totalParticipantsCount} Total Participants
+                        </p>
                       </div>
                     </div>
 
@@ -15006,8 +16169,9 @@ AI Verse Competition Platform • Faculty Review Engine
                       <div>
                         <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Tickets Emailed</p>
                         <h4 className="text-xl font-black text-emerald-600">
-                          {flattenedTicketRecipients.filter(r => r.ticketSent).length}
+                          {ticketTeams.filter(t => t.ticketSent).length}
                         </h4>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Teams Dispatched</p>
                       </div>
                     </div>
 
@@ -15018,8 +16182,9 @@ AI Verse Competition Platform • Faculty Review Engine
                       <div>
                         <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Pending Dispatch</p>
                         <h4 className="text-xl font-black text-amber-600">
-                          {flattenedTicketRecipients.filter(r => !r.ticketSent).length}
+                          {ticketTeams.filter(t => !t.ticketSent).length}
                         </h4>
+                        <p className="text-[10px] text-slate-400 mt-0.5">Teams Awaiting Passes</p>
                       </div>
                     </div>
 
@@ -15061,14 +16226,19 @@ AI Verse Competition Platform • Faculty Review Engine
                       <div className="relative">
                         <select
                           value={ticketAudienceFilter}
-                          onChange={(e) => setTicketAudienceFilter(e.target.value)}
+                          onChange={(e) => handleAudienceFilterChange(e.target.value)}
                           className="appearance-none bg-slate-50 border border-slate-200 rounded-2xl px-4 py-2.5 pr-9 text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500 cursor-pointer shadow-2xs"
                         >
-                          <option value="all">👥 All Participants ({flattenedTicketRecipients.length})</option>
-                          <option value="unsent">⏳ Pending / Unsent Only ({flattenedTicketRecipients.filter(r => !r.ticketSent).length})</option>
-                          <option value="sent">✓ Emailed Tickets Only ({flattenedTicketRecipients.filter(r => r.ticketSent).length})</option>
-                          <option value="leads">👑 Team Leads / Individual ({flattenedTicketRecipients.filter(r => r.isLead).length})</option>
-                          <option value="members">👤 Team Members ({flattenedTicketRecipients.filter(r => !r.isLead).length})</option>
+                          <option value="all">👥 All Members ({ticketTeams.length})</option>
+                          <option value="round_1">
+                            🎯 Only Round One ({ticketTeams.filter(t => (t.currentRound === 1 || !t.currentRound) && !t.isEliminated).length})
+                          </option>
+                          <option value="round_2">
+                            🚀 Only Round Two ({ticketTeams.filter(t => t.currentRound === 2 && !t.isEliminated).length})
+                          </option>
+                          <option value="round_3">
+                            🏆 Only Round Three ({ticketTeams.filter(t => t.currentRound === 3 && !t.isEliminated).length})
+                          </option>
                         </select>
                         <ChevronDown className="w-4 h-4 text-slate-400 absolute right-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
                       </div>
@@ -15082,7 +16252,7 @@ AI Verse Competition Platform • Faculty Review Engine
                           type="text"
                           value={ticketSearchQuery}
                           onChange={(e) => setTicketSearchQuery(e.target.value)}
-                          placeholder="Search student, roll, team..."
+                          placeholder="Search team, lead, roll, member..."
                           className="w-full pl-9 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs font-medium text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs"
                         />
                       </div>
@@ -15090,7 +16260,7 @@ AI Verse Competition Platform • Faculty Review Engine
                       <button
                         type="button"
                         onClick={handleSendTicketsBatch}
-                        disabled={selectedTicketRecipients.length === 0 || isSendingTickets}
+                        disabled={filteredTicketTeams.filter(t => selectedTicketTeams.includes(t.key)).length === 0 || isSendingTickets}
                         className="px-6 py-2.5 bg-gradient-to-r from-blue-600 via-indigo-600 to-indigo-700 hover:from-blue-500 hover:to-indigo-600 active:scale-95 text-white font-black text-xs sm:text-sm rounded-2xl transition-all shadow-md shadow-blue-500/20 flex items-center gap-2 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed border border-blue-400/20 whitespace-nowrap shrink-0"
                       >
                         {isSendingTickets ? (
@@ -15099,7 +16269,15 @@ AI Verse Competition Platform • Faculty Review Engine
                           <Send className="w-4 h-4" />
                         )}
                         <span>
-                          {isSendingTickets ? "Dispatching..." : `Send to Selected (${selectedTicketRecipients.length})`}
+                          {isSendingTickets
+                            ? "Dispatching..."
+                            : ticketAudienceFilter === "round_1"
+                            ? `Send to Round 1 (${filteredTicketTeams.filter(t => selectedTicketTeams.includes(t.key)).length} Teams)`
+                            : ticketAudienceFilter === "round_2"
+                            ? `Send to Round 2 (${filteredTicketTeams.filter(t => selectedTicketTeams.includes(t.key)).length} Teams)`
+                            : ticketAudienceFilter === "round_3"
+                            ? `Send to Round 3 (${filteredTicketTeams.filter(t => selectedTicketTeams.includes(t.key)).length} Teams)`
+                            : `Send to Selected (${filteredTicketTeams.filter(t => selectedTicketTeams.includes(t.key)).length} Teams)`}
                         </span>
                       </button>
                     </div>
@@ -15114,11 +16292,24 @@ AI Verse Competition Platform • Faculty Review Engine
                             <Loader2 className="w-5 h-5 text-blue-300 animate-spin" />
                           </div>
                           <div>
-                            <h4 className="text-sm font-black text-white">
-                              Dispatching Ticket {ticketSendingProgress.current} of {ticketSendingProgress.total}...
+                            <h4 className="text-sm font-black text-white flex items-center gap-2 flex-wrap">
+                              <span>Dispatching Team {ticketSendingProgress.current} of {ticketSendingProgress.total}...</span>
+                              {ticketSendingProgress.batchNumber && ticketSendingProgress.totalBatches && (
+                                <span className="px-2 py-0.5 rounded-full text-[10px] font-black bg-blue-500/30 text-blue-200 border border-blue-400/30">
+                                  Batch {ticketSendingProgress.batchNumber} of {ticketSendingProgress.totalBatches} (9 teams/batch)
+                                </span>
+                              )}
                             </h4>
-                            <p className="text-xs text-blue-200">
-                              Recipient: <strong className="text-white">{ticketSendingProgress.currentName}</strong> ({ticketSendingProgress.currentEmail})
+                            <p className="text-xs text-blue-200 mt-0.5">
+                              {ticketSendingProgress.isRateLimitPause ? (
+                                <span className="text-amber-300 font-bold flex items-center gap-1.5 animate-pulse">
+                                  ⏱️ Resend rate limit safety: Waiting 1.2s before sending next 9 teams...
+                                </span>
+                              ) : (
+                                <>
+                                  Team: <strong className="text-white">{ticketSendingProgress.currentName}</strong> ({ticketSendingProgress.currentEmail})
+                                </>
+                              )}
                             </p>
                           </div>
                         </div>
@@ -15144,22 +16335,22 @@ AI Verse Competition Platform • Faculty Review Engine
                     </div>
                   )}
 
-                  {/* Recipients Table */}
+                  {/* Teams Table */}
                   <div className="bg-white rounded-3xl border border-slate-200/80 shadow-xs overflow-hidden flex-1 flex flex-col">
                     <div className="p-4 bg-slate-50/80 border-b border-slate-200 flex items-center justify-between gap-4">
                       <div className="flex items-center gap-3">
                         <button
                           type="button"
-                          onClick={handleToggleSelectAllTicketRecipients}
+                          onClick={handleToggleSelectAllTicketTeams}
                           className="px-3.5 py-1.5 rounded-xl bg-white border border-slate-200 text-slate-700 hover:bg-slate-100 text-xs font-bold transition-all flex items-center gap-2 cursor-pointer shadow-2xs"
                         >
                           <CheckSquare className="w-3.5 h-3.5 text-blue-600" />
                           <span>
-                            {filteredTicketRecipients.every(r => selectedTicketRecipients.includes(r.key)) ? "Deselect Filtered" : "Select All Filtered"}
+                            {filteredTicketTeams.length > 0 && filteredTicketTeams.every(t => selectedTicketTeams.includes(t.key)) ? "Deselect Filtered" : "Select All Filtered"}
                           </span>
                         </button>
                         <span className="text-xs font-bold text-slate-500">
-                          Showing {filteredTicketRecipients.length} participants ({selectedTicketRecipients.length} selected)
+                          Showing {filteredTicketTeams.length} {ticketAudienceFilter === "round_1" ? "Round 1 " : ticketAudienceFilter === "round_2" ? "Round 2 " : ticketAudienceFilter === "round_3" ? "Round 3 " : ""}teams ({filteredTicketTeams.filter(t => selectedTicketTeams.includes(t.key)).length} selected)
                         </span>
                       </div>
 
@@ -15180,13 +16371,14 @@ AI Verse Competition Platform • Faculty Review Engine
                             <th className="py-3.5 px-4 w-12 text-center">
                               <input
                                 type="checkbox"
-                                checked={filteredTicketRecipients.length > 0 && filteredTicketRecipients.every(r => selectedTicketRecipients.includes(r.key))}
-                                onChange={handleToggleSelectAllTicketRecipients}
+                                checked={filteredTicketTeams.length > 0 && filteredTicketTeams.every(t => selectedTicketTeams.includes(t.key))}
+                                onChange={handleToggleSelectAllTicketTeams}
                                 className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
                               />
                             </th>
-                            <th className="py-3.5 px-4">Participant & Roll No</th>
-                            <th className="py-3.5 px-4">Team / Role</th>
+                            <th className="py-3.5 px-4">Team Name &amp; ID</th>
+                            <th className="py-3.5 px-4">Team Lead / Contact</th>
+                            <th className="py-3.5 px-4">Registered Members</th>
                             <th className="py-3.5 px-4">Email Address</th>
                             <th className="py-3.5 px-4">Payment</th>
                             <th className="py-3.5 px-4">Ticket Status</th>
@@ -15194,21 +16386,21 @@ AI Verse Competition Platform • Faculty Review Engine
                           </tr>
                         </thead>
                         <tbody className="divide-y divide-slate-100 font-medium">
-                          {filteredTicketRecipients.length === 0 ? (
+                          {filteredTicketTeams.length === 0 ? (
                             <tr>
-                              <td colSpan={7} className="text-center py-12 text-slate-400">
+                              <td colSpan={8} className="text-center py-12 text-slate-400">
                                 <Ticket className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-                                <p className="font-bold text-sm text-slate-600">No participants found</p>
+                                <p className="font-bold text-sm text-slate-600">No teams found</p>
                                 <p className="text-xs text-slate-400 mt-0.5">Try clearing filters or search queries.</p>
                               </td>
                             </tr>
                           ) : (
-                            filteredTicketRecipients.map((r) => {
-                              const isSelected = selectedTicketRecipients.includes(r.key);
+                            filteredTicketTeams.map((team) => {
+                              const isSelected = selectedTicketTeams.includes(team.key);
                               return (
                                 <tr
-                                  key={r.key}
-                                  onClick={() => handleToggleSelectTicketRecipient(r.key)}
+                                  key={team.key}
+                                  onClick={() => handleToggleSelectTicketTeam(team.key)}
                                   className={`hover:bg-blue-50/40 transition-colors cursor-pointer ${
                                     isSelected ? "bg-blue-50/20" : ""
                                   }`}
@@ -15217,48 +16409,105 @@ AI Verse Competition Platform • Faculty Review Engine
                                     <input
                                       type="checkbox"
                                       checked={isSelected}
-                                      onChange={() => handleToggleSelectTicketRecipient(r.key)}
+                                      onChange={() => handleToggleSelectTicketTeam(team.key)}
                                       className="w-4 h-4 rounded text-blue-600 focus:ring-blue-500 cursor-pointer"
                                     />
                                   </td>
                                   <td className="py-3.5 px-4">
-                                    <div className="font-black text-slate-900 text-sm">{r.name}</div>
-                                    <div className="text-[11px] text-slate-400 font-mono">
-                                      {r.studentId || "No Student ID"}
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className="font-black text-slate-900 text-sm">{team.teamName}</span>
+                                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                        team.isGroup
+                                          ? "bg-indigo-50 text-indigo-700 border border-indigo-200"
+                                          : "bg-slate-100 text-slate-600"
+                                      }`}>
+                                        {team.isGroup ? `👥 ${team.teamSize} Members` : "👤 Solo"}
+                                      </span>
+                                      {team.isEliminated ? (
+                                        <span className="px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-200">
+                                          Eliminated
+                                        </span>
+                                      ) : (
+                                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider ${
+                                          team.currentRound === 3
+                                            ? "bg-amber-100 text-amber-800 border border-amber-300"
+                                            : team.currentRound === 2
+                                            ? "bg-purple-100 text-purple-800 border border-purple-300"
+                                            : "bg-blue-50 text-blue-700 border border-blue-200"
+                                        }`}>
+                                          Round {team.currentRound || 1}
+                                        </span>
+                                      )}
+                                    </div>
+                                    <div className="text-[10px] text-slate-400 font-mono mt-0.5">
+                                      ID: AIV-{team.regId.slice(-8).toUpperCase()}
                                     </div>
                                   </td>
                                   <td className="py-3.5 px-4">
-                                    <div className="font-bold text-slate-700">
-                                      {r.teamName || "Individual Entry"}
+                                    <div className="font-black text-slate-900 text-sm">{team.leadName}</div>
+                                    <div className="flex items-center gap-1.5 mt-0.5">
+                                      <span className="text-[11px] text-slate-400 font-mono">
+                                        {team.leadStudentId || "No Student ID"}
+                                      </span>
+                                      <span className="px-1.5 py-0.2 rounded text-[9px] font-extrabold uppercase bg-amber-50 text-amber-700 border border-amber-200">
+                                        👑 Lead
+                                      </span>
                                     </div>
-                                    <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold mt-0.5 ${
-                                      r.isLead ? "bg-indigo-50 text-indigo-700 border border-indigo-200" : "bg-slate-100 text-slate-600"
-                                    }`}>
-                                      {r.isLead ? "Team Lead / Registrant" : `Member #${(r.memberIndex || 0) + 1}`}
-                                    </span>
                                   </td>
-                                  <td className="py-3.5 px-4 font-mono text-slate-700">
-                                    {r.email}
+                                  <td className="py-3.5 px-4">
+                                    {team.members && team.members.length > 0 ? (
+                                      <div className="space-y-1 max-w-xs">
+                                        {team.members.map((m: any, mIdx: number) => (
+                                          <div key={mIdx} className="flex items-center gap-1.5 text-xs text-slate-700">
+                                            <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0" />
+                                            <span className="font-bold text-slate-800 truncate max-w-[130px]">{m.name}</span>
+                                            {m.studentId && (
+                                              <span className="font-mono text-[10px] text-slate-400 shrink-0">
+                                                ({m.studentId})
+                                              </span>
+                                            )}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    ) : (
+                                      <span className="text-slate-400 text-xs italic">Solo Participant</span>
+                                    )}
+                                  </td>
+                                  <td className="py-3.5 px-4 font-mono text-slate-700 text-xs">
+                                    <div className="font-semibold text-slate-900">{team.leadEmail || "No Email"}</div>
+                                    {team.leadCollegeEmail && team.leadCollegeEmail !== team.leadEmail && (
+                                      <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                                        🎓 {team.leadCollegeEmail}
+                                      </div>
+                                    )}
+                                    {team.leadPersonalEmail && team.leadPersonalEmail !== team.leadEmail && (
+                                      <div className="text-[11px] text-slate-500 font-mono mt-0.5">
+                                        ✉️ {team.leadPersonalEmail}
+                                      </div>
+                                    )}
+                                    <span className="text-[10px] font-sans font-bold text-amber-600 block mt-0.5">
+                                      👑 Team Lead Mail Only
+                                    </span>
                                   </td>
                                   <td className="py-3.5 px-4">
                                     <span className={`px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider ${
-                                      r.paymentStatus === "Confirmed" || r.paymentStatus === "Free"
+                                      team.paymentStatus === "Confirmed" || team.paymentStatus === "Free"
                                         ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
                                         : "bg-amber-50 text-amber-700 border border-amber-200"
                                     }`}>
-                                      {r.paymentStatus || "Confirmed"}
+                                      {team.paymentStatus || "Confirmed"}
                                     </span>
                                   </td>
                                   <td className="py-3.5 px-4">
-                                    {r.ticketSent ? (
+                                    {team.ticketSent ? (
                                       <div className="space-y-0.5">
                                         <span className="px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-200 inline-flex items-center gap-1">
                                           <CheckCircle2 className="w-3 h-3" />
                                           <span>Emailed</span>
                                         </span>
-                                        {r.ticketSentAt && (
+                                        {team.ticketSentAt && (
                                           <p className="text-[10px] text-slate-400 font-mono">
-                                            {new Date(r.ticketSentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                                            {new Date(team.ticketSentAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                                           </p>
                                         )}
                                       </div>
@@ -15274,10 +16523,11 @@ AI Verse Competition Platform • Faculty Review Engine
                                       <button
                                         type="button"
                                         onClick={() => {
-                                          setSelectedPreviewTicket(r);
+                                          setSelectedPreviewTicket(team);
+                                          setPreviewMemberIdx(-1);
                                           setTicketTab("preview");
                                         }}
-                                        className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-all cursor-pointer flex items-center gap-1"
+                                        className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold rounded-xl text-xs transition-all cursor-pointer flex items-center gap-1 shadow-2xs"
                                         title="Preview Ticket Pass"
                                       >
                                         <Eye className="w-3.5 h-3.5" />
@@ -15285,9 +16535,9 @@ AI Verse Competition Platform • Faculty Review Engine
                                       </button>
                                       <button
                                         type="button"
-                                        onClick={() => handleSendSingleTicketEmail(r)}
+                                        onClick={() => handleSendSingleTicketEmail(team)}
                                         className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-600 hover:text-white font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 cursor-pointer shadow-2xs"
-                                        title="Dispatch ticket to this participant"
+                                        title="Dispatch ticket passes to this team"
                                       >
                                         <Send className="w-3.5 h-3.5" />
                                         <span>Send</span>
@@ -15305,130 +16555,988 @@ AI Verse Competition Platform • Faculty Review Engine
                 </div>
               )}
 
-              {/* TAB 2: LIVE PASS PREVIEW */}
-              {ticketTab === "preview" && (
-                <div className="max-w-3xl mx-auto space-y-6">
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <h3 className="text-lg font-black text-slate-900">Live Entry Pass Preview</h3>
-                      <p className="text-xs text-slate-500">
-                        Inspecting pass design for: <strong className="text-blue-600">{selectedPreviewTicket?.name || "Participant"}</strong>
-                      </p>
+              {/* TAB: CUSTOM DESIGN STUDIO */}
+              {ticketTab === "studio" && (
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 flex-1 text-left">
+                  {/* Left Form: Parameters & Template Uploader (6 cols) */}
+                  <div className="lg:col-span-6 bg-white p-6 sm:p-7 rounded-3xl border border-slate-200/80 shadow-xs space-y-6 text-left overflow-y-auto max-h-[820px] relative">
+                    
+                    {/* Sticky Header & Save Action */}
+                    <div className="sticky top-0 bg-white/95 backdrop-blur-md z-20 pb-4 border-b border-slate-100 space-y-3 pt-1 -mx-2 px-2">
+                      <div className="flex items-center justify-between flex-wrap gap-2">
+                        <div>
+                          <h3 className="text-lg font-black text-slate-900 flex items-center gap-2">
+                            <Sparkles className="w-5 h-5 text-blue-600" />
+                            <span>Ticket Design Studio</span>
+                          </h3>
+                          <p className="text-xs text-slate-500 mt-0.5">
+                            Upload your custom Canva/graphic design and adjust live QR code &amp; attendee stamping.
+                          </p>
+                        </div>
+
+                        <button
+                          type="button"
+                          onClick={handleSaveTicketDesignConfig}
+                          disabled={isSavingTicketTemplate}
+                          className="px-4 py-2.5 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-extrabold rounded-xl text-xs flex items-center gap-2 shadow-md shadow-blue-500/20 cursor-pointer disabled:opacity-50 transition-all active:scale-95"
+                          title="Save custom ticket design permanently"
+                        >
+                          {isSavingTicketTemplate ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5 text-amber-300" />}
+                          <span>{isSavingTicketTemplate ? "Saving..." : "Save Design"}</span>
+                        </button>
+                      </div>
+
+                      {ticketTemplateSaveSuccess && (
+                        <div className="p-3 bg-emerald-50 border border-emerald-200 text-emerald-800 rounded-xl text-xs font-bold flex items-center gap-2 animate-in fade-in">
+                          <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                          <span>{ticketTemplateSaveSuccess}</span>
+                        </div>
+                      )}
                     </div>
 
-                    <div className="flex items-center gap-3">
-                      <select
-                        value={selectedPreviewTicket?.key || ""}
-                        onChange={(e) => {
-                          const target = flattenedTicketRecipients.find(r => r.key === e.target.value);
-                          if (target) setSelectedPreviewTicket(target);
-                        }}
-                        className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-700 shadow-2xs"
-                      >
-                        {flattenedTicketRecipients.map(r => (
-                          <option key={r.key} value={r.key}>
-                            {r.name} ({r.teamName || "Individual"})
-                          </option>
-                        ))}
-                      </select>
+                    {/* 🖼️ 1. TEMPLATE UPLOAD DROPZONE */}
+                    <div className="space-y-4 p-4 rounded-2xl bg-blue-50/40 border border-blue-100/80">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <Upload className="w-4 h-4 text-blue-600" />
+                          <span className="font-extrabold text-slate-800 text-xs uppercase tracking-wider">
+                            Upload Custom Ticket Design
+                          </span>
+                        </div>
 
-                      {selectedPreviewTicket && (
-                        <a
-                          href={`/ticket/${selectedPreviewTicket.regId}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                        <button
+                          type="button"
+                          onClick={handleDownloadBlankTicketGuide}
+                          className="text-[11px] font-bold text-blue-600 hover:text-blue-800 hover:underline flex items-center gap-1 cursor-pointer"
+                          title="Download a 1600x800 PNG canvas template guide"
                         >
-                          <span>Open Live Web Pass</span>
-                          <ExternalLink className="w-3.5 h-3.5" />
-                        </a>
+                          <Download className="w-3 h-3" />
+                          <span>Canva Guide (1600×800)</span>
+                        </button>
+                      </div>
+
+                      {/* Hidden file input */}
+                      <input
+                        ref={ticketFileInputRef}
+                        type="file"
+                        accept="image/png, image/jpeg, image/jpg, image/webp"
+                        onChange={handleTicketTemplateUpload}
+                        className="hidden"
+                      />
+
+                      {(ticketCustomTemplateUrl || eventAccessEvent?.ticketDesign?.bgPreview) ? (
+                        <div className="bg-white p-3.5 rounded-2xl border border-blue-200/80 shadow-2xs flex items-center gap-4">
+                          <img
+                            src={ticketCustomTemplateUrl || eventAccessEvent?.ticketDesign?.bgPreview}
+                            alt="Uploaded Template Preview"
+                            className="w-24 h-14 object-cover rounded-xl border border-slate-200 shadow-inner shrink-0"
+                          />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-xs font-extrabold text-slate-900 truncate">
+                              {ticketCustomTemplateFilename || eventAccessEvent?.ticketDesign?.bgFilename || "Custom Ticket Template"}
+                            </p>
+                            <p className="text-[11px] font-semibold text-emerald-600 flex items-center gap-1 mt-0.5">
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>Custom design loaded</span>
+                            </p>
+                          </div>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              type="button"
+                              onClick={() => ticketFileInputRef.current?.click()}
+                              className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 font-bold rounded-xl text-xs transition-all cursor-pointer"
+                            >
+                              Change
+                            </button>
+                            <button
+                              type="button"
+                              onClick={handleRemoveTicketTemplate}
+                              className="p-1.5 text-slate-400 hover:text-rose-600 hover:bg-rose-50 rounded-xl transition-all cursor-pointer"
+                              title="Remove template"
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div
+                          onClick={() => ticketFileInputRef.current?.click()}
+                          className="border-2 border-dashed border-blue-300 hover:border-blue-500 hover:bg-blue-50/60 transition-all rounded-2xl p-6 text-center cursor-pointer space-y-2 bg-white/70"
+                        >
+                          <div className="w-12 h-12 rounded-2xl bg-blue-100 text-blue-600 mx-auto flex items-center justify-center">
+                            <FileUp className="w-6 h-6" />
+                          </div>
+                          <div>
+                            <p className="text-xs font-black text-slate-900">Click to upload your custom ticket design</p>
+                            <p className="text-[11px] font-medium text-slate-500 mt-0.5">PNG, JPG, WEBP up to 10MB (Standard 1600 × 800 px recommended)</p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 🔲 2. QR CODE CALIBRATION */}
+                    <div className="space-y-4 p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <QrCode className="w-4 h-4 text-indigo-600" />
+                          <span className="font-extrabold text-slate-800 text-xs uppercase tracking-wider">
+                            QR Code Placement &amp; Style
+                          </span>
+                        </div>
+                        <span className="text-[11px] font-mono text-indigo-600 font-bold">
+                          X: {ticketQrX}% • Y: {ticketQrY}%
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4">
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                            <span>Horizontal (X)</span>
+                            <span className="font-mono text-slate-400">{ticketQrX}%</span>
+                          </label>
+                          <input
+                            type="range"
+                            min={5}
+                            max={95}
+                            value={ticketQrX}
+                            onChange={(e) => setTicketQrX(Number(e.target.value))}
+                            className="w-full mt-1.5 accent-blue-600 cursor-pointer"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                            <span>Vertical (Y)</span>
+                            <span className="font-mono text-slate-400">{ticketQrY}%</span>
+                          </label>
+                          <input
+                            type="range"
+                            min={5}
+                            max={95}
+                            value={ticketQrY}
+                            onChange={(e) => setTicketQrY(Number(e.target.value))}
+                            className="w-full mt-1.5 accent-blue-600 cursor-pointer"
+                          />
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-4 pt-1">
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                            <span>QR Size (% Width)</span>
+                            <span className="font-mono text-slate-400">{ticketQrWidthPercent}%</span>
+                          </label>
+                          <input
+                            type="range"
+                            min={12}
+                            max={40}
+                            value={ticketQrWidthPercent}
+                            onChange={(e) => setTicketQrWidthPercent(Number(e.target.value))}
+                            className="w-full mt-1.5 accent-blue-600 cursor-pointer"
+                          />
+                        </div>
+
+                        <div>
+                          <label className="text-[11px] font-bold text-slate-600 block mb-1.5">
+                            Card Background Style
+                          </label>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            {[
+                              { id: "white", label: "White" },
+                              { id: "glow", label: "Glow" },
+                              { id: "transparent", label: "None" },
+                            ].map(opt => (
+                              <button
+                                key={opt.id}
+                                type="button"
+                                onClick={() => setTicketQrBg(opt.id as any)}
+                                className={`px-2 py-1.5 rounded-lg text-[10px] font-black uppercase transition-all cursor-pointer ${
+                                  ticketQrBg === opt.id
+                                    ? "bg-blue-600 text-white shadow-xs"
+                                    : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-100"
+                                }`}
+                              >
+                                {opt.label}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* 👤 3. ATTENDEE NAME OVERLAY */}
+                    <div className="space-y-4 p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={ticketShowAttendeeName}
+                            onChange={(e) => setTicketShowAttendeeName(e.target.checked)}
+                            className="w-4 h-4 rounded text-blue-600 accent-blue-600"
+                          />
+                          <span className="font-extrabold text-slate-800 text-xs uppercase tracking-wider">
+                            Stamp Attendee Name
+                          </span>
+                        </label>
+                        <span className="text-[11px] font-mono text-blue-600 font-bold">
+                          {ticketNameFontSize}px
+                        </span>
+                      </div>
+
+                      {ticketShowAttendeeName && (
+                        <div className="space-y-3 pt-2">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                                <span>Horizontal (X)</span>
+                                <span className="font-mono text-slate-400">{ticketNamePosX}%</span>
+                              </label>
+                              <input
+                                type="range"
+                                min={2}
+                                max={95}
+                                value={ticketNamePosX}
+                                onChange={(e) => setTicketNamePosX(Number(e.target.value))}
+                                className="w-full mt-1.5 accent-blue-600 cursor-pointer"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                                <span>Vertical (Y)</span>
+                                <span className="font-mono text-slate-400">{ticketNamePosY}%</span>
+                              </label>
+                              <input
+                                type="range"
+                                min={2}
+                                max={95}
+                                value={ticketNamePosY}
+                                onChange={(e) => setTicketNamePosY(Number(e.target.value))}
+                                className="w-full mt-1.5 accent-blue-600 cursor-pointer"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                                <span>Font Size</span>
+                                <span className="font-mono text-slate-400">{ticketNameFontSize}px</span>
+                              </label>
+                              <input
+                                type="range"
+                                min={14}
+                                max={48}
+                                value={ticketNameFontSize}
+                                onChange={(e) => setTicketNameFontSize(Number(e.target.value))}
+                                className="w-full mt-1.5 accent-blue-600 cursor-pointer"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                                <span>Color</span>
+                                <span className="font-mono text-slate-400">{ticketNameColor}</span>
+                              </label>
+                              <div className="flex items-center gap-2 mt-1.5">
+                                <input
+                                  type="color"
+                                  value={ticketNameColor}
+                                  onChange={(e) => setTicketNameColor(e.target.value)}
+                                  className="w-8 h-8 rounded-lg border border-slate-200 cursor-pointer p-0.5"
+                                />
+                                <div className="flex items-center gap-1">
+                                  {["#FFFFFF", "#0F172A", "#FBBF24", "#38BDF8"].map(c => (
+                                    <button
+                                      key={c}
+                                      type="button"
+                                      onClick={() => setTicketNameColor(c)}
+                                      className="w-6 h-6 rounded-md border border-slate-300 cursor-pointer"
+                                      style={{ backgroundColor: c }}
+                                      title={c}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 👥 4. TEAM NAME OVERLAY */}
+                    <div className="space-y-4 p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={ticketShowTeamName}
+                            onChange={(e) => setTicketShowTeamName(e.target.checked)}
+                            className="w-4 h-4 rounded text-blue-600 accent-blue-600"
+                          />
+                          <span className="font-extrabold text-slate-800 text-xs uppercase tracking-wider">
+                            Stamp Team Name / Role
+                          </span>
+                        </label>
+                        <span className="text-[11px] font-mono text-blue-600 font-bold">
+                          {ticketTeamFontSize}px
+                        </span>
+                      </div>
+
+                      {ticketShowTeamName && (
+                        <div className="space-y-3 pt-2">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                                <span>Horizontal (X)</span>
+                                <span className="font-mono text-slate-400">{ticketTeamPosX}%</span>
+                              </label>
+                              <input
+                                type="range"
+                                min={2}
+                                max={95}
+                                value={ticketTeamPosX}
+                                onChange={(e) => setTicketTeamPosX(Number(e.target.value))}
+                                className="w-full mt-1.5 accent-blue-600 cursor-pointer"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                                <span>Vertical (Y)</span>
+                                <span className="font-mono text-slate-400">{ticketTeamPosY}%</span>
+                              </label>
+                              <input
+                                type="range"
+                                min={2}
+                                max={95}
+                                value={ticketTeamPosY}
+                                onChange={(e) => setTicketTeamPosY(Number(e.target.value))}
+                                className="w-full mt-1.5 accent-blue-600 cursor-pointer"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                                <span>Font Size</span>
+                                <span className="font-mono text-slate-400">{ticketTeamFontSize}px</span>
+                              </label>
+                              <input
+                                type="range"
+                                min={10}
+                                max={32}
+                                value={ticketTeamFontSize}
+                                onChange={(e) => setTicketTeamFontSize(Number(e.target.value))}
+                                className="w-full mt-1.5 accent-blue-600 cursor-pointer"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                                <span>Color</span>
+                                <span className="font-mono text-slate-400">{ticketTeamColor}</span>
+                              </label>
+                              <div className="flex items-center gap-2 mt-1.5">
+                                <input
+                                  type="color"
+                                  value={ticketTeamColor}
+                                  onChange={(e) => setTicketTeamColor(e.target.value)}
+                                  className="w-8 h-8 rounded-lg border border-slate-200 cursor-pointer p-0.5"
+                                />
+                                <div className="flex items-center gap-1">
+                                  {["#93C5FD", "#FFFFFF", "#64748B", "#F59E0B"].map(c => (
+                                    <button
+                                      key={c}
+                                      type="button"
+                                      onClick={() => setTicketTeamColor(c)}
+                                      className="w-6 h-6 rounded-md border border-slate-300 cursor-pointer"
+                                      style={{ backgroundColor: c }}
+                                      title={c}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    {/* 🪪 5. ROLL NO / STUDENT ID OVERLAY */}
+                    <div className="space-y-4 p-4 rounded-2xl bg-slate-50 border border-slate-200">
+                      <div className="flex items-center justify-between">
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <input
+                            type="checkbox"
+                            checked={ticketShowRollNo}
+                            onChange={(e) => setTicketShowRollNo(e.target.checked)}
+                            className="w-4 h-4 rounded text-blue-600 accent-blue-600"
+                          />
+                          <span className="font-extrabold text-slate-800 text-xs uppercase tracking-wider">
+                            Stamp Roll No / Student ID
+                          </span>
+                        </label>
+                        <span className="text-[11px] font-mono text-blue-600 font-bold">
+                          {ticketRollFontSize}px
+                        </span>
+                      </div>
+
+                      {ticketShowRollNo && (
+                        <div className="space-y-3 pt-2">
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                                <span>Horizontal (X)</span>
+                                <span className="font-mono text-slate-400">{ticketRollPosX}%</span>
+                              </label>
+                              <input
+                                type="range"
+                                min={2}
+                                max={95}
+                                value={ticketRollPosX}
+                                onChange={(e) => setTicketRollPosX(Number(e.target.value))}
+                                className="w-full mt-1.5 accent-blue-600 cursor-pointer"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                                <span>Vertical (Y)</span>
+                                <span className="font-mono text-slate-400">{ticketRollPosY}%</span>
+                              </label>
+                              <input
+                                type="range"
+                                min={2}
+                                max={95}
+                                value={ticketRollPosY}
+                                onChange={(e) => setTicketRollPosY(Number(e.target.value))}
+                                className="w-full mt-1.5 accent-blue-600 cursor-pointer"
+                              />
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-4">
+                            <div>
+                              <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                                <span>Font Size</span>
+                                <span className="font-mono text-slate-400">{ticketRollFontSize}px</span>
+                              </label>
+                              <input
+                                type="range"
+                                min={10}
+                                max={26}
+                                value={ticketRollFontSize}
+                                onChange={(e) => setTicketRollFontSize(Number(e.target.value))}
+                                className="w-full mt-1.5 accent-blue-600 cursor-pointer"
+                              />
+                            </div>
+
+                            <div>
+                              <label className="text-[11px] font-bold text-slate-600 flex justify-between">
+                                <span>Color</span>
+                                <span className="font-mono text-slate-400">{ticketRollColor}</span>
+                              </label>
+                              <div className="flex items-center gap-2 mt-1.5">
+                                <input
+                                  type="color"
+                                  value={ticketRollColor}
+                                  onChange={(e) => setTicketRollColor(e.target.value)}
+                                  className="w-8 h-8 rounded-lg border border-slate-200 cursor-pointer p-0.5"
+                                />
+                                <div className="flex items-center gap-1">
+                                  {["#CBD5E1", "#FFFFFF", "#94A3B8", "#0F172A"].map(c => (
+                                    <button
+                                      key={c}
+                                      type="button"
+                                      onClick={() => setTicketRollColor(c)}
+                                      className="w-6 h-6 rounded-md border border-slate-300 cursor-pointer"
+                                      style={{ backgroundColor: c }}
+                                      title={c}
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       )}
                     </div>
                   </div>
 
-                  {/* Render Sleek Ticket Card */}
-                  <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 text-white p-8 rounded-3xl shadow-2xl border border-blue-500/30 relative overflow-hidden space-y-6">
-                    <div className="absolute right-0 top-0 w-80 h-80 bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.15),transparent_70%)] pointer-events-none" />
-
-                    {/* Pass Top Banner */}
-                    <div className="flex items-center justify-between border-b border-white/10 pb-5">
-                      <div className="flex items-center gap-3">
-                        <img src="/ai_verse.png" alt="AI Verse" className="w-10 h-10 rounded-xl object-contain bg-white/10 p-1 border border-white/20" />
-                        <div>
-                          <div className="text-[10px] font-black uppercase tracking-widest text-blue-300">OFFICIAL EVENT PASS</div>
-                          <h4 className="text-xl font-black text-white">{eventAccessEvent?.title || "AI Verse Event"}</h4>
-                        </div>
+                  {/* Right Column: Live Interactive Preview & Test Export (6 cols) */}
+                  <div className="lg:col-span-6 flex flex-col space-y-4">
+                    <div className="bg-white p-5 rounded-3xl border border-slate-200/80 shadow-xs flex items-center justify-between flex-wrap gap-3">
+                      <div>
+                        <h4 className="text-sm font-black text-slate-900 flex items-center gap-2">
+                          <Eye className="w-4 h-4 text-blue-600" />
+                          <span>Interactive Live Studio Preview</span>
+                        </h4>
+                        <p className="text-[11px] text-slate-500 mt-0.5">Real-time visualization of custom ticket layout</p>
                       </div>
 
-                      <span className="px-3.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 rounded-full text-xs font-black uppercase tracking-wider">
-                        ✓ VERIFIED ENTRY
-                      </span>
-                    </div>
+                      <div className="flex items-center gap-2">
+                        <select
+                          value={selectedPreviewTicket?.key || ""}
+                          onChange={(e) => {
+                            const target = ticketTeams.find(t => t.key === e.target.value) || flattenedTicketRecipients.find(r => r.key === e.target.value);
+                            if (target) setSelectedPreviewTicket(target);
+                          }}
+                          className="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 text-xs font-bold text-slate-700 shadow-2xs max-w-[200px] truncate"
+                        >
+                          {ticketTeams.map(t => (
+                            <option key={t.key} value={t.key}>
+                              {t.teamName} (Lead: {t.leadName})
+                            </option>
+                          ))}
+                        </select>
 
-                    {/* Pass Metadata Grid */}
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white/5 p-6 rounded-2xl border border-white/10 backdrop-blur-md">
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">ATTENDEE NAME</p>
-                        <h5 className="text-lg font-black text-white mt-0.5">{selectedPreviewTicket?.name || "Participant Name"}</h5>
-                        <p className="text-xs font-mono text-blue-300">{selectedPreviewTicket?.studentId || "23PA1A0501"}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">TEAM / ROLE</p>
-                        <h5 className="text-lg font-black text-indigo-300 mt-0.5">{selectedPreviewTicket?.teamName || "Individual Participant"}</h5>
-                        <p className="text-xs text-slate-300">{selectedPreviewTicket?.isLead ? "Team Lead / Registrant" : "Team Member"}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">DATE & TIME</p>
-                        <h5 className="text-sm font-bold text-white mt-0.5">{eventAccessEvent?.date || "Upcoming Event"}</h5>
-                        <p className="text-xs text-slate-300">{eventAccessEvent?.time || "10:00 AM IST"}</p>
-                      </div>
-
-                      <div>
-                        <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">VENUE / LOCATION</p>
-                        <h5 className="text-sm font-bold text-white mt-0.5">{eventAccessEvent?.location || "Main Campus Auditorium"}</h5>
-                        <p className="text-xs text-slate-300">Vishnu Institute of Technology</p>
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadSampleTicketPng(selectedPreviewTicket)}
+                          className="px-3 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-extrabold rounded-xl text-xs flex items-center gap-1.5 transition-all shadow-xs cursor-pointer"
+                          title="Download test PNG"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Export PNG</span>
+                        </button>
                       </div>
                     </div>
 
-                    {/* QR Code Bar */}
-                    <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2 border-t border-white/10">
-                      <div className="flex items-center gap-4">
-                        <div className="w-16 h-16 bg-white rounded-xl p-1.5 flex items-center justify-center shrink-0">
-                          <QrCode className="w-full h-full text-slate-900" />
-                        </div>
-                        <div>
-                          <p className="text-[11px] font-bold text-slate-300">Show this QR code at campus entry check-in.</p>
-                          <p className="text-[10px] font-mono text-blue-300">PASS ID: {selectedPreviewTicket?.regId ? `AIV-TKT-${selectedPreviewTicket.regId.slice(-8).toUpperCase()}` : "AIV-TKT-SAMPLE"}</p>
-                        </div>
-                      </div>
-
-                      <div className="text-right">
-                        {eventAccessEvent?.whatsappGroupUrl && (
-                          <a
-                            href={eventAccessEvent.whatsappGroupUrl}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-all inline-flex items-center gap-2 shadow-xs"
+                    {/* Render the pass preview card */}
+                    <div className="w-full rounded-3xl overflow-hidden shadow-2xl border border-slate-700 bg-slate-950 relative select-none">
+                      {(ticketCustomTemplateUrl || eventAccessEvent?.ticketDesign?.bgPreview) ? (
+                        <img
+                          src={ticketCustomTemplateUrl || eventAccessEvent?.ticketDesign?.bgPreview}
+                          alt="Ticket Template Preview"
+                          className="w-full h-auto object-contain block"
+                        />
+                      ) : (
+                        <div className="w-full aspect-[2/1] bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 flex flex-col items-center justify-center p-8 text-center border border-dashed border-blue-500/30">
+                          <FileUp className="w-12 h-12 text-blue-400 mb-3 opacity-60" />
+                          <h5 className="text-base font-black text-white">No Custom Template Uploaded</h5>
+                          <p className="text-xs text-blue-200/70 max-w-sm mt-1">
+                            Upload your ticket graphic on the left or use Canva to build your event boarding pass.
+                          </p>
+                          <button
+                            type="button"
+                            onClick={() => ticketFileInputRef.current?.click()}
+                            className="mt-4 px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-bold rounded-xl text-xs shadow-md transition-all cursor-pointer"
                           >
-                            <MessageSquare className="w-4 h-4" />
-                            <span>Join WhatsApp Group</span>
-                          </a>
-                        )}
+                            Upload Graphic Now
+                          </button>
+                        </div>
+                      )}
+
+                      {/* Dynamic Stamped QR Code */}
+                      <div
+                        className="absolute z-10 transition-all duration-75"
+                        style={{
+                          left: `${ticketQrX}%`,
+                          top: `${ticketQrY}%`,
+                          width: `${ticketQrWidthPercent}%`,
+                          transform: "translate(-50%, -50%)",
+                        }}
+                      >
+                        <div
+                          className={`w-full aspect-square flex flex-col items-center justify-center rounded-2xl shadow-xl transition-all ${
+                            ticketQrBg === "white"
+                              ? "bg-white p-2 text-slate-900 border border-slate-200/80"
+                              : ticketQrBg === "glow"
+                              ? "bg-slate-950/90 backdrop-blur-md p-2 border-2 border-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.35)]"
+                              : "p-0"
+                          }`}
+                        >
+                          <img
+                            src={`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(`https://aiversevitb.in/ticket/${selectedPreviewTicket?.regId || "SAMPLE"}`)}`}
+                            alt="Pass Check-in QR"
+                            className="w-full h-full object-contain rounded-lg block"
+                          />
+                        </div>
                       </div>
+
+                      {/* Attendee Name Overlay */}
+                      {ticketShowAttendeeName && selectedPreviewTicket?.name && (
+                        <div
+                          className="absolute z-10 font-black pointer-events-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] tracking-tight leading-none"
+                          style={{
+                            left: `${ticketNamePosX}%`,
+                            top: `${ticketNamePosY}%`,
+                            transform: "translateY(-50%)",
+                            color: ticketNameColor,
+                            fontSize: `clamp(12px, ${ticketNameFontSize * 0.9}px, 32px)`,
+                          }}
+                        >
+                          {selectedPreviewTicket.name}
+                        </div>
+                      )}
+
+                      {/* Team Name Overlay */}
+                      {ticketShowTeamName && selectedPreviewTicket?.teamName && (
+                        <div
+                          className="absolute z-10 font-extrabold pointer-events-none drop-shadow-[0_2px_3px_rgba(0,0,0,0.8)] leading-none"
+                          style={{
+                            left: `${ticketTeamPosX}%`,
+                            top: `${ticketTeamPosY}%`,
+                            transform: "translateY(-50%)",
+                            color: ticketTeamColor,
+                            fontSize: `clamp(10px, ${ticketTeamFontSize * 0.9}px, 24px)`,
+                          }}
+                        >
+                          {selectedPreviewTicket.teamName}
+                        </div>
+                      )}
+
+                      {/* Roll No Overlay */}
+                      {ticketShowRollNo && selectedPreviewTicket?.studentId && (
+                        <div
+                          className="absolute z-10 font-mono font-bold pointer-events-none drop-shadow-[0_2px_3px_rgba(0,0,0,0.8)] leading-none"
+                          style={{
+                            left: `${ticketRollPosX}%`,
+                            top: `${ticketRollPosY}%`,
+                            transform: "translateY(-50%)",
+                            color: ticketRollColor,
+                            fontSize: `clamp(9px, ${ticketRollFontSize * 0.9}px, 18px)`,
+                          }}
+                        >
+                          {selectedPreviewTicket.studentId}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="p-4 bg-blue-50/60 border border-blue-100 rounded-2xl text-xs text-blue-900 space-y-1">
+                      <p className="font-extrabold flex items-center gap-1.5">
+                        <Info className="w-4 h-4 text-blue-600" />
+                        <span>How Custom Ticket Stamping Works:</span>
+                      </p>
+                      <p className="text-[11px] text-blue-800/80">
+                        When you dispatch tickets, the system draws your high-resolution uploaded template, stamps each recipient's personal QR code and details with mathematical precision, and delivers the customized ticket PNG as an email attachment &amp; web pass.
+                      </p>
                     </div>
                   </div>
                 </div>
               )}
+
+              {/* TAB 2: LIVE PASS PREVIEW */}
+              {ticketTab === "preview" && (() => {
+                const activePreviewAttendee = (previewMemberIdx >= 0 && selectedPreviewTicket?.members?.[previewMemberIdx])
+                  ? {
+                      name: selectedPreviewTicket.members[previewMemberIdx].name,
+                      teamName: selectedPreviewTicket.teamName,
+                      studentId: selectedPreviewTicket.members[previewMemberIdx].studentId,
+                      regId: selectedPreviewTicket.regId,
+                      role: `Team Member #${previewMemberIdx + 1}`,
+                      isLead: false,
+                    }
+                  : {
+                      name: selectedPreviewTicket?.leadName || selectedPreviewTicket?.name || "Participant Name",
+                      teamName: selectedPreviewTicket?.teamName || "Individual Entry",
+                      studentId: selectedPreviewTicket?.leadStudentId || selectedPreviewTicket?.studentId || "",
+                      regId: selectedPreviewTicket?.regId || "SAMPLE",
+                      role: "Team Lead / Registrant",
+                      isLead: true,
+                    };
+
+                return (
+                  <div className="max-w-3xl mx-auto space-y-6">
+                    <div className="flex items-center justify-between flex-wrap gap-3">
+                      <div>
+                        <h3 className="text-lg font-black text-slate-900">Live Entry Pass Preview</h3>
+                        <p className="text-xs text-slate-500">
+                          Inspecting pass design for: <strong className="text-blue-600">{activePreviewAttendee.name}</strong> ({activePreviewAttendee.role} • {activePreviewAttendee.teamName})
+                        </p>
+                      </div>
+
+                      <div className="flex items-center gap-2.5">
+                        <select
+                          value={selectedPreviewTicket?.key || ""}
+                          onChange={(e) => {
+                            const target = ticketTeams.find(t => t.key === e.target.value) || flattenedTicketRecipients.find(r => r.key === e.target.value);
+                            if (target) {
+                              setSelectedPreviewTicket(target);
+                              setPreviewMemberIdx(-1);
+                            }
+                          }}
+                          className="bg-white border border-slate-200 rounded-xl px-3 py-1.5 text-xs font-bold text-slate-700 shadow-2xs max-w-[240px] truncate"
+                        >
+                          {ticketTeams.map(t => (
+                            <option key={t.key} value={t.key}>
+                              {t.teamName} ({t.isGroup ? `${t.teamSize} Members` : "Solo"})
+                            </option>
+                          ))}
+                        </select>
+
+                        <button
+                          type="button"
+                          onClick={() => handleDownloadSampleTicketPng(activePreviewAttendee)}
+                          className="px-3.5 py-1.5 bg-slate-900 hover:bg-slate-800 text-white font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                          title="Download rendered pass image"
+                        >
+                          <Download className="w-3.5 h-3.5" />
+                          <span>Download PNG</span>
+                        </button>
+
+                        {selectedPreviewTicket && (
+                          <a
+                            href={`/ticket/${selectedPreviewTicket.regId}`}
+                            target="_blank"
+                            rel="noreferrer"
+                            className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 shadow-xs cursor-pointer"
+                          >
+                            <span>Open Live Web Pass</span>
+                            <ExternalLink className="w-3.5 h-3.5" />
+                          </a>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Member Switcher Pills (Allows inspecting any team member's pass) */}
+                    {selectedPreviewTicket?.members && selectedPreviewTicket.members.length > 0 && (
+                      <div className="flex items-center gap-1.5 flex-wrap bg-white p-2.5 rounded-2xl border border-slate-200 shadow-2xs">
+                        <span className="text-[11px] font-bold text-slate-400 pl-1 mr-1">Preview Pass For:</span>
+                        <button
+                          type="button"
+                          onClick={() => setPreviewMemberIdx(-1)}
+                          className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                            previewMemberIdx === -1
+                              ? "bg-blue-600 text-white shadow-xs"
+                              : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                          }`}
+                        >
+                          👑 {selectedPreviewTicket.leadName} (Lead)
+                        </button>
+                        {selectedPreviewTicket.members.map((m: any, mIdx: number) => (
+                          <button
+                            key={mIdx}
+                            type="button"
+                            onClick={() => setPreviewMemberIdx(mIdx)}
+                            className={`px-3 py-1 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                              previewMemberIdx === mIdx
+                                ? "bg-blue-600 text-white shadow-xs"
+                                : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                            }`}
+                          >
+                            👤 {m.name}
+                          </button>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* CUSTOM TEMPLATE OR DEFAULT PASS RENDER */}
+                    {(ticketCustomTemplateUrl || eventAccessEvent?.ticketDesign?.bgPreview) ? (
+                      <div className="space-y-4">
+                        <div className="p-3.5 bg-emerald-50 border border-emerald-200 rounded-2xl flex items-center justify-between flex-wrap gap-2 text-xs">
+                          <div className="flex items-center gap-2 text-emerald-800 font-extrabold">
+                            <Sparkles className="w-4 h-4 text-emerald-600" />
+                            <span>Custom Event Ticket Design is ACTIVE for this event.</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setTicketTab("studio")}
+                            className="px-3 py-1 bg-white hover:bg-slate-50 text-slate-700 font-bold rounded-lg border border-slate-200 shadow-2xs cursor-pointer flex items-center gap-1.5"
+                          >
+                            <Settings2 className="w-3.5 h-3.5 text-blue-600" />
+                            <span>Edit Layout in Studio</span>
+                          </button>
+                        </div>
+
+                        {/* Custom Render Card */}
+                        <div className="w-full rounded-3xl overflow-hidden shadow-2xl border border-slate-700 bg-slate-950 relative select-none group">
+                          {/* Background Graphic */}
+                          <img
+                            src={ticketCustomTemplateUrl || eventAccessEvent?.ticketDesign?.bgPreview}
+                            alt="Custom Event Ticket"
+                            className="w-full h-auto object-contain block"
+                          />
+
+                          {/* Dynamic Stamped QR Code */}
+                          <div
+                            className="absolute z-10 transition-all duration-75"
+                            style={{
+                              left: `${ticketQrX}%`,
+                              top: `${ticketQrY}%`,
+                              width: `${ticketQrWidthPercent}%`,
+                              transform: "translate(-50%, -50%)",
+                            }}
+                          >
+                            <div
+                              className={`w-full aspect-square flex flex-col items-center justify-center rounded-2xl shadow-xl transition-all ${
+                                ticketQrBg === "white"
+                                  ? "bg-white p-2 text-slate-900 border border-slate-200/80"
+                                  : ticketQrBg === "glow"
+                                  ? "bg-slate-950/90 backdrop-blur-md p-2 border-2 border-cyan-400 shadow-[0_0_20px_rgba(34,211,238,0.35)]"
+                                  : "p-0"
+                              }`}
+                            >
+                              <img
+                                src={`https://api.qrserver.com/v1/create-qr-code/?size=400x400&data=${encodeURIComponent(`https://aiversevitb.in/ticket/${activePreviewAttendee?.regId || "SAMPLE"}`)}`}
+                                alt="Pass Check-in QR"
+                                className="w-full h-full object-contain rounded-lg block"
+                              />
+                            </div>
+                          </div>
+
+                          {/* Attendee Name Overlay */}
+                          {ticketShowAttendeeName && activePreviewAttendee?.name && (
+                            <div
+                              className="absolute z-10 font-black pointer-events-none drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] tracking-tight leading-none"
+                              style={{
+                                left: `${ticketNamePosX}%`,
+                                top: `${ticketNamePosY}%`,
+                                transform: "translateY(-50%)",
+                                color: ticketNameColor,
+                                fontSize: `clamp(12px, ${ticketNameFontSize * 0.9}px, 32px)`,
+                              }}
+                            >
+                              {activePreviewAttendee.name}
+                            </div>
+                          )}
+
+                          {/* Team Name Overlay */}
+                          {ticketShowTeamName && activePreviewAttendee?.teamName && (
+                            <div
+                              className="absolute z-10 font-extrabold pointer-events-none drop-shadow-[0_2px_3px_rgba(0,0,0,0.8)] leading-none"
+                              style={{
+                                left: `${ticketTeamPosX}%`,
+                                top: `${ticketTeamPosY}%`,
+                                transform: "translateY(-50%)",
+                                color: ticketTeamColor,
+                                fontSize: `clamp(10px, ${ticketTeamFontSize * 0.9}px, 24px)`,
+                              }}
+                            >
+                              {activePreviewAttendee.teamName}
+                            </div>
+                          )}
+
+                          {/* Roll No Overlay */}
+                          {ticketShowRollNo && activePreviewAttendee?.studentId && (
+                            <div
+                              className="absolute z-10 font-mono font-bold pointer-events-none drop-shadow-[0_2px_3px_rgba(0,0,0,0.8)] leading-none"
+                              style={{
+                                left: `${ticketRollPosX}%`,
+                                top: `${ticketRollPosY}%`,
+                                transform: "translateY(-50%)",
+                                color: ticketRollColor,
+                                fontSize: `clamp(9px, ${ticketRollFontSize * 0.9}px, 18px)`,
+                              }}
+                            >
+                              {activePreviewAttendee.studentId}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="space-y-4">
+                        {/* Notice Banner */}
+                        <div className="p-4 bg-gradient-to-r from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl flex items-center justify-between flex-wrap gap-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-10 h-10 rounded-xl bg-blue-600 text-white flex items-center justify-center shrink-0">
+                              <Sparkles className="w-5 h-5 text-amber-300" />
+                            </div>
+                            <div>
+                              <h4 className="text-xs font-black text-slate-900">Custom Ticket Design Not Configured</h4>
+                              <p className="text-[11px] text-slate-600 mt-0.5">
+                                Showing the standard default boarding pass. Upload your Canva or graphic design in the <strong>Design Studio</strong> to activate custom tickets!
+                              </p>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setTicketTab("studio")}
+                            className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-xs rounded-xl shadow-xs transition-all flex items-center gap-1.5 cursor-pointer"
+                          >
+                            <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+                            <span>Upload Custom Design</span>
+                          </button>
+                        </div>
+
+                        {/* Render Sleek Default Ticket Card */}
+                        <div className="bg-gradient-to-br from-slate-900 via-blue-950 to-indigo-950 text-white p-8 rounded-3xl shadow-2xl border border-blue-500/30 relative overflow-hidden space-y-6">
+                          <div className="absolute right-0 top-0 w-80 h-80 bg-[radial-gradient(circle_at_top_right,rgba(59,130,246,0.15),transparent_70%)] pointer-events-none" />
+
+                          {/* Pass Top Banner */}
+                          <div className="flex items-center justify-between border-b border-white/10 pb-5">
+                            <div className="flex items-center gap-3">
+                              <img src="/ai_verse.png" alt="AI Verse" className="w-10 h-10 rounded-xl object-contain bg-white/10 p-1 border border-white/20" />
+                              <div>
+                                <div className="text-[10px] font-black uppercase tracking-widest text-blue-300">OFFICIAL EVENT PASS</div>
+                                <h4 className="text-xl font-black text-white">{eventAccessEvent?.title || "AI Verse Event"}</h4>
+                              </div>
+                            </div>
+
+                            <span className="px-3.5 py-1 bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 rounded-full text-xs font-black uppercase tracking-wider">
+                              ✓ VERIFIED ENTRY
+                            </span>
+                          </div>
+
+                          {/* Pass Metadata Grid */}
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 bg-white/5 p-6 rounded-2xl border border-white/10 backdrop-blur-md">
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">ATTENDEE NAME</p>
+                              <h5 className="text-lg font-black text-white mt-0.5">{activePreviewAttendee.name}</h5>
+                              <p className="text-xs font-mono text-blue-300">{activePreviewAttendee.studentId || "N/A"}</p>
+                            </div>
+
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">TEAM / ROLE</p>
+                              <h5 className="text-lg font-black text-indigo-300 mt-0.5">{activePreviewAttendee.teamName}</h5>
+                              <p className="text-xs text-slate-300">{activePreviewAttendee.role}</p>
+                            </div>
+
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">DATE &amp; TIME</p>
+                              <h5 className="text-sm font-bold text-white mt-0.5">{eventAccessEvent?.date || "Upcoming Event"}</h5>
+                              <p className="text-xs text-slate-300">{eventAccessEvent?.time || "10:00 AM IST"}</p>
+                            </div>
+
+                            <div>
+                              <p className="text-[10px] font-black uppercase tracking-wider text-slate-400">VENUE / LOCATION</p>
+                              <h5 className="text-sm font-bold text-white mt-0.5">{eventAccessEvent?.location || "Main Campus Auditorium"}</h5>
+                              <p className="text-xs text-slate-300">Vishnu Institute of Technology</p>
+                            </div>
+                          </div>
+
+                          {/* QR Code Bar */}
+                          <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-2 border-t border-white/10">
+                            <div className="flex items-center gap-4">
+                              <div className="w-16 h-16 bg-white rounded-xl p-1.5 flex items-center justify-center shrink-0">
+                                <QrCode className="w-full h-full text-slate-900" />
+                              </div>
+                              <div>
+                                <p className="text-[11px] font-bold text-slate-300">Show this QR code at campus entry check-in.</p>
+                                <p className="text-[10px] font-mono text-blue-300">PASS ID: {activePreviewAttendee?.regId ? `AIV-TKT-${activePreviewAttendee.regId.slice(-8).toUpperCase()}` : "AIV-TKT-SAMPLE"}</p>
+                              </div>
+                            </div>
+
+                            <div className="text-right">
+                              {eventAccessEvent?.whatsappGroupUrl && (
+                                <a
+                                  href={eventAccessEvent.whatsappGroupUrl}
+                                  target="_blank"
+                                  rel="noreferrer"
+                                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold rounded-xl text-xs transition-all inline-flex items-center gap-2 shadow-xs"
+                                >
+                                  <MessageSquare className="w-4 h-4" />
+                                  <span>Join WhatsApp Group</span>
+                                </a>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
 
               {/* TAB 3: LOGS & EXPORT */}
               {ticketTab === "logs" && (
                 <div className="bg-white p-6 sm:p-8 rounded-3xl border border-slate-200/80 shadow-xs space-y-6 flex-1 flex flex-col">
                   <div className="flex items-center justify-between">
                     <div>
-                      <h3 className="text-lg font-black text-slate-900">Ticket Dispatch & Delivery Records</h3>
-                      <p className="text-xs text-slate-500">Comprehensive delivery history and online ticket pass links.</p>
+                      <h3 className="text-lg font-black text-slate-900">Ticket Dispatch &amp; Delivery Records</h3>
+                      <p className="text-xs text-slate-500">Comprehensive delivery history and online ticket pass links by team.</p>
                     </div>
 
                     <button
@@ -15447,37 +17555,59 @@ AI Verse Competition Platform • Faculty Review Engine
                         <tr>
                           <th className="py-3 px-4">#</th>
                           <th className="py-3 px-4">Registration ID</th>
-                          <th className="py-3 px-4">Participant Name</th>
+                          <th className="py-3 px-4">Team Name &amp; Size</th>
+                          <th className="py-3 px-4">Team Lead</th>
+                          <th className="py-3 px-4">Registered Members</th>
                           <th className="py-3 px-4">Email Address</th>
-                          <th className="py-3 px-4">Team</th>
                           <th className="py-3 px-4">Dispatch Timestamp</th>
                           <th className="py-3 px-4 text-right">Ticket Pass Link</th>
                         </tr>
                       </thead>
                       <tbody className="divide-y divide-slate-100 font-medium">
-                        {flattenedTicketRecipients.length === 0 ? (
+                        {ticketTeams.length === 0 ? (
                           <tr>
-                            <td colSpan={7} className="text-center py-12 text-slate-400">
+                            <td colSpan={8} className="text-center py-12 text-slate-400">
                               <Ticket className="w-10 h-10 mx-auto mb-2 text-slate-300" />
-                              <p className="font-bold text-sm text-slate-600">No participants registered</p>
+                              <p className="font-bold text-sm text-slate-600">No teams registered</p>
                             </td>
                           </tr>
                         ) : (
-                          flattenedTicketRecipients.map((r, idx) => (
-                            <tr key={r.key} className="hover:bg-slate-50 transition-colors">
+                          ticketTeams.map((team, idx) => (
+                            <tr key={team.key} className="hover:bg-slate-50 transition-colors">
                               <td className="py-3.5 px-4 text-slate-400">{idx + 1}</td>
-                              <td className="py-3.5 px-4 font-mono font-bold text-blue-700">{r.regId}</td>
-                              <td className="py-3.5 px-4 font-bold text-slate-900">{r.name}</td>
-                              <td className="py-3.5 px-4 font-mono text-slate-600">{r.email}</td>
-                              <td className="py-3.5 px-4 text-slate-700">{r.teamName || "Individual"}</td>
+                              <td className="py-3.5 px-4 font-mono font-bold text-blue-700">AIV-{team.regId.slice(-8).toUpperCase()}</td>
+                              <td className="py-3.5 px-4">
+                                <div className="font-black text-slate-900">{team.teamName}</div>
+                                <span className="text-[10px] text-slate-400 font-bold">
+                                  {team.isGroup ? `👥 ${team.teamSize} Members` : "👤 Solo"}
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <div className="font-bold text-slate-800">{team.leadName}</div>
+                                {team.leadStudentId && (
+                                  <div className="font-mono text-[10px] text-slate-400">{team.leadStudentId}</div>
+                                )}
+                              </td>
+                              <td className="py-3.5 px-4 text-slate-600">
+                                {team.members && team.members.length > 0 ? (
+                                  <div className="space-y-0.5 text-[11px]">
+                                    {team.members.map((m: any, mIdx: number) => (
+                                      <div key={mIdx}>• {m.name} {m.studentId ? `(${m.studentId})` : ""}</div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <span className="text-slate-400 text-xs italic">None (Solo)</span>
+                                )}
+                              </td>
+                              <td className="py-3.5 px-4 font-mono text-slate-600">{team.leadEmail}</td>
                               <td className="py-3.5 px-4 text-slate-500">
-                                {r.ticketSentAt ? new Date(r.ticketSentAt).toLocaleString() : (
+                                {team.ticketSentAt ? new Date(team.ticketSentAt).toLocaleString() : (
                                   <span className="text-amber-600 font-bold">Unsent</span>
                                 )}
                               </td>
                               <td className="py-3.5 px-4 text-right">
                                 <a
-                                  href={`/ticket/${r.regId}`}
+                                  href={`/ticket/${team.regId}`}
                                   target="_blank"
                                   rel="noreferrer"
                                   className="px-3 py-1.5 bg-blue-50 text-blue-700 hover:bg-blue-100 font-bold rounded-lg text-xs transition-all inline-flex items-center gap-1"

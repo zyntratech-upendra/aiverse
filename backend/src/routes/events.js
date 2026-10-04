@@ -18,6 +18,9 @@ async function sanitizeEventImages(eventData) {
   if (eventData.speakerImagePreview) eventData.speakerImagePreview = await uploadToCloudinaryIfBase64(eventData.speakerImagePreview, 'ai_verse/events');
   if (eventData.paymentQrImagePreview) eventData.paymentQrImagePreview = await uploadToCloudinaryIfBase64(eventData.paymentQrImagePreview, 'ai_verse/events');
   if (eventData.juryImagePreview) eventData.juryImagePreview = await uploadToCloudinaryIfBase64(eventData.juryImagePreview, 'ai_verse/events');
+  if (eventData.ticketDesign && eventData.ticketDesign.bgPreview) {
+    eventData.ticketDesign.bgPreview = await uploadToCloudinaryIfBase64(eventData.ticketDesign.bgPreview, 'ai_verse/events');
+  }
   if (Array.isArray(eventData.posterImages)) {
     eventData.posterImages = await Promise.all(eventData.posterImages.map(async (pi) => {
       if (!pi) return pi;

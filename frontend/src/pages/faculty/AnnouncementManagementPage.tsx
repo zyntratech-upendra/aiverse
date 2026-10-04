@@ -37,6 +37,43 @@ interface ToastMessage {
   type: "success" | "info" | "warning";
 }
 
+const STORAGE_KEY = "aiverse_faculty_announcements";
+
+const DEFAULT_ANNOUNCEMENTS: AnnouncementItem[] = [
+  {
+    id: "ann-1",
+    title: "AI Winter Research Symposium 2024 Final Schedule",
+    category: "EVENT",
+    status: "Pinned",
+    date: "Oct 24, 2024",
+    reach: 2450
+  },
+  {
+    id: "ann-2",
+    title: "Neural Ethics Lab Access Protocols Updated",
+    category: "URGENT",
+    status: "Published",
+    date: "Oct 22, 2024",
+    reach: 1890
+  },
+  {
+    id: "ann-3",
+    title: "Faculty Mentorship Applications Open for Spring",
+    category: "ACADEMIC",
+    status: "Scheduled",
+    date: "For Nov 01, 2024",
+    reach: 980
+  },
+  {
+    id: "ann-4",
+    title: "Robotics Club Hardware Sponsorship Announcement",
+    category: "CLUB UPDATE",
+    status: "Draft",
+    date: "Saved 2h ago",
+    reach: 0
+  }
+];
+
 const AnnouncementManagementPage: React.FC = () => {
   // Global stats state
   const [totalAnnouncements, setTotalAnnouncements] = useState(42);
@@ -63,32 +100,23 @@ const AnnouncementManagementPage: React.FC = () => {
 
   const [announcements, setAnnouncements] = useState<AnnouncementItem[]>([]);
 
-  // Fetch announcements from Firestore on mount
+  // Fetch announcements from LocalStorage or fallback on mount
   useEffect(() => {
-    const loadAnnouncements = async () => {
-      try {
-        const querySnapshot = await getDocs(collection(db, "announcements"));
-        const list: AnnouncementItem[] = [];
-        querySnapshot.forEach((doc) => {
-          const data = doc.data();
-          list.push({
-            id: doc.id,
-            title: data.title || "",
-            category: data.category || "EVENT",
-            status: data.status || "Published",
-            date: data.date || "",
-            reach: data.reach || 0
-          });
-        });
-        setAnnouncements(list);
-        setTotalAnnouncements(list.length);
-      } catch (err) {
-        console.error("Error reading announcements from Firestore:", err);
-        addToast("Failed to fetch announcements from Firestore. Using fallback.", "warning");
+    try {
+      const stored = localStorage.getItem(STORAGE_KEY);
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          setAnnouncements(parsed);
+          setTotalAnnouncements(parsed.length);
+          return;
+        }
       }
-    };
-    
-    loadAnnouncements();
+    } catch (err) {
+      console.warn("Error reading announcements from localStorage:", err);
+    }
+    setAnnouncements(DEFAULT_ANNOUNCEMENTS);
+    setTotalAnnouncements(DEFAULT_ANNOUNCEMENTS.length);
   }, []);
 
   // Toast helper
@@ -142,7 +170,7 @@ const AnnouncementManagementPage: React.FC = () => {
   }, [totalPages, currentPage]);
 
   // Form submit - Create new announcement
-  const handleCreateAnnouncement = async (e: React.FormEvent) => {
+  const handleCreateAnnouncement = (e: React.FormEvent) => {
     e.preventDefault();
     if (!formTitle.trim()) {
       addToast("Title is required", "warning");
@@ -164,78 +192,75 @@ const AnnouncementManagementPage: React.FC = () => {
       createdAt: Date.now()
     };
 
-    addToast("Saving announcement to database...", "info");
-    
-    try {
-      const docRef = await addDoc(collection(db, "announcements"), newPayload);
-      const newItem: AnnouncementItem = {
-        id: docRef.id,
-        ...newPayload
-      };
+    const newItem: AnnouncementItem = {
+      id: `ann-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+      ...newPayload
+    };
 
-      setAnnouncements(prev => [newItem, ...prev]);
-      setTotalAnnouncements(prev => prev + 1);
-      if (formStatus === "Published" || formStatus === "Pinned") {
-        setActiveBroadcasts(prev => prev + 1);
-      }
-      
-      // Clear and Close
-      setFormTitle("");
-      setFormCategory("EVENT");
-      setFormStatus("Published");
-      setFormReach(1500);
-      setIsCreateModalOpen(false);
-      setCurrentPage(1);
-
-      addToast(`Announcement "${formTitle}" created successfully!`);
-    } catch (err) {
-      console.error("Error saving announcement to Firestore:", err);
-      addToast("Failed to save announcement to Firestore.", "warning");
+    const updated = [newItem, ...announcements];
+    setAnnouncements(updated);
+    setTotalAnnouncements(updated.length);
+    if (formStatus === "Published" || formStatus === "Pinned") {
+      setActiveBroadcasts(prev => prev + 1);
     }
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+    } catch (err) {
+      console.warn("Could not save announcement to localStorage:", err);
+    }
+    
+    // Clear and Close
+    setFormTitle("");
+    setFormCategory("EVENT");
+    setFormStatus("Published");
+    setFormReach(1500);
+    setIsCreateModalOpen(false);
+    setCurrentPage(1);
+
+    addToast(`Announcement "${formTitle}" created successfully!`);
   };
 
   // Toggle Pinned status
-  const handleTogglePin = async (id: string) => {
+  const handleTogglePin = (id: string) => {
     const itemToToggle = announcements.find(a => a.id === id);
     if (!itemToToggle) return;
 
     const wasPinned = itemToToggle.status === "Pinned";
-    const nextStatus = wasPinned ? "Published" : "Pinned";
+    const nextStatus: AnnouncementItem["status"] = wasPinned ? "Published" : "Pinned";
 
+    const updated: AnnouncementItem[] = announcements.map(item => {
+      if (item.id === id) {
+        return { ...item, status: nextStatus };
+      }
+      return item;
+    });
+
+    setAnnouncements(updated);
     try {
-      const docRef = doc(db, "announcements", id);
-      await updateDoc(docRef, { status: nextStatus });
-
-      setAnnouncements(prev => prev.map(item => {
-        if (item.id === id) {
-          addToast(
-            wasPinned ? `Unpinned "${item.title}"` : `Pinned "${item.title}" to top of dashboard.`,
-            wasPinned ? "info" : "success"
-          );
-          return { ...item, status: nextStatus };
-        }
-        return item;
-      }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
     } catch (err) {
-      console.error("Error updating pin status in Firestore:", err);
-      addToast("Failed to update status in database.", "warning");
+      console.warn("Could not update pin status:", err);
     }
+
+    addToast(
+      wasPinned ? `Unpinned "${itemToToggle.title}"` : `Pinned "${itemToToggle.title}" to top of dashboard.`,
+      wasPinned ? "info" : "success"
+    );
   };
 
   // Delete item
-  const handleDeleteAnnouncement = async (id: string, title: string) => {
+  const handleDeleteAnnouncement = (id: string, title: string) => {
     if (confirm(`Are you sure you want to delete the announcement "${title}"?`)) {
+      const updated = announcements.filter(item => item.id !== id);
+      setAnnouncements(updated);
+      setTotalAnnouncements(prev => Math.max(0, prev - 1));
       try {
-        const docRef = doc(db, "announcements", id);
-        await deleteDoc(docRef);
-        
-        setAnnouncements(prev => prev.filter(item => item.id !== id));
-        setTotalAnnouncements(prev => Math.max(0, prev - 1));
-        addToast(`Announcement "${title}" removed successfully.`);
+        localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
       } catch (err) {
-        console.error("Error deleting announcement from Firestore:", err);
-        addToast("Failed to delete announcement from database.", "warning");
+        console.warn("Could not delete announcement:", err);
       }
+      addToast(`Announcement "${title}" removed successfully.`);
     }
   };
 

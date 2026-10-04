@@ -16,6 +16,7 @@ interface RegistrationEmailData {
   transactionId?: string;
   members?: Array<{ name: string; studentId?: string; email?: string }>;
   ticketUrl: string;
+  ticketImageUrl?: string;
   whatsGroupLink?: string;
   whatsappGroupLink?: string;
   whatsappGroupUrl?: string;
@@ -47,6 +48,7 @@ export function buildRegistrationConfirmationEmail(data: RegistrationEmailData):
     transactionId,
     members,
     ticketUrl,
+    ticketImageUrl,
     whatsGroupLink,
     whatsappGroupLink,
     whatsappGroupUrl,
@@ -178,6 +180,21 @@ export function buildRegistrationConfirmationEmail(data: RegistrationEmailData):
                   </tr>
                   ${memberRows}
                 </table>
+              </div>
+              ` : ""}
+
+              ${ticketImageUrl ? `
+              <!-- Official Custom Ticket Pass Image Preview -->
+              <div style="margin: 26px 0 28px 0; text-align: center;">
+                <div style="font-size: 11px; font-weight: 800; letter-spacing: 2px; color: #2563eb; text-transform: uppercase; margin-bottom: 10px;">
+                  🎟️ YOUR OFFICIAL ENTRY PASS
+                </div>
+                <div style="display: inline-block; border-radius: 18px; overflow: hidden; box-shadow: 0 12px 36px rgba(0,0,0,0.14); border: 1.5px solid #cbd5e1; max-width: 100%; background-color: #0f172a;">
+                  <img src="${ticketImageUrl}" alt="Official Ticket Pass" style="width: 100%; max-width: 536px; height: auto; display: block; border-radius: 16px;" />
+                </div>
+                <p style="font-size: 11px; color: #64748b; margin-top: 8px; font-weight: 600;">
+                  Custom pass designed for ${eventTitle}. Show this QR code at campus check-in.
+                </p>
               </div>
               ` : ""}
 

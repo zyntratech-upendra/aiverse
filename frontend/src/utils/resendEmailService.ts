@@ -13,6 +13,13 @@ export interface SendResendEmailParams {
   from?: string;
   reply_to?: string | string[];
   headers?: Record<string, string>;
+  attachments?: Array<{
+    filename: string;
+    content?: string;
+    path?: string;
+    encoding?: string;
+    contentType?: string;
+  }>;
 }
 
 const sanitizeEmailField = (val?: string | string[], fallback: string = ""): string => {
@@ -30,6 +37,7 @@ export const sendResendEmail = async ({
   from,
   reply_to,
   headers,
+  attachments,
 }: SendResendEmailParams): Promise<{ success: boolean; data?: any; error?: string }> => {
   const recipients = Array.isArray(to) ? to : [to];
   const defaultFrom = (import.meta.env.VITE_RESEND_FROM_EMAIL as string) || "AI Verse <events@aiversevitb.in>";
@@ -64,6 +72,7 @@ export const sendResendEmail = async ({
         from: senderEmail, 
         reply_to: replyToEmail,
         headers: emailHeaders,
+        attachments,
       }),
     });
 

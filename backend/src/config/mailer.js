@@ -57,7 +57,18 @@ const sendMail = async ({ to, subject, html, text, from, replyTo, reply_to, atta
 
     if (text) payload.text = text;
     if (headers && typeof headers === 'object') payload.headers = headers;
-    if (attachments && Array.isArray(attachments)) payload.attachments = attachments;
+    if (attachments && Array.isArray(attachments)) {
+      payload.attachments = attachments.map((att) => {
+        let content = att.content;
+        if (typeof content === 'string' && content.includes(',')) {
+          content = content.split(',')[1];
+        }
+        const item = { filename: att.filename || 'attachment.png' };
+        if (content) item.content = content;
+        if (att.path) item.path = att.path;
+        return item;
+      });
+    }
 
     const res = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -92,7 +103,22 @@ const sendMail = async ({ to, subject, html, text, from, replyTo, reply_to, atta
       html: html || `<p>${text}</p>`,
     };
     if (text) mailOptions.text = text;
-    if (attachments && Array.isArray(attachments)) mailOptions.attachments = attachments;
+    if (attachments && Array.isArray(attachments)) {
+      mailOptions.attachments = attachments.map((att) => {
+        let content = att.content;
+        if (typeof content === 'string' && content.includes(',')) {
+          content = content.split(',')[1];
+        }
+        if (content && typeof content === 'string' && !att.path) {
+          return {
+            filename: att.filename || 'attachment.png',
+            content: Buffer.from(content, 'base64'),
+            contentType: att.contentType || 'image/png',
+          };
+        }
+        return att;
+      });
+    }
     if (headers && typeof headers === 'object') mailOptions.headers = headers;
 
     const info = await smtpTransporter.sendMail(mailOptions);

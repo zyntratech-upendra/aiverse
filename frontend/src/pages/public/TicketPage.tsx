@@ -56,6 +56,21 @@ interface TicketDesignConfig {
   qrY?: number;
   qrWidthPercent?: number;
   qrBg?: "white" | "transparent" | "glow";
+  showAttendeeName?: boolean;
+  namePosX?: number;
+  namePosY?: number;
+  nameFontSize?: number;
+  nameColor?: string;
+  showTeamName?: boolean;
+  teamPosX?: number;
+  teamPosY?: number;
+  teamFontSize?: number;
+  teamColor?: string;
+  showRollNo?: boolean;
+  rollPosX?: number;
+  rollPosY?: number;
+  rollFontSize?: number;
+  rollColor?: string;
   showAttendeeText?: boolean;
   textX?: number;
   textY?: number;
@@ -173,6 +188,24 @@ const TicketPage: React.FC = () => {
   const ticketTextColor = ticketDesign.textColor || "#FFFFFF";
   const ticketPassLabel = ticketDesign.passLabel || "OFFICIAL ACCESS PASS";
   const ticketPrimaryColor = ticketDesign.primaryColor || "#2563EB";
+
+  const ticketShowAttendeeName = ticketDesign.showAttendeeName !== undefined ? ticketDesign.showAttendeeName : true;
+  const ticketNamePosX = ticketDesign.namePosX !== undefined ? ticketDesign.namePosX : 20;
+  const ticketNamePosY = ticketDesign.namePosY !== undefined ? ticketDesign.namePosY : 72;
+  const ticketNameFontSize = ticketDesign.nameFontSize !== undefined ? ticketDesign.nameFontSize : 22;
+  const ticketNameColor = ticketDesign.nameColor || "#FFFFFF";
+
+  const ticketShowTeamName = ticketDesign.showTeamName !== undefined ? ticketDesign.showTeamName : true;
+  const ticketTeamPosX = ticketDesign.teamPosX !== undefined ? ticketDesign.teamPosX : 20;
+  const ticketTeamPosY = ticketDesign.teamPosY !== undefined ? ticketDesign.teamPosY : 81;
+  const ticketTeamFontSize = ticketDesign.teamFontSize !== undefined ? ticketDesign.teamFontSize : 16;
+  const ticketTeamColor = ticketDesign.teamColor || "#93C5FD";
+
+  const ticketShowRollNo = ticketDesign.showRollNo !== undefined ? ticketDesign.showRollNo : true;
+  const ticketRollPosX = ticketDesign.rollPosX !== undefined ? ticketDesign.rollPosX : 20;
+  const ticketRollPosY = ticketDesign.rollPosY !== undefined ? ticketDesign.rollPosY : 89;
+  const ticketRollFontSize = ticketDesign.rollFontSize !== undefined ? ticketDesign.rollFontSize : 13;
+  const ticketRollColor = ticketDesign.rollColor || "#E2E8F0";
 
   // Status check: whether the team registration is confirmed by coordinators
   const isConfirmed = 
@@ -318,13 +351,57 @@ const TicketPage: React.FC = () => {
           // 4. Draw attendee QR code
           ctx.drawImage(qrImage, qrLeft, qrTop, qrWidth, qrHeight);
 
-          // 5. Optional Attendee Text Overlay
+          // 5. Dynamic Attendee Name
+          if (ticketShowAttendeeName && displayLeadName) {
+            const nameX = origW * (ticketNamePosX / 100);
+            const nameY = origH * (ticketNamePosY / 100);
+            ctx.fillStyle = ticketNameColor;
+            ctx.font = `900 ${Math.max(16, Math.round(ticketNameFontSize * (origW / 1000)))}px sans-serif`;
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.shadowColor = "rgba(0,0,0,0.6)";
+            ctx.shadowBlur = 4;
+            ctx.fillText(displayLeadName, nameX, nameY);
+            ctx.shadowColor = "transparent";
+          }
+
+          // 6. Dynamic Team Name
+          if (ticketShowTeamName && displayGroupName) {
+            const teamX = origW * (ticketTeamPosX / 100);
+            const teamY = origH * (ticketTeamPosY / 100);
+            ctx.fillStyle = ticketTeamColor;
+            ctx.font = `800 ${Math.max(12, Math.round(ticketTeamFontSize * (origW / 1000)))}px sans-serif`;
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.shadowColor = "rgba(0,0,0,0.6)";
+            ctx.shadowBlur = 4;
+            ctx.fillText(displayGroupName, teamX, teamY);
+            ctx.shadowColor = "transparent";
+          }
+
+          // 7. Dynamic Roll No / Student ID
+          const rollVal = registration?.teamLeadStudentId || allMembers[0]?.studentId;
+          if (ticketShowRollNo && rollVal) {
+            const rollX = origW * (ticketRollPosX / 100);
+            const rollY = origH * (ticketRollPosY / 100);
+            ctx.fillStyle = ticketRollColor;
+            ctx.font = `700 ${Math.max(11, Math.round(ticketRollFontSize * (origW / 1000)))}px monospace`;
+            ctx.textAlign = "left";
+            ctx.textBaseline = "middle";
+            ctx.shadowColor = "rgba(0,0,0,0.6)";
+            ctx.shadowBlur = 4;
+            ctx.fillText(rollVal, rollX, rollY);
+            ctx.shadowColor = "transparent";
+          }
+
+          // 8. Optional Attendee Text Overlay
           if (ticketShowAttendeeText) {
             const textCenterX = origW * (ticketTextX / 100);
             const textCenterY = origH * (ticketTextY / 100);
             ctx.fillStyle = ticketTextColor;
             ctx.font = `bold ${Math.max(16, Math.round(origW * 0.024))}px sans-serif`;
             ctx.textAlign = "center";
+            ctx.textBaseline = "middle";
             ctx.fillText(`${displayGroupName} • ID: AV-${registrationId?.slice(-6).toUpperCase() || "PASS"}`, textCenterX, textCenterY);
           }
         } else {
@@ -632,6 +709,54 @@ const TicketPage: React.FC = () => {
                     className="w-full h-full object-contain block"
                   />
                 </div>
+
+                {/* Dynamic Attendee Name Overlay */}
+                {ticketShowAttendeeName && displayLeadName && (
+                  <div
+                    style={{
+                      left: `${ticketNamePosX}%`,
+                      top: `${ticketNamePosY}%`,
+                      color: ticketNameColor,
+                      fontSize: `${ticketNameFontSize}px`,
+                      transform: "translate(-50%, -50%)"
+                    }}
+                    className="absolute z-20 text-left font-black tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] pointer-events-none whitespace-nowrap"
+                  >
+                    {displayLeadName}
+                  </div>
+                )}
+
+                {/* Dynamic Team Name Overlay */}
+                {ticketShowTeamName && displayGroupName && (
+                  <div
+                    style={{
+                      left: `${ticketTeamPosX}%`,
+                      top: `${ticketTeamPosY}%`,
+                      color: ticketTeamColor,
+                      fontSize: `${ticketTeamFontSize}px`,
+                      transform: "translate(-50%, -50%)"
+                    }}
+                    className="absolute z-20 text-left font-extrabold tracking-wide drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] pointer-events-none whitespace-nowrap"
+                  >
+                    {displayGroupName}
+                  </div>
+                )}
+
+                {/* Dynamic Roll No / Student ID Overlay */}
+                {ticketShowRollNo && (registration?.teamLeadStudentId || allMembers[0]?.studentId) && (
+                  <div
+                    style={{
+                      left: `${ticketRollPosX}%`,
+                      top: `${ticketRollPosY}%`,
+                      color: ticketRollColor,
+                      fontSize: `${ticketRollFontSize}px`,
+                      transform: "translate(-50%, -50%)"
+                    }}
+                    className="absolute z-20 text-left font-bold font-mono tracking-wider drop-shadow-[0_2px_4px_rgba(0,0,0,0.85)] pointer-events-none whitespace-nowrap"
+                  >
+                    {registration?.teamLeadStudentId || allMembers[0]?.studentId}
+                  </div>
+                )}
 
                 {/* Optional Attendee Text Overlay */}
                 {ticketShowAttendeeText && (
