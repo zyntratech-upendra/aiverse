@@ -32,6 +32,7 @@ const SubmitScoresModal: React.FC<SubmitScoresModalProps> = ({
       try {
         const title = localStorage.getItem("activeJuryEventTitle") || "Active Hackathon Track";
         setActiveTitle(title);
+        const roundNum = Number(localStorage.getItem("activeJuryRound") || 1);
 
         const [evalsRes, regsRes] = await Promise.all([
           fetchJuryEvaluations().catch(() => []),
@@ -41,7 +42,17 @@ const SubmitScoresModal: React.FC<SubmitScoresModalProps> = ({
         const evals = Array.isArray(evalsRes) ? evalsRes : [];
         const regs = Array.isArray(regsRes) ? regsRes : [];
 
-        const totalItems = Math.max(regs.length, evals.length, 1);
+        const activeRegs = regs.filter((r: any) => {
+          const rRound = Number(r.currentRound || r.round || 1);
+          const rPromoted = Number(r.promotedToRound || 0);
+          const rStatus = (r.roundStatus || r.status || "").trim().toLowerCase();
+          if (rStatus === "eliminated") return false;
+          if (rRound === roundNum || rPromoted === roundNum) return true;
+          if (rRound >= roundNum && rStatus !== "eliminated") return true;
+          return false;
+        });
+
+        const totalItems = activeRegs.length > 0 ? activeRegs.length : Math.max(regs.length, evals.length, 1);
         const evaluatedItems = evals.filter((e: any) => e.status === "Evaluated" || e.isSaved || Number(e.totalScore || e.score) > 0).length;
 
         setCompleted(propCompleted ?? evaluatedItems);

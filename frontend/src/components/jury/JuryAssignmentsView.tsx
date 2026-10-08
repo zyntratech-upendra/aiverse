@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { 
   CheckCircle2, 
   Clock, 
@@ -13,9 +13,13 @@ import {
   Flame,
   Maximize2,
   Minimize2,
-  Award
+  Award,
+  Layers,
+  Users,
+  Trophy,
+  ShieldAlert
 } from "lucide-react";
-import { fetchSettings, fetchRegistrations, fetchJuryEvaluations, updateJuryEvaluation, updateRegistration } from "../../services/apiClient";
+import { fetchSettings, fetchRegistrations, fetchJuryEvaluations, fetchEvents, updateJuryEvaluation, updateRegistration } from "../../services/apiClient";
 
 export interface JuryMarksColumn {
   id: string;
@@ -30,6 +34,17 @@ export const DEFAULT_JURY_MARKS_COLUMNS: JuryMarksColumn[] = [
   { id: "statistics", name: "Statistics", maxMarks: 20 },
   { id: "revenue", name: "Revenue", maxMarks: 20 }
 ];
+
+export interface TeamMember {
+  name: string;
+  email?: string;
+  phone?: string;
+  college?: string;
+  rollNo?: string;
+  studentId?: string;
+  role?: string;
+  isLead?: boolean;
+}
 
 export interface HackathonProject {
   id: string;
@@ -50,6 +65,12 @@ export interface HackathonProject {
   demoUrl?: string;
   abstract: string;
   isSaved?: boolean;
+  ticketCode?: string;
+  currentRound?: number;
+  promotedToRound?: number;
+  roundStatus?: string;
+  lead?: TeamMember;
+  members?: TeamMember[];
 }
 
 const mockProjects: HackathonProject[] = [];
@@ -77,9 +98,18 @@ const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
     const local = localStorage.getItem("activeJuryRound");
     return local ? Number(local) : 1;
   });
+  const [selectedRound, setSelectedRound] = useState<number | "all">(() => {
+    if (propActiveRound) return propActiveRound;
+    const local = localStorage.getItem("activeJuryRound");
+    return local ? Number(local) : 1;
+  });
+  const [eventDetails, setEventDetails] = useState<any>(null);
 
   useEffect(() => {
-    if (propActiveRound) setActiveRound(propActiveRound);
+    if (propActiveRound) {
+      setActiveRound(propActiveRound);
+      setSelectedRound(propActiveRound);
+    }
   }, [propActiveRound]);
   // Reveal saved scores toggle state (defaults to false so saved evaluations are masked)
   const [revealScores, setRevealScores] = useState(false);
@@ -187,24 +217,48 @@ const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
     let settingsPoll: any = null;
     const loadSettings = async () => {
       try {
-        const d = await fetchSettings("portal_config");
+        const [d, eventsRes] = await Promise.all([
+          fetchSettings("portal_config").catch(() => null),
+          fetchEvents().catch(() => [])
+        ]);
+
+        const eventsList = Array.isArray(eventsRes) ? eventsRes : (eventsRes?.events || []);
+
+        let activeId = "ALL_EVENTS";
+        let activeTitle = "All Events";
+
         if (d) {
           if (d.activeJuryEventId || d.activeJuryEventTitle) {
-            const id = d.activeJuryEventId || "ALL_EVENTS";
-            const title = d.activeJuryEventTitle || "All Events";
-            setActiveEventConfig({ id, title });
-            localStorage.setItem("activeJuryEventId", id);
-            localStorage.setItem("activeJuryEventTitle", title);
-          }
-          if (d.currentRound) {
-            setActiveRound(Number(d.currentRound));
-            localStorage.setItem("activeJuryRound", String(d.currentRound));
+            activeId = d.activeJuryEventId || "ALL_EVENTS";
+            activeTitle = d.activeJuryEventTitle || "All Events";
+            setActiveEventConfig({ id: activeId, title: activeTitle });
+            localStorage.setItem("activeJuryEventId", activeId);
+            localStorage.setItem("activeJuryEventTitle", activeTitle);
           }
           if (Array.isArray(d.juryMarksColumns) && d.juryMarksColumns.length > 0) {
             setMarksColumns(d.juryMarksColumns);
             localStorage.setItem("juryMarksColumns", JSON.stringify(d.juryMarksColumns));
           }
         }
+
+        const matchedEvent = eventsList.find((e: any) => 
+          (activeId && activeId !== "ALL_EVENTS" && (e.id === activeId || e._id === activeId)) ||
+          (activeTitle && activeTitle !== "All Events" && e.title?.toLowerCase() === activeTitle?.toLowerCase())
+        );
+
+        if (matchedEvent) {
+          setEventDetails(matchedEvent);
+        }
+
+        let resolvedRound = 1;
+        if (matchedEvent && matchedEvent.currentRound) {
+          resolvedRound = Number(matchedEvent.currentRound);
+        } else if (d && d.currentRound) {
+          resolvedRound = Number(d.currentRound);
+        }
+
+        setActiveRound(resolvedRound);
+        localStorage.setItem("activeJuryRound", String(resolvedRound));
       } catch (e) {
         // ignore
       }
@@ -271,6 +325,37 @@ const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
             const projectTitle = reg.projectTitle || evalData.projectTitle || `${teamName} Submission`;
             const membersCount = reg.teamSize || (reg.members && Array.isArray(reg.members) ? reg.members.length + 1 : 1);
 
+            // Map Team Lead & Members
+            const lead: TeamMember = {
+              name: reg.teamLeadName || reg.name || reg.fullName || "Team Lead",
+              email: reg.teamLeadEmail || reg.email || reg.leadEmail || "",
+              phone: reg.teamLeadPhone || reg.leadPhone || reg.phone || "",
+              rollNo: reg.teamLeadStudentId || reg.studentId || reg.rollNo || reg.registrationNumber || "",
+              college: reg.college || reg.collegeName || "Vishnu Institute of Technology",
+              isLead: true,
+              role: "Lead"
+            };
+
+            const memberList: TeamMember[] = [lead];
+            if (Array.isArray(reg.members)) {
+              reg.members.forEach((m: any) => {
+                memberList.push({
+                  name: m.name || "Member",
+                  email: m.email || "",
+                  phone: m.phone || "",
+                  rollNo: m.studentId || m.rollNo || m.registrationNumber || "",
+                  college: m.college || reg.college || "Vishnu Institute of Technology",
+                  isLead: false,
+                  role: m.role || "Member"
+                });
+              });
+            }
+
+            const currentRound = Number(reg.currentRound || reg.promotedToRound) || 1;
+            const promotedToRound = reg.promotedToRound ? Number(reg.promotedToRound) : undefined;
+            const roundStatus = reg.roundStatus || undefined;
+            const ticketCode = reg.ticketCode || reg.registrationId || (id ? id.slice(-6).toUpperCase() : "");
+
             const criteriaScores: Record<string, number> = {};
             let criteriaSum = 0;
 
@@ -326,7 +411,13 @@ const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
               githubUrl: evalData.githubUrl || reg.githubUrl || "https://github.com/ai-verse",
               demoUrl: evalData.demoUrl || reg.demoUrl || "https://demo.aiverse.in",
               abstract: evalData.abstract || reg.abstract || `Registered team lead: ${reg.teamLeadName || teamName} (${reg.teamLeadEmail || ""}).`,
-              isSaved
+              isSaved,
+              ticketCode,
+              currentRound,
+              promotedToRound,
+              roundStatus,
+              lead,
+              members: memberList
             });
           });
 
@@ -365,6 +456,9 @@ const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
               const totalScore = criteriaSum > 0 ? criteriaSum : (Number(evalData.totalScore || evalData.score) || 0);
               const isSaved = Boolean(evalData.isSaved || evalData.status === "Evaluated" || totalScore > 0);
 
+              const currentRound = Number(evalData.round) || 1;
+              const ticketCode = evalData.ticketCode || (id ? id.slice(-6).toUpperCase() : "");
+
               merged.push({
                 id,
                 eventId: evalData.eventId || "",
@@ -383,7 +477,10 @@ const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
                 githubUrl: evalData.githubUrl || "https://github.com/ai-verse",
                 demoUrl: evalData.demoUrl || "https://demo.aiverse.in",
                 abstract: evalData.abstract || "Submission for jury evaluation.",
-                isSaved
+                isSaved,
+                ticketCode,
+                currentRound,
+                lead: { name: evalData.teamLeadName || evalData.teamName || "Team Lead", isLead: true }
               });
             }
           });
@@ -405,10 +502,39 @@ const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
 
   const tracks = Array.from(new Set(projects.map(p => p.track).filter(Boolean)));
 
+  const availableRounds = useMemo(() => {
+    const roundsSet = new Set<number>([1]);
+    if (eventDetails?.totalRounds) {
+      for (let i = 1; i <= Number(eventDetails.totalRounds); i++) roundsSet.add(i);
+    }
+    if (activeRound) roundsSet.add(activeRound);
+    projects.forEach(p => {
+      if (p.currentRound) roundsSet.add(p.currentRound);
+      if (p.promotedToRound) roundsSet.add(p.promotedToRound);
+    });
+    return Array.from(roundsSet).sort((a, b) => a - b);
+  }, [eventDetails, activeRound, projects]);
+
+  const isTeamInRound = (p: HackathonProject, roundNum: number | "all") => {
+    if (roundNum === "all") return true;
+    if (p.roundStatus === "Eliminated") return false;
+    const teamRound = Number(p.currentRound || p.promotedToRound) || 1;
+    return teamRound === roundNum;
+  };
+
   const filteredProjects = projects.filter(p => {
-    const matchesSearch = p.projectTitle.toLowerCase().includes(searchQuery.toLowerCase()) || 
-                          p.teamName.toLowerCase().includes(searchQuery.toLowerCase()) ||
-                          p.abstract.toLowerCase().includes(searchQuery.toLowerCase());
+    const q = searchQuery.toLowerCase().trim();
+    const matchesSearch = !q ||
+                          p.projectTitle.toLowerCase().includes(q) || 
+                          p.teamName.toLowerCase().includes(q) ||
+                          p.abstract.toLowerCase().includes(q) ||
+                          (p.ticketCode && p.ticketCode.toLowerCase().includes(q)) ||
+                          (p.lead?.name && p.lead.name.toLowerCase().includes(q)) ||
+                          (p.lead?.rollNo && p.lead.rollNo.toLowerCase().includes(q)) ||
+                          (p.members && p.members.some(m => 
+                            m.name.toLowerCase().includes(q) || 
+                            (m.rollNo && m.rollNo.toLowerCase().includes(q))
+                          ));
     const matchesStatus = filterStatus === "All" || p.status === filterStatus;
     const matchesTrack = filterTrack === "All" || p.track === filterTrack;
 
@@ -422,7 +548,10 @@ const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
                                    projectTrackClean.includes(activeTitleClean) ||
                                    activeTitleClean.includes(projectTrackClean);
 
-    return matchesSearch && matchesStatus && matchesTrack && matchesActiveJuryEvent;
+    // Active round filter
+    const matchesRound = isTeamInRound(p, selectedRound);
+
+    return matchesSearch && matchesStatus && matchesTrack && matchesActiveJuryEvent && matchesRound;
   });
 
   // Inline cell score change handler (Tracks modified rows to prevent any data loss)
@@ -533,29 +662,42 @@ const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
     const headers = [
       "Row",
       "Round",
+      "Ticket Code",
       "Team Name", 
+      "Team Lead",
+      "Team Lead Roll No",
+      "Team Members",
       "Project Title", 
       "Track", 
       ...marksColumns.map(c => `"${c.name} (${c.maxMarks})"`),
       `"Total Score (${totalMaxMarks})"`, 
       "Status"
     ];
-    const rows = filteredProjects.map((p, idx) => [
-      idx + 1,
-      `Round ${activeRound}`,
-      `"${p.teamName}"`,
-      `"${p.projectTitle}"`,
-      `"${p.track}"`,
-      ...marksColumns.map(c => p.status === "Evaluated" ? getColumnScore(p, c.id) : "N/A"),
-      p.totalScore !== undefined ? p.totalScore : "N/A",
-      p.status
-    ]);
+    const rows = filteredProjects.map((p, idx) => {
+      const membersText = p.members 
+        ? p.members.map(m => `${m.name}${m.rollNo ? ` (${m.rollNo})` : ''}`).join("; ")
+        : "";
+      return [
+        idx + 1,
+        `Round ${p.currentRound || activeRound}`,
+        `"${p.ticketCode || ''}"`,
+        `"${p.teamName}"`,
+        `"${p.lead?.name || ''}"`,
+        `"${p.lead?.rollNo || ''}"`,
+        `"${membersText}"`,
+        `"${p.projectTitle}"`,
+        `"${p.track}"`,
+        ...marksColumns.map(c => p.status === "Evaluated" ? getColumnScore(p, c.id) : "N/A"),
+        p.totalScore !== undefined ? p.totalScore : "N/A",
+        p.status
+      ];
+    });
 
     const csvContent = "data:text/csv;charset=utf-8," + [headers.join(","), ...rows.map(r => r.join(","))].join("\n");
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `jury_evaluation_matrix_round_${activeRound}_${new Date().toISOString().split("T")[0]}.csv`);
+    link.setAttribute("download", `jury_evaluation_matrix_round_${selectedRound}_${new Date().toISOString().split("T")[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -567,6 +709,96 @@ const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
   const avgScore = evaluatedProjects.length > 0 
     ? (evaluatedProjects.reduce((acc, p) => acc + (p.totalScore || 0), 0) / evaluatedProjects.length).toFixed(1)
     : "N/A";
+
+  const renderStageSelector = () => (
+    <div className="bg-white p-3 sm:p-3.5 rounded-2xl border border-slate-200/90 shadow-xs flex items-center justify-between gap-3 flex-wrap">
+      <div className="flex items-center gap-2">
+        <div className="w-7 h-7 rounded-lg bg-blue-50 text-blue-600 flex items-center justify-center shrink-0">
+          <Layers className="w-4 h-4" />
+        </div>
+        <div>
+          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block leading-none">
+            Round Filter
+          </span>
+          <span className="text-xs font-black text-slate-800 tracking-tight">
+            Active Evaluation Stage
+          </span>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-1.5 flex-wrap">
+        {availableRounds.map((rNum) => {
+          const isSelected = selectedRound === rNum;
+          const isActiveStage = rNum === activeRound;
+          const countForRound = projects.filter(p => {
+            const activeTitleClean = activeEventConfig.title.trim().toLowerCase();
+            const projectTrackClean = p.track.trim().toLowerCase();
+            const matchesEvent = activeEventConfig.id === "ALL_EVENTS" || 
+                                 activeTitleClean === "all events" ||
+                                 projectTrackClean === activeTitleClean ||
+                                 projectTrackClean.includes(activeTitleClean) ||
+                                 activeTitleClean.includes(projectTrackClean);
+            return matchesEvent && isTeamInRound(p, rNum);
+          }).length;
+
+          return (
+            <button
+              key={rNum}
+              type="button"
+              onClick={() => setSelectedRound(rNum)}
+              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 border ${
+                isSelected
+                  ? "bg-[#2563EB] text-white border-blue-600 shadow-sm shadow-blue-500/25"
+                  : "bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200/80"
+              }`}
+            >
+              <Trophy className={`w-3 h-3 ${isSelected ? "text-white" : "text-amber-500"}`} />
+              <span>Round {rNum}</span>
+              {isActiveStage && (
+                <span className={`text-[8.5px] px-1.5 py-0.2 rounded uppercase font-black ${
+                  isSelected ? "bg-white/20 text-white" : "bg-blue-100 text-blue-700"
+                }`}>
+                  Active
+                </span>
+              )}
+              <span className={`text-[9.5px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+                isSelected ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700"
+              }`}>
+                {countForRound}
+              </span>
+            </button>
+          );
+        })}
+
+        {/* All Stages Option */}
+        <button
+          type="button"
+          onClick={() => setSelectedRound("all")}
+          className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 border ${
+            selectedRound === "all"
+              ? "bg-slate-900 text-white border-slate-900 shadow-sm"
+              : "bg-slate-50 hover:bg-slate-100 text-slate-600 border-slate-200/80"
+          }`}
+        >
+          <span>All Stages</span>
+          <span className={`text-[9.5px] px-1.5 py-0.2 rounded-full font-mono font-bold ${
+            selectedRound === "all" ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700"
+          }`}>
+            {projects.filter(p => {
+              const activeTitleClean = activeEventConfig.title.trim().toLowerCase();
+              const projectTrackClean = p.track.trim().toLowerCase();
+              const matchesEvent = activeEventConfig.id === "ALL_EVENTS" || 
+                                   activeTitleClean === "all events" ||
+                                   projectTrackClean === activeTitleClean ||
+                                   projectTrackClean.includes(activeTitleClean) ||
+                                   activeTitleClean.includes(projectTrackClean);
+              return matchesEvent && p.roundStatus !== "Eliminated";
+            }).length}
+          </span>
+        </button>
+      </div>
+    </div>
+  );
 
   return (
     <div className={`space-y-5 animate-in fade-in duration-200 text-left font-sans w-full ${isFullScreenMode ? "min-h-full" : ""}`}>
@@ -703,12 +935,17 @@ const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
             </div>
             <div>
               <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">Assigned Projects</span>
-              <span className="text-xs font-black text-slate-800 block mt-0.5">{projects.length} Submissions</span>
+              <span className="text-xs font-black text-slate-800 block mt-0.5">{filteredProjects.length} Teams</span>
             </div>
             <div>
               <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">Evaluated</span>
-              <span className="text-xs font-black text-emerald-600 block mt-0.5">{evaluatedCount} / {projects.length}</span>
+              <span className="text-xs font-black text-emerald-600 block mt-0.5">{evaluatedCount} / {filteredProjects.length}</span>
             </div>
+          </div>
+
+          {/* Active Round / Stage Filter in Standby Mode */}
+          <div className="pt-1">
+            {renderStageSelector()}
           </div>
 
           <div className="pt-2 flex flex-col sm:flex-row items-center justify-center gap-3">
@@ -763,6 +1000,9 @@ const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
               <span className="text-[#2563EB] font-black">{activeEventConfig.title}</span>
             </div>
           </div>
+
+          {/* Stage / Round Filter Selector */}
+          {renderStageSelector()}
 
       {/* Filter & Reveal Toolbar */}
       <div className="bg-white p-4 rounded-2xl border border-slate-200/80 shadow-sm flex flex-col md:flex-row gap-4 items-center justify-between">
@@ -846,7 +1086,7 @@ const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
             <thead>
               <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-extrabold text-slate-700 uppercase tracking-wider">
                 <th className="py-3 px-3 border-r border-slate-200 w-12 text-center font-mono">#</th>
-                <th className="py-3 px-4 border-r border-slate-200 min-w-[160px]">Team Name</th>
+                <th className="py-3 px-4 border-r border-slate-200 min-w-[280px]">Team & Active Round Members</th>
                 {marksColumns.map((col) => (
                   <th key={col.id} className="py-3 px-3 border-r border-slate-200 min-w-[130px] text-center">
                     <div>{col.name}</div>
@@ -883,10 +1123,71 @@ const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
                         {idx + 1}
                       </td>
 
-                      {/* Team Name */}
-                      <td className="py-3.5 px-4 border-r border-slate-200/70 font-extrabold text-slate-900">
-                        <div>{p.teamName}</div>
-                        <div className="text-[10px] text-slate-400 font-normal mt-0.5">{p.membersCount} members</div>
+                      {/* Team & Active Round Members */}
+                      <td className="py-3 px-4 border-r border-slate-200/70 text-slate-900 min-w-[280px]">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="font-extrabold text-xs text-slate-900 tracking-tight">
+                            {p.teamName}
+                          </span>
+                          {p.ticketCode && (
+                            <span className="px-1.5 py-0.5 rounded-md text-[9px] font-mono font-black bg-blue-50 text-blue-700 border border-blue-200/70">
+                              {p.ticketCode}
+                            </span>
+                          )}
+                          <span className="px-1.5 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-slate-100 text-slate-700 border border-slate-200">
+                            Round {p.currentRound || activeRound}
+                          </span>
+                        </div>
+
+                        {/* Project / Problem Title if distinct */}
+                        {p.projectTitle && p.projectTitle !== p.teamName && (
+                          <div className="text-[10.5px] font-medium text-slate-500 truncate max-w-xs mt-0.5" title={p.projectTitle}>
+                            {p.projectTitle}
+                          </div>
+                        )}
+
+                        {/* Team Lead & Members List */}
+                        <div className="mt-2 space-y-1">
+                          {/* Team Lead */}
+                          {p.lead && p.lead.name ? (
+                            <div className="flex items-center gap-1.5 text-[11px] text-slate-800 font-bold bg-amber-50/70 border border-amber-200/60 px-2 py-0.5 rounded-lg w-fit">
+                              <span className="text-[9px] uppercase px-1 py-0.2 rounded bg-amber-500 text-white font-black tracking-wider">Lead</span>
+                              <span className="truncate max-w-[140px]">{p.lead.name}</span>
+                              {(p.lead.rollNo || p.lead.studentId) && (
+                                <span className="font-mono text-[9.5px] text-amber-700 font-semibold">
+                                  ({p.lead.rollNo || p.lead.studentId})
+                                </span>
+                              )}
+                            </div>
+                          ) : null}
+
+                          {/* Squad Members */}
+                          {p.members && p.members.length > 0 ? (
+                            <div className="flex items-center gap-1 flex-wrap pt-0.5">
+                              {p.members
+                                .filter(m => !p.lead || (m.name !== p.lead.name && m.email !== p.lead.email))
+                                .map((m, mIdx) => (
+                                  <span 
+                                    key={mIdx} 
+                                    className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-md text-[10px] font-semibold bg-slate-100 text-slate-700 border border-slate-200/80"
+                                    title={`${m.name} ${m.rollNo ? `(${m.rollNo})` : ''} - ${m.college || ''}`}
+                                  >
+                                    <span className="w-1 h-1 rounded-full bg-slate-400"></span>
+                                    <span className="truncate max-w-[110px]">{m.name}</span>
+                                    {(m.rollNo || m.studentId) && (
+                                      <span className="font-mono text-[8.5px] text-slate-500">
+                                        ({m.rollNo || m.studentId})
+                                      </span>
+                                    )}
+                                  </span>
+                                ))}
+                            </div>
+                          ) : (
+                            <div className="text-[10px] text-slate-400 font-normal">
+                              {p.membersCount} member{p.membersCount !== 1 ? 's' : ''}
+                            </div>
+                          )}
+                        </div>
                       </td>
 
                       {/* Dynamic Marks Columns */}

@@ -8,7 +8,7 @@ import JurySettingsView from "./JurySettingsView";
 import SubmitScoresModal from "./SubmitScoresModal";
 import SEO from "../layout/SEO";
 import { Lock, ShieldAlert } from "lucide-react";
-import { fetchSettings } from "../../services/apiClient";
+import { fetchSettings, fetchEvents } from "../../services/apiClient";
 
 interface JuryPortalProps {
   initialTab?: JurySidebarTab;
@@ -124,15 +124,34 @@ const JuryPortal: React.FC<JuryPortalProps> = ({
     let poll: any = null;
     const load = async () => {
       try {
-        const data = await fetchSettings("portal_config");
+        const [data, eventsRes] = await Promise.all([
+          fetchSettings("portal_config").catch(() => null),
+          fetchEvents().catch(() => [])
+        ]);
+
         if (data && typeof data.juryPortalActive === "boolean") {
           setIsJuryActive(data.juryPortalActive);
           localStorage.setItem("juryPortalActive", String(data.juryPortalActive));
         }
-        if (data && data.currentRound) {
-          setActiveRound(Number(data.currentRound));
-          localStorage.setItem("activeJuryRound", String(data.currentRound));
+
+        const eventsList = Array.isArray(eventsRes) ? eventsRes : (eventsRes?.events || []);
+        const activeEventId = data?.activeJuryEventId || localStorage.getItem("activeJuryEventId");
+        const activeEventTitle = data?.activeJuryEventTitle || localStorage.getItem("activeJuryEventTitle");
+
+        let resolvedRound = 1;
+        const matchedEvent = eventsList.find((e: any) => 
+          (activeEventId && activeEventId !== "ALL_EVENTS" && (e.id === activeEventId || e._id === activeEventId)) ||
+          (activeEventTitle && activeEventTitle !== "All Events" && e.title?.toLowerCase() === activeEventTitle?.toLowerCase())
+        );
+
+        if (matchedEvent && matchedEvent.currentRound) {
+          resolvedRound = Number(matchedEvent.currentRound);
+        } else if (data && data.currentRound) {
+          resolvedRound = Number(data.currentRound);
         }
+
+        setActiveRound(resolvedRound);
+        localStorage.setItem("activeJuryRound", String(resolvedRound));
       } catch (e) {}
     };
     load();

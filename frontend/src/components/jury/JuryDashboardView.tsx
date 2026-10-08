@@ -42,7 +42,7 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
 }) => {
   const [evaluations, setEvaluations] = useState<JuryEvaluationDoc[]>([]);
   const [dbEvents, setDbEvents] = useState<FirestoreEventDoc[]>([]);
-  const [registrationsCount, setRegistrationsCount] = useState<number>(0);
+  const [registrations, setRegistrations] = useState<any[]>([]);
   const [activeEventConfig, setActiveEventConfig] = useState<{ id: string; title: string }>({
     id: localStorage.getItem("activeJuryEventId") || "ALL_EVENTS",
     title: localStorage.getItem("activeJuryEventTitle") || "All Events"
@@ -57,7 +57,7 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
     if (propActiveRound) setActiveRound(propActiveRound);
   }, [propActiveRound]);
 
-  // 1. Subscribe to Active Event and Round configuration from settings/portal_config
+  // 1. Subscribe to Active Event and Round configuration from settings/portal_config & events
   useEffect(() => {
     const syncConfig = () => {
       const id = localStorage.getItem("activeJuryEventId") || "ALL_EVENTS";
@@ -73,7 +73,10 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
     let settingsPoll: any = null;
     const loadSettings = async () => {
       try {
-        const d = await fetchSettings("portal_config");
+        const [d, events] = await Promise.all([
+          fetchSettings("portal_config").catch(() => null),
+          fetchEvents().catch(() => [])
+        ]);
         if (d && (d.activeJuryEventId || d.activeJuryEventTitle)) {
           const id = d.activeJuryEventId || "ALL_EVENTS";
           const title = d.activeJuryEventTitle || "All Events";
@@ -81,10 +84,25 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
           localStorage.setItem("activeJuryEventId", id);
           localStorage.setItem("activeJuryEventTitle", title);
         }
-        if (d && d.currentRound) {
-          setActiveRound(Number(d.currentRound));
-          localStorage.setItem("activeJuryRound", String(d.currentRound));
+
+        const eventsList = Array.isArray(events) ? events : (events?.events || []);
+        const activeEventId = d?.activeJuryEventId || localStorage.getItem("activeJuryEventId");
+        const activeEventTitle = d?.activeJuryEventTitle || localStorage.getItem("activeJuryEventTitle");
+
+        let resolvedRound = 1;
+        const matchedEvent = eventsList.find((e: any) => 
+          (activeEventId && activeEventId !== "ALL_EVENTS" && (e.id === activeEventId || e._id === activeEventId)) ||
+          (activeEventTitle && activeEventTitle !== "All Events" && e.title?.toLowerCase() === activeEventTitle?.toLowerCase())
+        );
+
+        if (matchedEvent && matchedEvent.currentRound) {
+          resolvedRound = Number(matchedEvent.currentRound);
+        } else if (d && d.currentRound) {
+          resolvedRound = Number(d.currentRound);
         }
+
+        setActiveRound(resolvedRound);
+        localStorage.setItem("activeJuryRound", String(resolvedRound));
       } catch (e) {}
     };
 
@@ -128,21 +146,21 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
     return () => { if (evalsPoll) clearInterval(evalsPoll); };
   }, []);
 
-  // 3. Load registrations count for fallback metrics
+  // 3. Load registrations for accurate active round metrics
   useEffect(() => {
     let regsPoll: any = null;
-    const loadRegsCount = async () => {
+    const loadRegs = async () => {
       try {
         const list = await fetchRegistrations();
         if (Array.isArray(list)) {
-          setRegistrationsCount(list.length);
+          setRegistrations(list);
         }
       } catch (err) {
-        console.error("Error loading registrations count:", err);
+        console.error("Error loading registrations:", err);
       }
     };
-    loadRegsCount();
-    regsPoll = setInterval(loadRegsCount, 15000);
+    loadRegs();
+    regsPoll = setInterval(loadRegs, 15000);
     return () => { if (regsPoll) clearInterval(regsPoll); };
   }, []);
 
@@ -182,25 +200,74 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
     return () => { if (eventsPoll) clearInterval(eventsPoll); };
   }, []);
 
+  const isTeamInRound = (r: any, targetRound: number) => {
+    const rRound = Number(r.currentRound || r.round || 1);
+    const rPromoted = Number(r.promotedToRound || 0);
+    const rStatus = (r.roundStatus || r.status || "").trim().toLowerCase();
+
+    if (rStatus === "eliminated") return false;
+    if (rRound === targetRound || rPromoted === targetRound) return true;
+    if (rRound >= targetRound && rStatus !== "eliminated") return true;
+    return false;
+  };
+
+  const isTeamInActiveEvent = (r: any, config: { id: string; title: string }) => {
+    if (config.id === "ALL_EVENTS" || config.title.toLowerCase() === "all events") return true;
+    const evTitle = (r.eventTitle || r.event || r.track || "").trim().toLowerCase();
+    const cTitle = config.title.trim().toLowerCase();
+    const evId = r.eventId || r.event || "";
+    if (config.id && evId === config.id) return true;
+    return evTitle.includes(cTitle) || cTitle.includes(evTitle);
+  };
+
+  // Filter active round registrations for the active event
+  const activeRoundRegistrations = registrations.filter(r => 
+    isTeamInActiveEvent(r, activeEventConfig) && isTeamInRound(r, activeRound)
+  );
+
   // Filter evaluations based on active event configuration
   const activeEvaluations = evaluations.filter((item) => {
-    if (activeEventConfig.id === "ALL_EVENTS") return true;
-    return (
-      item.track.toLowerCase().includes(activeEventConfig.title.toLowerCase()) ||
-      activeEventConfig.title.toLowerCase().includes(item.track.toLowerCase())
-    );
+    if (activeEventConfig.id === "ALL_EVENTS" || activeEventConfig.title.toLowerCase() === "all events") return true;
+    const itemTrack = (item.track || "").toLowerCase();
+    const cTitle = activeEventConfig.title.toLowerCase();
+    return itemTrack.includes(cTitle) || cTitle.includes(itemTrack);
   });
 
-  // Derived real metrics
-  const totalAssignments = activeEvaluations.length > 0 ? activeEvaluations.length : registrationsCount;
-  const completedCount = activeEvaluations.filter((e) => e.status === "Evaluated" || e.isSaved).length;
+  // Derived real metrics strictly for active round teams
+  const totalAssignments = activeRoundRegistrations.length > 0 
+    ? activeRoundRegistrations.length 
+    : (activeEvaluations.length > 0 ? activeEvaluations.length : (registrations.length > 0 ? registrations.length : 0));
+
+  const completedCount = activeRoundRegistrations.length > 0
+    ? activeRoundRegistrations.filter((r) => {
+        if (r.status === "Evaluated" || r.isSaved) return true;
+        const teamNameClean = (r.teamName || r.name || "").trim().toLowerCase();
+        return activeEvaluations.some(e => 
+          e.teamName.trim().toLowerCase() === teamNameClean && (e.status === "Evaluated" || e.isSaved)
+        );
+      }).length
+    : activeEvaluations.filter((e) => e.status === "Evaluated" || e.isSaved).length;
+
   const pendingCount = Math.max(0, totalAssignments - completedCount);
   const completionPercentage = totalAssignments > 0 ? Math.round((completedCount / totalAssignments) * 100) : 0;
 
   // Derive tracks breakdown dynamically from Firestore (Filtering out 100% completed tracks)
   const tracksMap = new Map<string, { total: number; evaluated: number }>();
   
-  if (activeEvaluations.length > 0) {
+  if (activeRoundRegistrations.length > 0) {
+    activeRoundRegistrations.forEach((r) => {
+      const trackName = r.eventTitle || r.track || activeEventConfig.title || "General Track";
+      const existing = tracksMap.get(trackName) || { total: 0, evaluated: 0 };
+      const teamNameClean = (r.teamName || r.name || "").trim().toLowerCase();
+      const isEv = r.status === "Evaluated" || r.isSaved || activeEvaluations.some(e => 
+        e.teamName.trim().toLowerCase() === teamNameClean && (e.status === "Evaluated" || e.isSaved)
+      );
+      tracksMap.set(trackName, {
+        total: existing.total + 1,
+        evaluated: existing.evaluated + (isEv ? 1 : 0)
+      });
+    });
+  } else if (activeEvaluations.length > 0) {
     activeEvaluations.forEach((item) => {
       const trackName = item.track || activeEventConfig.title || "General Track";
       const existing = tracksMap.get(trackName) || { total: 0, evaluated: 0 };
