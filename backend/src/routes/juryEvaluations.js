@@ -109,6 +109,8 @@ router.post(
           juryScore: payload.totalScore || payload.score || 0,
           juryEvaluated: true,
           evaluationStatus: payload.status || 'Evaluated',
+          criteriaScores: payload.criteriaScores || {},
+          ...(payload.criteriaScores || {}),
           communication: payload.communication || 0,
           innovationUniqueness: payload.innovationUniqueness || 0,
           feasibilityViability: payload.feasibilityViability || 0,
@@ -175,7 +177,11 @@ router.put(
 
     let filter = { _id: id.match(/^[0-9a-fA-F]{24}$/) ? id : null };
     if (!filter._id) {
-      filter = { $or: [{ registrationId: id }, { _id: id }] };
+      const roundNum = payload.round ? Number(payload.round) : 1;
+      filter = { 
+        $or: [{ registrationId: id }, { _id: id }],
+        round: roundNum
+      };
     }
 
     const updated = await JuryEvaluation.findOneAndUpdate(
@@ -187,22 +193,37 @@ router.put(
     try {
       const regId = payload.registrationId || id;
       const Registration = require('../models/Registration');
-      await Registration.findByIdAndUpdate(regId, {
-        $set: {
-          totalScore: payload.totalScore || payload.score || 0,
-          score: payload.totalScore || payload.score || 0,
-          juryScore: payload.totalScore || payload.score || 0,
-          juryEvaluated: true,
-          evaluationStatus: payload.status || 'Evaluated',
-          communication: payload.communication || 0,
-          innovationUniqueness: payload.innovationUniqueness || 0,
-          feasibilityViability: payload.feasibilityViability || 0,
-          statistics: payload.statistics || 0,
-          revenue: payload.revenue || 0,
-          isSaved: payload.isSaved !== undefined ? payload.isSaved : true,
-          updatedAt: Date.now(),
-        },
-      });
+      const regDoc = await Registration.findById(regId);
+      const roundNum = payload.round ? Number(payload.round) : 1;
+      const currentScore = payload.totalScore || payload.score || 0;
+
+      const r1 = roundNum === 1 ? currentScore : Number(regDoc?.round1Score || 0);
+      const r2 = roundNum === 2 ? currentScore : Number(regDoc?.round2Score || 0);
+      const calculatedAvg = (r1 > 0 && r2 > 0) ? Math.round(((r1 + r2) / 2) * 10) / 10 : (r1 > 0 ? r1 : r2);
+
+      const regUpdate = {
+        totalScore: payload.totalScore || payload.score || 0,
+        score: payload.totalScore || payload.score || 0,
+        juryScore: payload.totalScore || payload.score || 0,
+        juryEvaluated: true,
+        evaluationStatus: payload.status || 'Evaluated',
+        criteriaScores: payload.criteriaScores || {},
+        ...(payload.criteriaScores || {}),
+        communication: payload.communication || 0,
+        innovationUniqueness: payload.innovationUniqueness || 0,
+        feasibilityViability: payload.feasibilityViability || 0,
+        statistics: payload.statistics || 0,
+        revenue: payload.revenue || 0,
+        isSaved: payload.isSaved !== undefined ? payload.isSaved : true,
+        round1Score: r1,
+        round2Score: r2,
+        averageScore: calculatedAvg,
+        updatedAt: Date.now(),
+      };
+      if (roundNum === 1) regUpdate.round1CriteriaScores = payload.criteriaScores || {};
+      if (roundNum === 2) regUpdate.round2CriteriaScores = payload.criteriaScores || {};
+
+      await Registration.findByIdAndUpdate(regId, { $set: regUpdate });
     } catch (err) {}
 
     res.json({

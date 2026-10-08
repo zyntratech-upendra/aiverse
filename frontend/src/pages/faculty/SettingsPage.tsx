@@ -25,6 +25,7 @@ import {
   EyeOff,
   Key,
   ShieldCheck,
+  Users,
   ArrowUp,
   ArrowDown,
   Edit3,
@@ -66,10 +67,26 @@ interface PortalConfig {
   juryPortalActive: boolean;
   activeJuryEventId?: string;
   activeJuryEventTitle?: string;
+  currentRound?: number;
+  juryMarksColumns?: JuryMarksColumn[];
   heroImages?: string[];
   aboutImage?: string;
   aboutImages?: string[];
 }
+
+export interface JuryMarksColumn {
+  id: string;
+  name: string;
+  maxMarks: number;
+}
+
+export const DEFAULT_JURY_MARKS_COLUMNS: JuryMarksColumn[] = [
+  { id: "communication", name: "Communication", maxMarks: 20 },
+  { id: "innovationUniqueness", name: "Innovation & Uniqueness", maxMarks: 20 },
+  { id: "feasibilityViability", name: "Feasibility & Viability", maxMarks: 20 },
+  { id: "statistics", name: "Statistics", maxMarks: 20 },
+  { id: "revenue", name: "Revenue", maxMarks: 20 }
+];
 
 const SettingsPage: React.FC = () => {
   // Saved default configurations (to support Discard & Reset)
@@ -95,6 +112,8 @@ const SettingsPage: React.FC = () => {
     juryPortalActive: true,
     activeJuryEventId: "ALL_EVENTS",
     activeJuryEventTitle: "All Events",
+    currentRound: 1,
+    juryMarksColumns: DEFAULT_JURY_MARKS_COLUMNS,
     heroImages: ["/homepage/p.png", "/homepage/vice.png", "/homepage/all.jpeg"],
     aboutImage: "/homepage/g.jpeg",
     aboutImages: ["/homepage/g.jpeg"]
@@ -161,6 +180,13 @@ const SettingsPage: React.FC = () => {
   const [editingRoleIndex, setEditingRoleIndex] = useState<number | null>(null);
   const [editingRoleValue, setEditingRoleValue] = useState("");
 
+  // Marks Columns Configuration State
+  const [newMarksColName, setNewMarksColName] = useState("");
+  const [newMarksColMax, setNewMarksColMax] = useState("20");
+  const [editingMarksColId, setEditingMarksColId] = useState<string | null>(null);
+  const [editingMarksColName, setEditingMarksColName] = useState("");
+  const [editingMarksColMax, setEditingMarksColMax] = useState("20");
+
   // Toast trigger helper
   const addToast = (text: string, type: ToastMessage["type"] = "success") => {
     const id = `${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
@@ -213,6 +239,92 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  // Student Organizer Password State (No current password required)
+  const [orgNewPassword, setOrgNewPassword] = useState("");
+  const [orgConfirmPassword, setOrgConfirmPassword] = useState("");
+  const [orgShowNewPassword, setOrgShowNewPassword] = useState(false);
+  const [orgShowConfirmPassword, setOrgShowConfirmPassword] = useState(false);
+  const [isUpdatingOrgPassword, setIsUpdatingOrgPassword] = useState(false);
+  const [orgPasswordError, setOrgPasswordError] = useState("");
+
+  // Password update handler for Student Organizer (Direct Admin Override)
+  const handleUpdateOrgPassword = async () => {
+    setOrgPasswordError("");
+
+    if (!orgNewPassword) {
+      setOrgPasswordError("Please enter a new password for Student Organizer.");
+      return;
+    }
+
+    if (orgNewPassword.length < 6) {
+      setOrgPasswordError("Password must be at least 6 characters long.");
+      return;
+    }
+
+    if (orgNewPassword !== orgConfirmPassword) {
+      setOrgPasswordError("Passwords do not match. Please re-check.");
+      return;
+    }
+
+    setIsUpdatingOrgPassword(true);
+
+    try {
+      await apiUpdatePassword(orgNewPassword, "studentorganizer@aiverse.in");
+      setOrgNewPassword("");
+      setOrgConfirmPassword("");
+      addToast("Student Organizer password updated successfully!", "success");
+    } catch (err: any) {
+      console.error("Error updating Student Organizer password:", err);
+      setOrgPasswordError(err?.message || "Failed to update Student Organizer password.");
+      addToast(err?.message || "Failed to update Student Organizer password.", "error");
+    } finally {
+      setIsUpdatingOrgPassword(false);
+    }
+  };
+
+  // Jury Portal Password State (No current password required)
+  const [juryNewPassword, setJuryNewPassword] = useState("");
+  const [juryConfirmPassword, setJuryConfirmPassword] = useState("");
+  const [juryShowNewPassword, setJuryShowNewPassword] = useState(false);
+  const [juryShowConfirmPassword, setJuryShowConfirmPassword] = useState(false);
+  const [isUpdatingJuryPassword, setIsUpdatingJuryPassword] = useState(false);
+  const [juryPasswordError, setJuryPasswordError] = useState("");
+
+  // Password update handler for Jury Portal (Direct Admin Override)
+  const handleUpdateJuryPassword = async () => {
+    setJuryPasswordError("");
+
+    if (!juryNewPassword) {
+      setJuryPasswordError("Please enter a new password for Jury Portal.");
+      return;
+    }
+
+    if (juryNewPassword.length < 6) {
+      setJuryPasswordError("Password must be at least 6 characters long.");
+      return;
+    }
+
+    if (juryNewPassword !== juryConfirmPassword) {
+      setJuryPasswordError("Passwords do not match. Please re-check.");
+      return;
+    }
+
+    setIsUpdatingJuryPassword(true);
+
+    try {
+      await apiUpdatePassword(juryNewPassword, "jury@aiverse.in");
+      setJuryNewPassword("");
+      setJuryConfirmPassword("");
+      addToast("Jury Portal password updated successfully!", "success");
+    } catch (err: any) {
+      console.error("Error updating Jury Portal password:", err);
+      setJuryPasswordError(err?.message || "Failed to update Jury Portal password.");
+      addToast(err?.message || "Failed to update Jury Portal password.", "error");
+    } finally {
+      setIsUpdatingJuryPassword(false);
+    }
+  };
+
   // Fetch settings from MongoDB backend on mount
   useEffect(() => {
     const fetchPortalSettings = async () => {
@@ -220,13 +332,23 @@ const SettingsPage: React.FC = () => {
         const fetchedData = await fetchSettings("portal_config");
         if (fetchedData && Object.keys(fetchedData).length > 0 && !fetchedData.error) {
           const mergedConfig = { ...defaultConfigs, ...fetchedData };
+          if (!mergedConfig.currentRound) {
+            mergedConfig.currentRound = 1;
+          }
+          if (!mergedConfig.juryMarksColumns || !Array.isArray(mergedConfig.juryMarksColumns) || mergedConfig.juryMarksColumns.length === 0) {
+            mergedConfig.juryMarksColumns = DEFAULT_JURY_MARKS_COLUMNS;
+          }
           setSavedConfig(mergedConfig);
           setCurrentConfig(mergedConfig);
           dataCache.set("portal_config", mergedConfig);
+          localStorage.setItem("activeJuryRound", String(mergedConfig.currentRound));
+          localStorage.setItem("juryMarksColumns", JSON.stringify(mergedConfig.juryMarksColumns));
         } else {
           setSavedConfig(defaultConfigs);
           setCurrentConfig(defaultConfigs);
           dataCache.set("portal_config", defaultConfigs);
+          localStorage.setItem("activeJuryRound", "1");
+          localStorage.setItem("juryMarksColumns", JSON.stringify(defaultConfigs.juryMarksColumns));
         }
       } catch (err) {
         console.error("Error loading settings from database:", err);
@@ -379,6 +501,194 @@ const SettingsPage: React.FC = () => {
         addToast("Roles reset to standard hierarchy. Click Save Changes to apply!", "info");
       }
     }
+  };
+
+  // Marks Columns Management Handlers (Jury Evaluation Criteria)
+  const handleAddMarksColumn = async () => {
+    const trimmedName = newMarksColName.trim();
+    if (!trimmedName) {
+      addToast("Please enter a marks column name.", "warning");
+      return;
+    }
+    const maxVal = parseInt(newMarksColMax, 10);
+    if (isNaN(maxVal) || maxVal <= 0) {
+      addToast("Maximum marks must be a positive number.", "warning");
+      return;
+    }
+
+    const currentColumns = currentConfig.juryMarksColumns || DEFAULT_JURY_MARKS_COLUMNS;
+    if (currentColumns.some(c => c.name.toLowerCase() === trimmedName.toLowerCase())) {
+      addToast("A marks column with this name already exists.", "warning");
+      return;
+    }
+
+    const newCol: JuryMarksColumn = {
+      id: `col_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+      name: trimmedName,
+      maxMarks: maxVal
+    };
+
+    const updatedColumns = [...currentColumns, newCol];
+    const updatedConfig = { ...currentConfig, juryMarksColumns: updatedColumns };
+    setCurrentConfig(updatedConfig);
+    setNewMarksColName("");
+    setNewMarksColMax("20");
+
+    localStorage.setItem("juryMarksColumns", JSON.stringify(updatedColumns));
+    window.dispatchEvent(new Event("storage"));
+    window.dispatchEvent(new Event("juryPortalStatusChanged"));
+
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      dataCache.set("portal_config", updatedConfig);
+      addToast(`Marks column "${trimmedName}" (${maxVal} Marks) added and saved!`, "success");
+    } catch (err) {
+      console.error("Error auto-saving marks column:", err);
+      addToast(`"${trimmedName}" added locally. Click Confirm System Update to sync.`, "info");
+    }
+  };
+
+  const handleRemoveMarksColumn = async (colId: string, colName: string) => {
+    const currentColumns = currentConfig.juryMarksColumns || DEFAULT_JURY_MARKS_COLUMNS;
+    if (currentColumns.length <= 1) {
+      addToast("You must keep at least one marks column for jury evaluation.", "warning");
+      return;
+    }
+    if (!window.confirm(`Delete the marks column "${colName}"?`)) return;
+
+    const updatedColumns = currentColumns.filter(c => c.id !== colId);
+    const updatedConfig = { ...currentConfig, juryMarksColumns: updatedColumns };
+    setCurrentConfig(updatedConfig);
+
+    localStorage.setItem("juryMarksColumns", JSON.stringify(updatedColumns));
+    window.dispatchEvent(new Event("storage"));
+    window.dispatchEvent(new Event("juryPortalStatusChanged"));
+
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      dataCache.set("portal_config", updatedConfig);
+      addToast(`Marks column "${colName}" removed.`, "info");
+    } catch (err) {
+      console.error("Error auto-saving column removal:", err);
+    }
+  };
+
+  const handleStartEditMarksColumn = (col: JuryMarksColumn) => {
+    setEditingMarksColId(col.id);
+    setEditingMarksColName(col.name);
+    setEditingMarksColMax(String(col.maxMarks));
+  };
+
+  const handleSaveEditMarksColumn = async (colId: string) => {
+    const trimmedName = editingMarksColName.trim();
+    if (!trimmedName) {
+      addToast("Column name cannot be empty.", "warning");
+      return;
+    }
+    const maxVal = parseInt(editingMarksColMax, 10);
+    if (isNaN(maxVal) || maxVal <= 0) {
+      addToast("Maximum marks must be a positive number.", "warning");
+      return;
+    }
+
+    const currentColumns = currentConfig.juryMarksColumns || DEFAULT_JURY_MARKS_COLUMNS;
+    const updatedColumns = currentColumns.map(c => {
+      if (c.id === colId) {
+        return { ...c, name: trimmedName, maxMarks: maxVal };
+      }
+      return c;
+    });
+
+    const updatedConfig = { ...currentConfig, juryMarksColumns: updatedColumns };
+    setCurrentConfig(updatedConfig);
+    setEditingMarksColId(null);
+
+    localStorage.setItem("juryMarksColumns", JSON.stringify(updatedColumns));
+    window.dispatchEvent(new Event("storage"));
+    window.dispatchEvent(new Event("juryPortalStatusChanged"));
+
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      dataCache.set("portal_config", updatedConfig);
+      addToast(`Marks column updated to "${trimmedName}" (${maxVal} Marks)!`, "success");
+    } catch (err) {
+      console.error("Error auto-saving column edit:", err);
+    }
+  };
+
+  const handleMoveMarksColumn = async (index: number, direction: "up" | "down") => {
+    const currentColumns = [...(currentConfig.juryMarksColumns || DEFAULT_JURY_MARKS_COLUMNS)];
+    const targetIndex = direction === "up" ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= currentColumns.length) return;
+
+    const temp = currentColumns[index];
+    currentColumns[index] = currentColumns[targetIndex];
+    currentColumns[targetIndex] = temp;
+
+    const updatedConfig = { ...currentConfig, juryMarksColumns: currentColumns };
+    setCurrentConfig(updatedConfig);
+
+    localStorage.setItem("juryMarksColumns", JSON.stringify(currentColumns));
+    window.dispatchEvent(new Event("storage"));
+    window.dispatchEvent(new Event("juryPortalStatusChanged"));
+
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      dataCache.set("portal_config", updatedConfig);
+    } catch (err) {
+      console.error("Error saving column order:", err);
+    }
+  };
+
+  const handleResetDefaultMarksColumns = async () => {
+    if (!window.confirm("Reset marks columns to default 5 evaluation criteria (100 total marks)?")) return;
+
+    const updatedConfig = { ...currentConfig, juryMarksColumns: DEFAULT_JURY_MARKS_COLUMNS };
+    setCurrentConfig(updatedConfig);
+
+    localStorage.setItem("juryMarksColumns", JSON.stringify(DEFAULT_JURY_MARKS_COLUMNS));
+    window.dispatchEvent(new Event("storage"));
+    window.dispatchEvent(new Event("juryPortalStatusChanged"));
+
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      dataCache.set("portal_config", updatedConfig);
+      addToast("Marks columns reset to default criteria (100 Marks)!", "success");
+    } catch (err) {
+      console.error("Error resetting marks columns:", err);
+    }
+  };
+
+  // Evaluation Rounds Active/Inactive Toggle Handler (Round 1 vs Round 2)
+  const handleSetActiveRound = async (roundNumber: 1 | 2) => {
+    if (currentConfig.currentRound === roundNumber) return;
+
+    const updatedConfig = { ...currentConfig, currentRound: roundNumber };
+    setCurrentConfig(updatedConfig);
+    localStorage.setItem("activeJuryRound", String(roundNumber));
+
+    try {
+      await updateSettings("portal_config", updatedConfig);
+      setSavedConfig(updatedConfig);
+      dataCache.set("portal_config", updatedConfig);
+    } catch (err) {
+      console.error("Error updating active jury round:", err);
+    }
+
+    // Instantly notify active tabs, windows, and jury components
+    window.dispatchEvent(new Event("storage"));
+    window.dispatchEvent(new Event("juryPortalStatusChanged"));
+    window.dispatchEvent(new Event("portalSettingsUpdated"));
+
+    addToast(
+      `Round ${roundNumber} is now ACTIVE for Jury Evaluation. Round ${roundNumber === 1 ? 2 : 1} is now INACTIVE.`,
+      "success"
+    );
   };
 
   // Hero Images Management Handlers
@@ -610,8 +920,11 @@ const SettingsPage: React.FC = () => {
       await updateSettings("portal_config", currentConfig);
       setSavedConfig(currentConfig);
       dataCache.set("portal_config", currentConfig);
+      localStorage.setItem("activeJuryRound", String(currentConfig.currentRound || 1));
+      localStorage.setItem("juryMarksColumns", JSON.stringify(currentConfig.juryMarksColumns || DEFAULT_JURY_MARKS_COLUMNS));
       window.dispatchEvent(new Event("portalSettingsUpdated"));
       window.dispatchEvent(new Event("storage"));
+      window.dispatchEvent(new Event("juryPortalStatusChanged"));
       addToast("Portal configurations updated successfully!");
     } catch (err) {
       console.error("Error writing settings to database:", err);
@@ -628,6 +941,7 @@ const SettingsPage: React.FC = () => {
 
     setTimeout(() => {
       setCurrentConfig(savedConfig);
+      localStorage.setItem("activeJuryRound", String(savedConfig.currentRound || 1));
       setIsDiscarding(false);
       addToast("Form changes discarded successfully.", "info");
     }, 800);
@@ -655,8 +969,11 @@ const SettingsPage: React.FC = () => {
       setCurrentConfig(defaultConfigs);
       setSavedConfig(defaultConfigs);
       dataCache.set("portal_config", defaultConfigs);
+      localStorage.setItem("activeJuryRound", "1");
+      localStorage.setItem("juryMarksColumns", JSON.stringify(DEFAULT_JURY_MARKS_COLUMNS));
       window.dispatchEvent(new Event("portalSettingsUpdated"));
       window.dispatchEvent(new Event("storage"));
+      window.dispatchEvent(new Event("juryPortalStatusChanged"));
       addToast("All configurations restored to system defaults.");
     } catch (err) {
       console.error("Error resetting settings in database:", err);
@@ -1405,6 +1722,163 @@ const SettingsPage: React.FC = () => {
                 </button>
               </div>
 
+              {/* Evaluation Rounds Section (Round 1 vs Round 2) */}
+              <div className="pt-4 border-t border-slate-100 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      Jury Evaluation Rounds
+                    </label>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      Configure the active evaluation round. Activating one round automatically deactivates the other.
+                    </p>
+                  </div>
+                  <span className="px-2.5 py-1 text-[10px] font-mono font-bold rounded-lg bg-blue-50 text-blue-700 border border-blue-200 shadow-xs self-start sm:self-auto shrink-0">
+                    Round {currentConfig.currentRound === 2 ? "2" : "1"} Active
+                  </span>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 pt-1">
+                  {/* Round 1 Card */}
+                  {(() => {
+                    const isRound1Active = (currentConfig.currentRound || 1) === 1;
+                    return (
+                      <div
+                        className={`p-4 rounded-2xl transition-all border ${
+                          isRound1Active
+                            ? "bg-blue-50/40 border-blue-500 ring-2 ring-blue-500/15 shadow-sm"
+                            : "bg-slate-50/60 border-slate-200 hover:border-slate-300 opacity-80 hover:opacity-100"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div className="flex items-center gap-2.5">
+                            <div
+                              className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs ${
+                                isRound1Active
+                                  ? "bg-[#2563EB] text-white shadow-md shadow-blue-600/20"
+                                  : "bg-slate-200 text-slate-600"
+                              }`}
+                            >
+                              R1
+                            </div>
+                            <div>
+                              <h3 className="text-xs font-extrabold text-slate-800">Round 1</h3>
+                              <p className="text-[10px] text-slate-400 font-semibold">
+                                Preliminary / Initial Evaluation
+                              </p>
+                            </div>
+                          </div>
+
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase ${
+                              isRound1Active
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                : "bg-slate-200/70 text-slate-500 border border-slate-300/50"
+                            }`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                isRound1Active ? "bg-emerald-600 animate-pulse" : "bg-slate-400"
+                              }`}
+                            />
+                            {isRound1Active ? "ACTIVE" : "INACTIVE"}
+                          </span>
+                        </div>
+
+                        {isRound1Active ? (
+                          <button
+                            type="button"
+                            disabled
+                            className="w-full py-2 px-3 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-default"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5 text-white" />
+                            <span>Currently Active</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleSetActiveRound(1)}
+                            className="w-full py-2 px-3 rounded-xl bg-white hover:bg-blue-600 text-[#2563EB] hover:text-white font-bold text-xs border border-blue-200 hover:border-blue-600 transition-all flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer shadow-xs group"
+                          >
+                            <Sparkles className="h-3.5 w-3.5 text-blue-500 group-hover:text-white" />
+                            <span>Activate Round 1</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+
+                  {/* Round 2 Card */}
+                  {(() => {
+                    const isRound2Active = currentConfig.currentRound === 2;
+                    return (
+                      <div
+                        className={`p-4 rounded-2xl transition-all border ${
+                          isRound2Active
+                            ? "bg-blue-50/40 border-blue-500 ring-2 ring-blue-500/15 shadow-sm"
+                            : "bg-slate-50/60 border-slate-200 hover:border-slate-300 opacity-80 hover:opacity-100"
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-3 mb-3">
+                          <div className="flex items-center gap-2.5">
+                            <div
+                              className={`w-9 h-9 rounded-xl flex items-center justify-center font-black text-xs ${
+                                isRound2Active
+                                  ? "bg-[#2563EB] text-white shadow-md shadow-blue-600/20"
+                                  : "bg-slate-200 text-slate-600"
+                              }`}
+                            >
+                              R2
+                            </div>
+                            <div>
+                              <h3 className="text-xs font-extrabold text-slate-800">Round 2</h3>
+                              <p className="text-[10px] text-slate-400 font-semibold">
+                                Finals / Finalist Evaluation
+                              </p>
+                            </div>
+                          </div>
+
+                          <span
+                            className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase ${
+                              isRound2Active
+                                ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
+                                : "bg-slate-200/70 text-slate-500 border border-slate-300/50"
+                            }`}
+                          >
+                            <span
+                              className={`w-1.5 h-1.5 rounded-full ${
+                                isRound2Active ? "bg-emerald-600 animate-pulse" : "bg-slate-400"
+                              }`}
+                            />
+                            {isRound2Active ? "ACTIVE" : "INACTIVE"}
+                          </span>
+                        </div>
+
+                        {isRound2Active ? (
+                          <button
+                            type="button"
+                            disabled
+                            className="w-full py-2 px-3 rounded-xl bg-emerald-600 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs cursor-default"
+                          >
+                            <CheckCircle2 className="h-3.5 w-3.5 text-white" />
+                            <span>Currently Active</span>
+                          </button>
+                        ) : (
+                          <button
+                            type="button"
+                            onClick={() => handleSetActiveRound(2)}
+                            className="w-full py-2 px-3 rounded-xl bg-white hover:bg-blue-600 text-[#2563EB] hover:text-white font-bold text-xs border border-blue-200 hover:border-blue-600 transition-all flex items-center justify-center gap-1.5 active:scale-95 cursor-pointer shadow-xs group"
+                          >
+                            <Sparkles className="h-3.5 w-3.5 text-blue-500 group-hover:text-white" />
+                            <span>Activate Round 2</span>
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              </div>
+
               {/* Event Selector for Jury Scoring */}
               <div className="pt-4 border-t border-slate-100 space-y-2">
                 <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
@@ -1450,6 +1924,189 @@ const SettingsPage: React.FC = () => {
                 <p className="text-[10px] text-slate-400 font-semibold">
                   Select which event participants the jury will evaluate and mark in the spreadsheet.
                 </p>
+              </div>
+
+              {/* Marks Columns & Evaluation Rubric Section */}
+              <div className="pt-4 border-t border-slate-100 space-y-3">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+                  <div>
+                    <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                      Marks Columns & Evaluation Criteria
+                    </label>
+                    <p className="text-[11px] text-slate-500 font-medium mt-0.5">
+                      Configure the scoring columns and maximum marks for jury evaluation in the spreadsheet.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 self-start sm:self-auto shrink-0">
+                    <span className="px-2.5 py-1 text-[10px] font-mono font-bold rounded-lg bg-blue-50 text-blue-700 border border-blue-200 shadow-xs">
+                      {(currentConfig.juryMarksColumns || DEFAULT_JURY_MARKS_COLUMNS).length} Criteria • Total {(currentConfig.juryMarksColumns || DEFAULT_JURY_MARKS_COLUMNS).reduce((sum, c) => sum + (Number(c.maxMarks) || 0), 0)} Marks
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleResetDefaultMarksColumns}
+                      title="Reset to 5 default criteria (100 Marks)"
+                      className="px-2.5 py-1 text-[10px] font-bold text-slate-600 hover:text-slate-900 bg-slate-100 hover:bg-slate-200 border border-slate-200/80 rounded-lg flex items-center gap-1 transition-all cursor-pointer"
+                    >
+                      <RotateCcw className="h-3 w-3 text-slate-500" />
+                      <span>Reset</span>
+                    </button>
+                  </div>
+                </div>
+
+                {/* Configured Columns List */}
+                <div className="space-y-2">
+                  {(currentConfig.juryMarksColumns || DEFAULT_JURY_MARKS_COLUMNS).map((col, idx, arr) => {
+                    const isEditing = editingMarksColId === col.id;
+
+                    return (
+                      <div 
+                        key={col.id}
+                        className="flex items-center justify-between p-2.5 rounded-xl border border-slate-200/90 bg-slate-50/90 hover:bg-slate-100/80 transition-colors gap-2"
+                      >
+                        {isEditing ? (
+                          <div className="flex items-center gap-2 flex-1 flex-wrap sm:flex-nowrap">
+                            <input
+                              type="text"
+                              value={editingMarksColName}
+                              onChange={(e) => setEditingMarksColName(e.target.value)}
+                              placeholder="Column Name"
+                              className="flex-1 min-w-[120px] px-3 py-1.5 bg-white border border-blue-400 rounded-lg text-xs font-bold text-slate-800 focus:outline-none focus:ring-2 focus:ring-blue-500/20"
+                              autoFocus
+                            />
+                            <div className="flex items-center gap-1 bg-white border border-blue-400 rounded-lg px-2 py-1">
+                              <span className="text-[10px] text-slate-400 font-bold uppercase">Max:</span>
+                              <input
+                                type="number"
+                                min="1"
+                                max="500"
+                                value={editingMarksColMax}
+                                onChange={(e) => setEditingMarksColMax(e.target.value)}
+                                placeholder="20"
+                                className="w-14 bg-transparent text-xs font-mono font-bold text-slate-800 text-center focus:outline-none"
+                              />
+                            </div>
+                            <div className="flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => handleSaveEditMarksColumn(col.id)}
+                                className="p-1.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-lg transition-colors cursor-pointer"
+                                title="Save Column"
+                              >
+                                <Check className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => setEditingMarksColId(null)}
+                                className="p-1.5 bg-slate-200 hover:bg-slate-300 text-slate-700 rounded-lg transition-colors cursor-pointer"
+                                title="Cancel Edit"
+                              >
+                                <X className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              <span className="w-5 h-5 rounded-md bg-slate-200 text-slate-600 font-mono text-[10px] font-extrabold flex items-center justify-center shrink-0">
+                                {idx + 1}
+                              </span>
+                              <span className="text-xs font-bold text-slate-800 truncate">
+                                {col.name}
+                              </span>
+                            </div>
+
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <span className="px-2 py-0.5 rounded-md bg-blue-50 text-blue-700 border border-blue-100 font-mono text-[10px] font-bold">
+                                Max: {col.maxMarks}
+                              </span>
+                              <button
+                                type="button"
+                                disabled={idx === 0}
+                                onClick={() => handleMoveMarksColumn(idx, "up")}
+                                className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:hover:text-slate-400 rounded transition-colors cursor-pointer"
+                                title="Move Up"
+                              >
+                                <ArrowUp className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                disabled={idx === arr.length - 1}
+                                onClick={() => handleMoveMarksColumn(idx, "down")}
+                                className="p-1 text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:hover:text-slate-400 rounded transition-colors cursor-pointer"
+                                title="Move Down"
+                              >
+                                <ArrowDown className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleStartEditMarksColumn(col)}
+                                className="p-1 text-slate-400 hover:text-blue-600 rounded transition-colors cursor-pointer"
+                                title="Edit Column"
+                              >
+                                <Edit3 className="h-3.5 w-3.5" />
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleRemoveMarksColumn(col.id, col.name)}
+                                className="p-1 text-slate-400 hover:text-rose-600 rounded transition-colors cursor-pointer"
+                                title="Delete Column"
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Add New Marks Column Input Form */}
+                <div className="pt-2">
+                  <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2">
+                    <input
+                      type="text"
+                      value={newMarksColName}
+                      onChange={(e) => setNewMarksColName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") {
+                          e.preventDefault();
+                          handleAddMarksColumn();
+                        }
+                      }}
+                      placeholder="Add Marks Column (e.g. Code Quality, Presentation)..."
+                      className="flex-1 px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500"
+                    />
+                    <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1 bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-1.5 shrink-0">
+                        <span className="text-[10px] text-slate-400 font-bold uppercase">Max:</span>
+                        <input
+                          type="number"
+                          min="1"
+                          max="500"
+                          value={newMarksColMax}
+                          onChange={(e) => setNewMarksColMax(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              handleAddMarksColumn();
+                            }
+                          }}
+                          placeholder="20"
+                          className="w-12 bg-transparent text-xs font-mono font-bold text-slate-800 text-center focus:outline-none"
+                        />
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleAddMarksColumn}
+                        className="px-3.5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 shadow-sm transition-colors shrink-0 cursor-pointer"
+                      >
+                        <Plus className="h-3.5 w-3.5" />
+                        <span>Add Column</span>
+                      </button>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
           </div>
@@ -1886,6 +2543,260 @@ const SettingsPage: React.FC = () => {
             <div className="pt-2 flex items-center justify-center gap-1.5 text-[9px] font-extrabold text-red-600 uppercase tracking-widest leading-none">
               <Lock className="h-3.5 w-3.5 shrink-0" />
               <span>Superadmin Authentication Required</span>
+            </div>
+          </div>
+
+          {/* Card: Student Organizer Portal Password */}
+          <div className="bg-white p-6 rounded-card border border-slate-100 shadow-card text-left space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-50 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-emerald-50 text-emerald-600 rounded-xl">
+                  <Users className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-800">Student Organizer Password</h2>
+                  <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                    Update login credentials for Student Coordinators & attendance desk.
+                  </p>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-100">
+                <ShieldCheck className="w-3 h-3" />
+                Organizer Portal
+              </span>
+            </div>
+
+            <div className="bg-slate-50/80 rounded-xl p-3 border border-slate-100 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Target Account</span>
+                <span className="text-xs font-bold text-slate-800 truncate block">studentorganizer@aiverse.in</span>
+              </div>
+              <span className="text-[10px] font-semibold text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-lg border border-emerald-200/60 shadow-2xs">
+                No Current Password Required
+              </span>
+            </div>
+
+            {orgPasswordError && (
+              <div className="p-3 bg-red-50 border border-red-200/80 rounded-xl flex items-center gap-2 text-xs font-bold text-red-700 animate-in fade-in duration-200">
+                <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+                <span>{orgPasswordError}</span>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {/* New Password Input */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                  New Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={orgShowNewPassword ? "text" : "password"}
+                    value={orgNewPassword}
+                    onChange={(e) => {
+                      setOrgNewPassword(e.target.value);
+                      setOrgPasswordError("");
+                    }}
+                    placeholder="Enter at least 6 characters"
+                    className="w-full px-4 py-2.5 pr-10 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 bg-slate-50/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setOrgShowNewPassword(!orgShowNewPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                  >
+                    {orgShowNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirm New Password Input */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                  Confirm New Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={orgShowConfirmPassword ? "text" : "password"}
+                    value={orgConfirmPassword}
+                    onChange={(e) => {
+                      setOrgConfirmPassword(e.target.value);
+                      setOrgPasswordError("");
+                    }}
+                    placeholder="Re-enter new password"
+                    className="w-full px-4 py-2.5 pr-10 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 bg-slate-50/40 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 focus:border-emerald-500 transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setOrgShowConfirmPassword(!orgShowConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                  >
+                    {orgShowConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Password Match Status helper */}
+              {orgNewPassword && orgConfirmPassword && (
+                <div className="flex items-center gap-1.5 text-[10px] font-bold">
+                  {orgNewPassword === orgConfirmPassword ? (
+                    <span className="text-emerald-600 flex items-center gap-1">
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Passwords match
+                    </span>
+                  ) : (
+                    <span className="text-rose-500 flex items-center gap-1">
+                      <AlertCircle className="h-3.5 w-3.5" /> Passwords do not match
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Update Password Button */}
+              <button
+                type="button"
+                onClick={handleUpdateOrgPassword}
+                disabled={isUpdatingOrgPassword || !orgNewPassword || !orgConfirmPassword}
+                className="w-full py-2.5 px-4 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold text-xs rounded-xl shadow-md shadow-emerald-600/20 hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99]"
+              >
+                {isUpdatingOrgPassword ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Updating Organizer Password...</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="h-3.5 w-3.5" />
+                    <span>Update Student Organizer Password</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Card: Jury Evaluation Portal Password */}
+          <div className="bg-white p-6 rounded-card border border-slate-100 shadow-card text-left space-y-5">
+            <div className="flex items-center justify-between border-b border-slate-50 pb-3">
+              <div className="flex items-center gap-3">
+                <div className="p-2 bg-purple-50 text-purple-600 rounded-xl">
+                  <Award className="h-5 w-5" />
+                </div>
+                <div>
+                  <h2 className="text-base font-bold text-slate-800">Jury Portal Password</h2>
+                  <p className="text-[10px] text-slate-400 font-semibold mt-0.5">
+                    Update login credentials for Hackathon Judges & evaluation panel.
+                  </p>
+                </div>
+              </div>
+              <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold uppercase tracking-wider bg-purple-50 text-purple-700 border border-purple-100">
+                <ShieldCheck className="w-3 h-3" />
+                Jury Portal
+              </span>
+            </div>
+
+            <div className="bg-slate-50/80 rounded-xl p-3 border border-slate-100 flex items-center justify-between gap-3">
+              <div className="min-w-0">
+                <span className="text-[9px] font-bold text-slate-400 uppercase tracking-wider block">Target Account</span>
+                <span className="text-xs font-bold text-slate-800 truncate block">jury@aiverse.in</span>
+              </div>
+              <span className="text-[10px] font-semibold text-purple-700 bg-purple-50 px-2.5 py-1 rounded-lg border border-purple-200/60 shadow-2xs">
+                No Current Password Required
+              </span>
+            </div>
+
+            {juryPasswordError && (
+              <div className="p-3 bg-red-50 border border-red-200/80 rounded-xl flex items-center gap-2 text-xs font-bold text-red-700 animate-in fade-in duration-200">
+                <AlertCircle className="h-4 w-4 shrink-0 text-red-500" />
+                <span>{juryPasswordError}</span>
+              </div>
+            )}
+
+            <div className="space-y-4">
+              {/* New Password Input */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                  New Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={juryShowNewPassword ? "text" : "password"}
+                    value={juryNewPassword}
+                    onChange={(e) => {
+                      setJuryNewPassword(e.target.value);
+                      setJuryPasswordError("");
+                    }}
+                    placeholder="Enter at least 6 characters"
+                    className="w-full px-4 py-2.5 pr-10 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 bg-slate-50/40 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setJuryShowNewPassword(!juryShowNewPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                  >
+                    {juryShowNewPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Confirm New Password Input */}
+              <div>
+                <label className="block text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1.5">
+                  Confirm New Password
+                </label>
+                <div className="relative">
+                  <input
+                    type={juryShowConfirmPassword ? "text" : "password"}
+                    value={juryConfirmPassword}
+                    onChange={(e) => {
+                      setJuryConfirmPassword(e.target.value);
+                      setJuryPasswordError("");
+                    }}
+                    placeholder="Re-enter new password"
+                    className="w-full px-4 py-2.5 pr-10 border border-slate-200 rounded-xl text-xs font-semibold text-slate-800 bg-slate-50/40 focus:outline-none focus:ring-2 focus:ring-purple-500/20 focus:border-purple-500 transition-all"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setJuryShowConfirmPassword(!juryShowConfirmPassword)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+                  >
+                    {juryShowConfirmPassword ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                  </button>
+                </div>
+              </div>
+
+              {/* Password Match Status helper */}
+              {juryNewPassword && juryConfirmPassword && (
+                <div className="flex items-center gap-1.5 text-[10px] font-bold">
+                  {juryNewPassword === juryConfirmPassword ? (
+                    <span className="text-emerald-600 flex items-center gap-1">
+                      <CheckCircle2 className="h-3.5 w-3.5" /> Passwords match
+                    </span>
+                  ) : (
+                    <span className="text-rose-500 flex items-center gap-1">
+                      <AlertCircle className="h-3.5 w-3.5" /> Passwords do not match
+                    </span>
+                  )}
+                </div>
+              )}
+
+              {/* Update Password Button */}
+              <button
+                type="button"
+                onClick={handleUpdateJuryPassword}
+                disabled={isUpdatingJuryPassword || !juryNewPassword || !juryConfirmPassword}
+                className="w-full py-2.5 px-4 bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-700 hover:to-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed text-white font-extrabold text-xs rounded-xl shadow-md shadow-purple-600/20 hover:shadow-lg transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99]"
+              >
+                {isUpdatingJuryPassword ? (
+                  <>
+                    <div className="w-3.5 h-3.5 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                    <span>Updating Jury Password...</span>
+                  </>
+                ) : (
+                  <>
+                    <Lock className="h-3.5 w-3.5" />
+                    <span>Update Jury Portal Password</span>
+                  </>
+                )}
+              </button>
             </div>
           </div>
 

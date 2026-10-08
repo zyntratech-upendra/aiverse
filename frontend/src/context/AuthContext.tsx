@@ -290,7 +290,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const updateUserPassword = async (newPassword: string) => {
     try {
-      await apiUpdatePassword(newPassword);
+      await apiUpdatePassword(newPassword, user?.email);
       if (user) {
         const updated = { ...user, requiresPasswordChange: false };
         setUser(updated);

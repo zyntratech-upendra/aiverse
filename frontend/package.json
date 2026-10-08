@@ -2,11 +2,12 @@
   "name": "ai-verse-migrate-frontend",
   "version": "0.1.0",
   "private": true,
+  "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "sync-src": "node scripts/copy_src.js"
+    "sync-src": "node scripts/copy_src.cjs"
   },
   "dependencies": {
     "framer-motion": "^12.42.2",

@@ -11,6 +11,7 @@ import { fetchSettings, fetchJuryEvaluations, fetchRegistrations, fetchEvents } 
 
 interface JuryDashboardViewProps {
   onNavigateTab: (tab: "Dashboard" | "Assignments") => void;
+  activeRound?: number;
 }
 
 interface JuryEvaluationDoc {
@@ -36,7 +37,8 @@ interface FirestoreEventDoc {
 }
 
 const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
-  onNavigateTab
+  onNavigateTab,
+  activeRound: propActiveRound
 }) => {
   const [evaluations, setEvaluations] = useState<JuryEvaluationDoc[]>([]);
   const [dbEvents, setDbEvents] = useState<FirestoreEventDoc[]>([]);
@@ -45,13 +47,24 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
     id: localStorage.getItem("activeJuryEventId") || "ALL_EVENTS",
     title: localStorage.getItem("activeJuryEventTitle") || "All Events"
   });
+  const [activeRound, setActiveRound] = useState<number>(() => {
+    if (propActiveRound) return propActiveRound;
+    const local = localStorage.getItem("activeJuryRound");
+    return local ? Number(local) : 1;
+  });
 
-  // 1. Subscribe to Active Event configuration from settings/portal_config
+  useEffect(() => {
+    if (propActiveRound) setActiveRound(propActiveRound);
+  }, [propActiveRound]);
+
+  // 1. Subscribe to Active Event and Round configuration from settings/portal_config
   useEffect(() => {
     const syncConfig = () => {
       const id = localStorage.getItem("activeJuryEventId") || "ALL_EVENTS";
       const title = localStorage.getItem("activeJuryEventTitle") || "All Events";
       setActiveEventConfig({ id, title });
+      const r = localStorage.getItem("activeJuryRound");
+      if (r) setActiveRound(Number(r));
     };
 
     window.addEventListener("storage", syncConfig);
@@ -67,6 +80,10 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
           setActiveEventConfig({ id, title });
           localStorage.setItem("activeJuryEventId", id);
           localStorage.setItem("activeJuryEventTitle", title);
+        }
+        if (d && d.currentRound) {
+          setActiveRound(Number(d.currentRound));
+          localStorage.setItem("activeJuryRound", String(d.currentRound));
         }
       } catch (e) {}
     };
@@ -215,9 +232,13 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
       {/* ================= WELCOME HEADER ================= */}
       <div className="bg-white p-6 rounded-3xl border border-slate-100 shadow-sm flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="text-[10px] font-extrabold text-blue-600 uppercase tracking-widest bg-blue-50 px-3 py-0.5 rounded-full border border-blue-100/60">
               REAL-TIME JURY METRICS
+            </span>
+            <span className="inline-flex items-center gap-1.5 px-3 py-0.5 rounded-full text-[10px] font-extrabold tracking-wide uppercase bg-blue-100 text-blue-800 border border-blue-200 shadow-xs">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
+              ROUND {activeRound} ACTIVE
             </span>
             <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase bg-emerald-100 text-emerald-700">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
@@ -229,7 +250,7 @@ const JuryDashboardView: React.FC<JuryDashboardViewProps> = ({
           </h1>
           <p className="text-sm font-medium text-slate-500 mt-1">
             You have <span className="font-extrabold text-blue-600">{pendingCount} projects</span> pending evaluation for{" "}
-            <span className="font-extrabold text-slate-800">{activeEventConfig.title}</span>.
+            <span className="font-extrabold text-slate-800">{activeEventConfig.title}</span> (Round {activeRound}).
           </p>
         </div>
 

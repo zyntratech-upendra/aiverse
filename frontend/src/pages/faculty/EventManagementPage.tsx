@@ -18,6 +18,8 @@ import {
   batchRoundAccess,
   fetchAllQuizzes,
   fetchQuizSubmissions,
+  fetchAllQuizSubmissions,
+  fetchQuizSessions,
   fetchJuryEvaluations,
   uploadImage
 } from "../../services/apiClient";
@@ -73,7 +75,8 @@ import {
   FileUp,
   Send,
   GraduationCap,
-  RotateCcw
+  RotateCcw,
+  RefreshCw
 } from "lucide-react";
 import DatePicker from "../../components/ui/DatePicker";
 import TimePicker from "../../components/ui/TimePicker";
@@ -3324,6 +3327,8 @@ const EventManagementPage: React.FC = () => {
   const [markUnselectedAsEliminated, setMarkUnselectedAsEliminated] = useState<boolean>(false);
   const [advanceEventRoundOnPromote, setAdvanceEventRoundOnPromote] = useState<boolean>(true);
   const [isExecutingPromotion, setIsExecutingPromotion] = useState(false);
+  const [isDepromotingId, setIsDepromotingId] = useState<string | null>(null);
+  const [isDepromotingBatch, setIsDepromotingBatch] = useState(false);
 
   // Correlation Cache
   const [allQuizSubmissions, setAllQuizSubmissions] = useState<any[]>([]);
@@ -3333,34 +3338,61 @@ const EventManagementPage: React.FC = () => {
   const fetchPromotionData = async () => {
     setLoadingPromotionMetrics(true);
     try {
-      // 1. Fetch Quizzes for this event
+      const targetEvId = (eventAccessEvent?.id || eventAccessEvent?._id || searchParams.get("accessEventId") || searchParams.get("eventId") || "").toString().trim();
+      const targetEvTitle = (eventAccessEvent?.title || "").trim();
+
+      // 1. Fetch Quizzes for this event with multi-tier fallback
       let qList: any[] = [];
       try {
-        const qListRaw = await fetchAllQuizzes({ eventId: eventAccessEvent?.id });
-        qList = Array.isArray(qListRaw) ? qListRaw : (qListRaw?.data || []);
+        let qListRaw: any = null;
+        if (targetEvId) {
+          qListRaw = await fetchAllQuizzes({ eventId: targetEvId }).catch(() => null);
+        }
+        let parsed = Array.isArray(qListRaw) ? qListRaw : (qListRaw?.data || []);
+        // Fallback: If no quizzes returned by eventId query, fetch all quizzes and match locally
+        if (!parsed || parsed.length === 0) {
+          const allRaw = await fetchAllQuizzes().catch(() => null);
+          const all = Array.isArray(allRaw) ? allRaw : (allRaw?.data || []);
+          parsed = all.filter((q: any) => {
+            const qEvId = (q.eventId || "").toString().trim();
+            const qEvTitle = (q.eventTitle || "").trim();
+            return (targetEvId && qEvId && qEvId.toLowerCase() === targetEvId.toLowerCase()) ||
+                   (targetEvTitle && qEvTitle && qEvTitle.toLowerCase() === targetEvTitle.toLowerCase()) ||
+                   (targetEvTitle && q.title && q.title.toLowerCase().includes(targetEvTitle.toLowerCase()));
+          });
+          if (parsed.length === 0 && all.length > 0) {
+            parsed = all;
+          }
+        }
+        qList = parsed;
       } catch (apiErr) {
         console.warn("Failed to fetch quizzes via API:", apiErr);
       }
       setEventQuizzesList(qList);
       if (qList.length > 0) {
-        setSelectedPromotionQuizId(qList[0].id);
+        setSelectedPromotionQuizId((prev) => (prev && prev !== "all" && qList.some(q => (q.id || q._id) === prev) ? prev : (qList[0].id || qList[0]._id)));
       } else {
         setSelectedPromotionQuizId("all");
       }
 
-      // 2. Fetch Quiz Submissions & auto-evaluate scores if missing
+      // 2. Fetch Quiz Submissions & Sessions, auto-evaluate & merge overridden scores
       const subs: any[] = [];
       for (const qDef of qList) {
+        const qId = qDef.id || qDef._id;
         try {
-          const qSubsRaw = await fetchQuizSubmissions(qDef.id);
+          const [qSubsRaw, qSessionsRaw] = await Promise.all([
+            fetchQuizSubmissions(qId).catch(() => []),
+            fetchQuizSessions(qId).catch(() => [])
+          ]);
           const qSubs = Array.isArray(qSubsRaw) ? qSubsRaw : (qSubsRaw?.data || []);
+          const qSessions = Array.isArray(qSessionsRaw) ? qSessionsRaw : (qSessionsRaw?.data || []);
           const overridden = qDef.overriddenScores || {};
           
           for (const sDataRaw of qSubs) {
-             let sData = { ...sDataRaw };
-             // Apply overriding logic if exists
-             if (overridden[sData.id]) {
-                sData = { ...sData, ...overridden[sData.id] };
+             let sData = { ...sDataRaw, quizId: qId };
+             const overrideMatch = overridden[sData.id] || overridden[sData._id] || overridden[sData.userId] || (sData.userEmail && overridden[sData.userEmail]) || (sData.teamId && overridden[sData.teamId]);
+             if (overrideMatch) {
+                sData = { ...sData, ...overrideMatch };
              }
 
              if ((sData.score === undefined || sData.score === null) && sData.answers) {
@@ -3372,16 +3404,77 @@ const EventManagementPage: React.FC = () => {
              }
              subs.push(sData);
           }
+
+          // Merge submitted sessions if they are not already represented in subs
+          for (const sess of qSessions) {
+            if (sess.status === 'submitted') {
+              const alreadyInSubs = subs.some(s => s.id === sess._id || s.sessionId === sess._id || (sess.userEmail && s.userEmail && s.userEmail.toLowerCase() === sess.userEmail.toLowerCase()));
+              if (!alreadyInSubs) {
+                subs.push({
+                  id: sess._id,
+                  sessionId: sess._id,
+                  quizId: qId,
+                  userId: sess.userId,
+                  userEmail: sess.userEmail,
+                  userName: sess.userName,
+                  teamId: sess.teamId,
+                  teamName: sess.teamName,
+                  score: sess.score ?? 0,
+                  maxScore: sess.maxScore ?? qDef.totalMarks ?? 100,
+                  percentage: sess.percentage ?? 0,
+                  passed: sess.passed ?? false
+                });
+              }
+            }
+          }
+
+          // Merge standalone overridden scores
+          if (overridden && typeof overridden === 'object') {
+            Object.entries(overridden).forEach(([key, oVal]: [string, any]) => {
+              if (oVal && typeof oVal === 'object') {
+                const alreadyInSubs = subs.some(s => s.id === key || s._id === key || s.userId === key || (s.userEmail && s.userEmail.toLowerCase() === key.toLowerCase()) || s.teamId === key);
+                if (!alreadyInSubs) {
+                  subs.push({
+                    id: oVal.id || `override_${key}`,
+                    quizId: qId,
+                    userId: key,
+                    userEmail: oVal.userEmail || (key.includes('@') ? key : ''),
+                    teamId: oVal.teamId || key,
+                    teamName: oVal.teamName || '',
+                    score: oVal.score ?? 0,
+                    maxScore: oVal.maxScore ?? qDef.totalMarks ?? 100,
+                    percentage: oVal.percentage ?? 0,
+                    passed: oVal.passed ?? false,
+                    isScoreOverridden: true
+                  });
+                }
+              }
+            });
+          }
         } catch (err) {
-          console.error(`Error fetching submissions for quiz ${qDef.id}:`, err);
+          console.error(`Error fetching submissions for quiz ${qId}:`, err);
         }
       }
+
+      // Fallback: If no submissions found via per-quiz fetch, try global quiz submissions endpoint
+      if (subs.length === 0) {
+        try {
+          const globalSubsRaw = await fetchAllQuizSubmissions().catch(() => []);
+          const globalSubs = Array.isArray(globalSubsRaw) ? globalSubsRaw : (globalSubsRaw?.data || []);
+          if (globalSubs.length > 0) {
+            subs.push(...globalSubs);
+          }
+        } catch (globalErr) {
+          console.warn("Global quiz submissions fallback error:", globalErr);
+        }
+      }
+
       setAllQuizSubmissions(subs);
 
       // 3. Fetch Jury Evaluations
       let jList: any[] = [];
       try {
-        const juryRaw = await fetchJuryEvaluations({ eventId: eventAccessEvent?.id });
+        const juryRaw = await fetchJuryEvaluations({ eventId: targetEvId });
         jList = Array.isArray(juryRaw) ? juryRaw : (juryRaw?.data || []);
       } catch (apiErr) {
         console.warn("Failed to fetch jury evaluations via API:", apiErr);
@@ -3393,6 +3486,13 @@ const EventManagementPage: React.FC = () => {
       setLoadingPromotionMetrics(false);
     }
   };
+
+  // Automatically refresh promotion metrics when modal is opened or target event updates
+  useEffect(() => {
+    if (isEventRoundsModalOpen && (eventAccessEvent?.id || eventAccessEvent?._id)) {
+      fetchPromotionData();
+    }
+  }, [isEventRoundsModalOpen, eventAccessEvent?.id, eventAccessEvent?._id]);
 
   const getCleanRoundTitle = (nameStr?: string, roundNum?: number) => {
     if (!nameStr) return `Stage ${roundNum || 1}`;
@@ -3577,20 +3677,35 @@ const EventManagementPage: React.FC = () => {
         return groupName && jName && jName === groupName;
       });
 
-      const activeQuizDef = eventQuizzesList.find(q => q.id === (matchedQuiz?.quizId || selectedPromotionQuizId));
-      const fallbackMaxScore = activeQuizDef?.totalMarks ? Number(activeQuizDef.totalMarks) : 100;
+      const activeQuizDef = eventQuizzesList.find(q => (q.id || q._id) === (matchedQuiz?.quizId || selectedPromotionQuizId));
+
+      // Direct registration scores (stored directly on registration document)
+      const regQuizScore = (reg.quizScore !== undefined && reg.quizScore !== null)
+        ? Number(reg.quizScore)
+        : ((reg.quiz_score !== undefined && reg.quiz_score !== null) ? Number(reg.quiz_score) : null);
+      const regQuizMaxScore = reg.quizMaxScore ? Number(reg.quizMaxScore) : (reg.quiz_max_score ? Number(reg.quiz_max_score) : null);
+      const regQuizPct = (reg.quizPercentage !== undefined && reg.quizPercentage !== null)
+        ? Number(reg.quizPercentage)
+        : ((reg.quiz_percentage !== undefined && reg.quiz_percentage !== null)
+            ? Number(reg.quiz_percentage)
+            : (regQuizScore !== null && regQuizMaxScore ? Math.round((regQuizScore / regQuizMaxScore) * 100) : null));
+      const regQuizPassed = reg.quizPassed !== undefined ? Boolean(reg.quizPassed) : null;
+
+      const fallbackMaxScore = activeQuizDef?.totalMarks ? Number(activeQuizDef.totalMarks) : (regQuizMaxScore || 100);
       const quizMaxScore = matchedQuiz 
         ? (matchedQuiz.maxScore ? Number(matchedQuiz.maxScore) : fallbackMaxScore) 
-        : fallbackMaxScore;
+        : (regQuizMaxScore || fallbackMaxScore);
       const quizScore = matchedQuiz 
-        ? (matchedQuiz.score !== undefined && matchedQuiz.score !== null ? Number(matchedQuiz.score) : 0) 
-        : null;
+        ? (matchedQuiz.score !== undefined && matchedQuiz.score !== null 
+            ? (regQuizScore !== null ? Math.max(Number(matchedQuiz.score), regQuizScore) : Number(matchedQuiz.score)) 
+            : (regQuizScore !== null ? regQuizScore : 0)) 
+        : regQuizScore;
       const quizPct = matchedQuiz 
         ? (matchedQuiz.percentage !== undefined && matchedQuiz.percentage !== null 
             ? Number(matchedQuiz.percentage) 
             : (quizMaxScore > 0 ? Math.round(((quizScore || 0) / quizMaxScore) * 100) : 0)) 
-        : null;
-      const quizPassed = matchedQuiz?.passed ?? (quizPct !== null ? quizPct >= (quizCutoffPercentage || 40) : false);
+        : (regQuizPct !== null ? regQuizPct : (quizScore !== null && quizMaxScore > 0 ? Math.round((quizScore / quizMaxScore) * 100) : null));
+      const quizPassed = matchedQuiz?.passed ?? (regQuizPassed !== null ? regQuizPassed : (quizPct !== null ? quizPct >= (quizCutoffPercentage || 40) : false));
 
       const juryScore = matchedJury ? Number(matchedJury.totalScore) || 0 : null;
 
@@ -4213,6 +4328,179 @@ const EventManagementPage: React.FC = () => {
       alert("Failed to execute round promotion. Please check console.");
     } finally {
       setIsExecutingPromotion(false);
+    }
+  };
+
+  // ↩ Depromote a single team back to previous round and remove from current round
+  const handleDepromoteTeam = async (team: any) => {
+    if (!team) return;
+    const currentTeamRound = Number(team.currentTeamRound || team.currentRound || 1);
+    if (currentTeamRound <= 1) {
+      await showAlert({
+        title: "Already in Base Round",
+        message: `Team "${team.groupName || team.teamLeadName || "Team"}" is already in Round 1 and cannot be depromoted further.`,
+        type: "info",
+        icon: "info"
+      });
+      return;
+    }
+
+    const prevRound = currentTeamRound - 1;
+    const isGroup = team.groupName && team.groupName !== "Individual RSVP";
+    const displayTeamName = isGroup ? team.groupName : (team.teamLeadName || team.name || "Participant");
+
+    const confirmed = await showConfirm({
+      title: `Depromote Team from Round ${currentTeamRound}?`,
+      message: `Are you sure you want to depromote "${displayTeamName}" from Round ${currentTeamRound} back to Round ${prevRound}?\n\nThe team will be immediately removed from Round ${currentTeamRound} and reverted to Round ${prevRound}.`,
+      confirmText: `Depromote to Round ${prevRound}`,
+      cancelText: "Cancel",
+      type: "danger",
+      icon: "alert"
+    });
+    if (!confirmed) return;
+
+    setIsDepromotingId(team.id);
+    try {
+      const now = Date.now();
+      const updatePayload: Record<string, any> = {
+        currentRound: prevRound,
+        roundStatus: prevRound > 1 ? "Qualified" : "Active",
+        promotedToRound: prevRound,
+        eliminatedInRound: null,
+        updatedAt: now,
+        // Restore archived deliverables for target previous round if present
+        problemStatement: team[`r${prevRound}_problemStatement`] || team.problemStatement || "",
+        selectedProblemStatementId: team[`r${prevRound}_selectedProblemStatementId`] || team.selectedProblemStatementId || "",
+        srsFileName: team[`r${prevRound}_srsFileName`] || team.srsFileName || "",
+        srsFileUrl: team[`r${prevRound}_srsFileUrl`] || team.srsFileUrl || "",
+        presentationFileName: team[`r${prevRound}_presentationFileName`] || team.presentationFileName || "",
+        presentationUrl: team[`r${prevRound}_presentationUrl`] || team.presentationUrl || "",
+        keyFeatures: team[`r${prevRound}_keyFeatures`] || team.keyFeatures || "",
+        githubUrl: team[`r${prevRound}_githubUrl`] || team.githubUrl || "",
+        repoUrl: team[`r${prevRound}_repoUrl`] || team.repoUrl || "",
+        prototypeUrl: team[`r${prevRound}_prototypeUrl`] || team.prototypeUrl || "",
+        demoVideoUrl: team[`r${prevRound}_demoVideoUrl`] || team.demoVideoUrl || "",
+      };
+
+      await updateRegistration(team.id, updatePayload);
+
+      // Invalidate cache tags
+      dataCache.invalidate("participant_reg_");
+      dataCache.invalidate("all_registrations");
+      dataCache.invalidate("event_registrations");
+
+      // Update local eventAccessRegistrations state
+      setEventAccessRegistrations((prev) =>
+        prev.map((r) => {
+          if (r.id === team.id || r._id === team.id) {
+            return {
+              ...r,
+              ...updatePayload
+            };
+          }
+          return r;
+        })
+      );
+
+      // Remove from selected list if present
+      setSelectedPromoteRegIds((prev) => prev.filter((id) => id !== team.id));
+
+      setRoundsSuccessMsg(`↩ Team "${displayTeamName}" successfully depromoted from Round ${currentTeamRound} to Round ${prevRound} and removed from current round.`);
+      setTimeout(() => setRoundsSuccessMsg(null), 6000);
+    } catch (err) {
+      console.error("Error depromoting team:", err);
+      alert("Failed to depromote team. Please check console.");
+    } finally {
+      setIsDepromotingId(null);
+    }
+  };
+
+  // ↩ Batch depromote all selected teams that are in Round 2 or higher
+  const handleExecuteBatchDepromote = async () => {
+    const eligibleToDepromote = selectedPromoteRegIds
+      .map((id) => promotionRoster.find((t) => t.id === id))
+      .filter((t) => t && Number(t.currentTeamRound || 1) > 1);
+
+    if (eligibleToDepromote.length === 0) {
+      await showAlert({
+        title: "No Eligible Teams to Depromote",
+        message: "None of the selected teams are currently in Round 2 or higher. Only teams in Round 2+ can be depromoted to a previous round.",
+        type: "warning",
+        icon: "alert"
+      });
+      return;
+    }
+
+    const confirmed = await showConfirm({
+      title: `Depromote ${eligibleToDepromote.length} Selected Team(s)?`,
+      message: `Are you sure you want to depromote ${eligibleToDepromote.length} team(s) back to their previous round? They will be removed from their current round.`,
+      confirmText: `Depromote ${eligibleToDepromote.length} Team(s)`,
+      cancelText: "Cancel",
+      type: "danger",
+      icon: "alert"
+    });
+    if (!confirmed) return;
+
+    setIsDepromotingBatch(true);
+    try {
+      const now = Date.now();
+      const updatePromises = eligibleToDepromote.map(async (team: any) => {
+        const currentTeamRound = Number(team.currentTeamRound || 1);
+        const prevRound = Math.max(1, currentTeamRound - 1);
+        const updatePayload: Record<string, any> = {
+          currentRound: prevRound,
+          roundStatus: prevRound > 1 ? "Qualified" : "Active",
+          promotedToRound: prevRound,
+          eliminatedInRound: null,
+          updatedAt: now,
+          problemStatement: team[`r${prevRound}_problemStatement`] || team.problemStatement || "",
+          selectedProblemStatementId: team[`r${prevRound}_selectedProblemStatementId`] || team.selectedProblemStatementId || "",
+          srsFileName: team[`r${prevRound}_srsFileName`] || team.srsFileName || "",
+          srsFileUrl: team[`r${prevRound}_srsFileUrl`] || team.srsFileUrl || "",
+          presentationFileName: team[`r${prevRound}_presentationFileName`] || team.presentationFileName || "",
+          presentationUrl: team[`r${prevRound}_presentationUrl`] || team.presentationUrl || "",
+          keyFeatures: team[`r${prevRound}_keyFeatures`] || team.keyFeatures || "",
+          githubUrl: team[`r${prevRound}_githubUrl`] || team.githubUrl || "",
+          repoUrl: team[`r${prevRound}_repoUrl`] || team.repoUrl || "",
+          prototypeUrl: team[`r${prevRound}_prototypeUrl`] || team.prototypeUrl || "",
+          demoVideoUrl: team[`r${prevRound}_demoVideoUrl`] || team.demoVideoUrl || "",
+        };
+        await updateRegistration(team.id, updatePayload);
+      });
+
+      await Promise.all(updatePromises);
+
+      dataCache.invalidate("participant_reg_");
+      dataCache.invalidate("all_registrations");
+      dataCache.invalidate("event_registrations");
+
+      const depromotedIds = eligibleToDepromote.map((t) => t.id);
+      setEventAccessRegistrations((prev) =>
+        prev.map((r) => {
+          if (depromotedIds.includes(r.id)) {
+            const currentTeamRound = Number(r.currentRound || 1);
+            const prevRound = Math.max(1, currentTeamRound - 1);
+            return {
+              ...r,
+              currentRound: prevRound,
+              roundStatus: prevRound > 1 ? "Qualified" : "Active",
+              promotedToRound: prevRound,
+              eliminatedInRound: null,
+              updatedAt: now,
+            };
+          }
+          return r;
+        })
+      );
+
+      setSelectedPromoteRegIds([]);
+      setRoundsSuccessMsg(`↩ Successfully depromoted ${eligibleToDepromote.length} team(s) back to their previous round and removed them from the current round!`);
+      setTimeout(() => setRoundsSuccessMsg(null), 6000);
+    } catch (err) {
+      console.error("Error batch depromoting teams:", err);
+      alert("Failed to depromote selected teams. Please check console.");
+    } finally {
+      setIsDepromotingBatch(false);
     }
   };
 
@@ -12105,9 +12393,21 @@ const EventManagementPage: React.FC = () => {
                       <div className="bg-purple-50/60 p-4 sm:p-5 rounded-2xl border border-purple-200 space-y-4">
                         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                           <div className="space-y-1 sm:w-1/3">
-                            <label className="block text-[10px] font-black uppercase text-purple-900 tracking-wider">
-                              Select Target Assessment Quiz
-                            </label>
+                            <div className="flex items-center justify-between">
+                              <label className="block text-[10px] font-black uppercase text-purple-900 tracking-wider">
+                                Select Target Assessment Quiz
+                              </label>
+                              <button
+                                type="button"
+                                onClick={fetchPromotionData}
+                                disabled={loadingPromotionMetrics}
+                                className="inline-flex items-center gap-1 text-[10px] font-black text-purple-700 hover:text-purple-900 underline cursor-pointer disabled:opacity-50"
+                                title="Re-sync quizzes and scores"
+                              >
+                                <RefreshCw className={`w-2.5 h-2.5 ${loadingPromotionMetrics ? "animate-spin" : ""}`} />
+                                <span>Sync Scores</span>
+                              </button>
+                            </div>
                             <select
                               value={selectedPromotionQuizId}
                               onChange={(e) => setSelectedPromotionQuizId(e.target.value)}
@@ -12115,7 +12415,7 @@ const EventManagementPage: React.FC = () => {
                             >
                               <option value="all">All Event Quizzes Combined</option>
                               {eventQuizzesList.map((q) => (
-                                <option key={q.id} value={q.id}>
+                                <option key={q.id || q._id} value={q.id || q._id}>
                                   {q.title} ({q.totalMarks || 50} Marks)
                                 </option>
                               ))}
@@ -12798,45 +13098,23 @@ const EventManagementPage: React.FC = () => {
                                         <input
                                           type="checkbox"
                                           checked={isSelected}
-                                          disabled={!isInSourceRound || (promotionMode === "quiz" && !meetsQuizCutoff)}
+                                          disabled={team.isEliminated || (!isInSourceRound && team.currentTeamRound <= 1)}
                                           onChange={() => {
                                             if (isSelected) {
                                               setSelectedPromoteRegIds(prev => prev.filter(id => id !== team.id));
                                             } else {
-                                              if (!isInSourceRound) {
-                                                showAlert({
-                                                  title: "Team Not In Active Round",
-                                                  message: isUnpromotedFromPrev
-                                                    ? `Team "${displayTeamName}" is currently in Round ${team.currentTeamRound} and has not been promoted to Round ${promoteFromRound} yet. You cannot promote them to Round ${promoteToRound} directly.`
-                                                    : `Team "${displayTeamName}" is already in Round ${team.currentTeamRound}.`,
-                                                  type: "warning",
-                                                  icon: "alert"
-                                                });
-                                                return;
-                                              }
-                                              if (promotionMode === "quiz" && !meetsQuizCutoff) {
-                                                showAlert({
-                                                  title: "Cutoff Not Met",
-                                                  message: `Team "${displayTeamName}" scored ${team.quizScore !== null ? `${team.quizScore}/${team.quizMaxScore} (${team.quizPercentage}%)` : "No Quiz"}, which is below the cutoff threshold of ${quizCutoffType === "score" ? `${quizCutoffScore} marks` : `${quizCutoffPercentage}%`}. Only participants with score equal or greater than the cutoff can be selected for promotion.`,
-                                                  type: "warning",
-                                                  icon: "alert"
-                                                });
-                                                return;
-                                              }
                                               setSelectedPromoteRegIds(prev => [...prev, team.id]);
                                             }
                                           }}
                                           className={`w-4 h-4 rounded text-blue-600 ${
-                                            !isInSourceRound || (promotionMode === "quiz" && !meetsQuizCutoff) ? "cursor-not-allowed opacity-30" : "cursor-pointer"
+                                            team.isEliminated || (!isInSourceRound && team.currentTeamRound <= 1) ? "cursor-not-allowed opacity-30" : "cursor-pointer"
                                           }`}
                                           title={
-                                            !isInSourceRound
-                                              ? isUnpromotedFromPrev
-                                                ? `Team is currently in Round ${team.currentTeamRound} (Not promoted to Round ${promoteFromRound})`
-                                                : `Team is already in Round ${team.currentTeamRound}`
-                                              : promotionMode === "quiz" && !meetsQuizCutoff
-                                              ? `Score below cutoff (${quizCutoffType === "score" ? `${quizCutoffScore} marks` : `${quizCutoffPercentage}%`})`
-                                              : undefined
+                                            team.isEliminated
+                                              ? "Eliminated team"
+                                              : !isInSourceRound && team.currentTeamRound <= 1
+                                              ? "Team is in Round 1 and not yet in source round"
+                                              : "Select team for promotion or depromotion"
                                           }
                                         />
                                       </td>
@@ -12916,6 +13194,11 @@ const EventManagementPage: React.FC = () => {
                                               {meetsQuizCutoff || (!isInSourceRound && isTeamAboveCutoff) ? "✓ Qualified" : "Below Cutoff"}
                                             </span>
                                           </div>
+                                        ) : loadingPromotionMetrics ? (
+                                          <span className="text-[10px] text-purple-600 font-bold px-2 py-1 rounded-lg bg-purple-50 border border-purple-200 inline-flex items-center gap-1">
+                                            <Loader2 className="w-2.5 h-2.5 animate-spin" />
+                                            <span>Syncing...</span>
+                                          </span>
                                         ) : (
                                           <span className="text-[10px] text-slate-400 font-bold px-2 py-1 rounded-lg bg-slate-100 border border-slate-200">
                                             No Quiz
@@ -12960,45 +13243,119 @@ const EventManagementPage: React.FC = () => {
                                       {/* Quick Action Button */}
                                       <td className="py-4 px-4 text-right">
                                         {team.isEliminated ? (
-                                          <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 cursor-not-allowed inline-block">
-                                            Eliminated
-                                          </span>
+                                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                            <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-rose-50 text-rose-700 border border-rose-200 cursor-not-allowed inline-block">
+                                              Eliminated
+                                            </span>
+                                          </div>
                                         ) : isAlreadyPromoted ? (
-                                          <span className="px-3 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 cursor-not-allowed inline-block">
-                                            In Round {team.currentTeamRound} ✓
-                                          </span>
+                                          <div className="flex items-center justify-end gap-2 flex-wrap">
+                                            <span className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-emerald-50 text-emerald-700 border border-emerald-200 inline-block shadow-2xs">
+                                              In Round {team.currentTeamRound} ✓
+                                            </span>
+                                            {team.currentTeamRound > 1 && (
+                                              <button
+                                                type="button"
+                                                onClick={() => handleDepromoteTeam(team)}
+                                                disabled={isDepromotingId === team.id}
+                                                className="px-2.5 py-1.5 rounded-xl text-xs font-black bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 hover:border-rose-300 transition-all cursor-pointer shadow-2xs inline-flex items-center gap-1 active:scale-95 disabled:opacity-50"
+                                                title={`Depromote and remove from Round ${team.currentTeamRound} back to Round ${team.currentTeamRound - 1}`}
+                                              >
+                                                {isDepromotingId === team.id ? (
+                                                  <Loader2 className="w-3 h-3 animate-spin text-rose-600" />
+                                                ) : (
+                                                  <RotateCcw className="w-3 h-3 text-rose-600" />
+                                                )}
+                                                <span>Depromote</span>
+                                              </button>
+                                            )}
+                                          </div>
                                         ) : isUnpromotedFromPrev ? (
-                                          <span
-                                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 cursor-not-allowed inline-block"
-                                            title={`This team is currently in Round ${team.currentTeamRound} and must be promoted to Round ${promoteFromRound} first.`}
-                                          >
-                                            In Round {team.currentTeamRound} (Unpromoted)
-                                          </span>
+                                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                            <span
+                                              className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-amber-50 text-amber-700 border border-amber-200 cursor-not-allowed inline-block"
+                                              title={`This team is currently in Round ${team.currentTeamRound} and must be promoted to Round ${promoteFromRound} first.`}
+                                            >
+                                              In Round {team.currentTeamRound}
+                                            </span>
+                                            {team.currentTeamRound > 1 && (
+                                              <button
+                                                type="button"
+                                                onClick={() => handleDepromoteTeam(team)}
+                                                disabled={isDepromotingId === team.id}
+                                                className="px-2 py-1.5 rounded-xl text-xs font-black bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 hover:border-rose-300 transition-all cursor-pointer shadow-2xs inline-flex items-center gap-1 active:scale-95 disabled:opacity-50"
+                                                title={`Depromote from Round ${team.currentTeamRound} back to Round ${team.currentTeamRound - 1}`}
+                                              >
+                                                {isDepromotingId === team.id ? (
+                                                  <Loader2 className="w-3 h-3 animate-spin text-rose-600" />
+                                                ) : (
+                                                  <RotateCcw className="w-3 h-3 text-rose-600" />
+                                                )}
+                                                <span>Depromote</span>
+                                              </button>
+                                            )}
+                                          </div>
                                         ) : promotionMode === "quiz" && !meetsQuizCutoff ? (
-                                          <span
-                                            className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed inline-block"
-                                            title={`Score below required cutoff (${quizCutoffType === "score" ? `${quizCutoffScore} marks` : `${quizCutoffPercentage}%`})`}
-                                          >
-                                            Below Cutoff
-                                          </span>
+                                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                            <span
+                                              className="px-2.5 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-400 border border-slate-200 cursor-not-allowed inline-block"
+                                              title={`Score below required cutoff (${quizCutoffType === "score" ? `${quizCutoffScore} marks` : `${quizCutoffPercentage}%`})`}
+                                            >
+                                              Below Cutoff
+                                            </span>
+                                            {team.currentTeamRound > 1 && (
+                                              <button
+                                                type="button"
+                                                onClick={() => handleDepromoteTeam(team)}
+                                                disabled={isDepromotingId === team.id}
+                                                className="px-2.5 py-1.5 rounded-xl text-xs font-black bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 hover:border-rose-300 transition-all cursor-pointer shadow-2xs inline-flex items-center gap-1 active:scale-95 disabled:opacity-50"
+                                                title={`Depromote from Round ${team.currentTeamRound} back to Round ${team.currentTeamRound - 1}`}
+                                              >
+                                                {isDepromotingId === team.id ? (
+                                                  <Loader2 className="w-3 h-3 animate-spin text-rose-600" />
+                                                ) : (
+                                                  <RotateCcw className="w-3 h-3 text-rose-600" />
+                                                )}
+                                                <span>Depromote</span>
+                                              </button>
+                                            )}
+                                          </div>
                                         ) : (
-                                          <button
-                                            type="button"
-                                            onClick={() => {
-                                              if (isSelected) {
-                                                setSelectedPromoteRegIds(prev => prev.filter(id => id !== team.id));
-                                              } else {
-                                                setSelectedPromoteRegIds(prev => [...prev, team.id]);
-                                              }
-                                            }}
-                                            className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
-                                              isSelected
-                                                ? "bg-emerald-600 text-white shadow-xs"
-                                                : "bg-slate-100 hover:bg-slate-200 text-slate-700"
-                                            }`}
-                                          >
-                                            {isSelected ? "Selected ✓" : `Promote to R${promoteToRound}`}
-                                          </button>
+                                          <div className="flex items-center justify-end gap-1.5 flex-wrap">
+                                            {team.currentTeamRound > 1 && (
+                                              <button
+                                                type="button"
+                                                onClick={() => handleDepromoteTeam(team)}
+                                                disabled={isDepromotingId === team.id}
+                                                className="px-2 py-1.5 rounded-xl text-xs font-black bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-200 hover:border-rose-300 transition-all cursor-pointer shadow-2xs inline-flex items-center gap-1 active:scale-95 disabled:opacity-50"
+                                                title={`Depromote from Round ${team.currentTeamRound} back to Round ${team.currentTeamRound - 1}`}
+                                              >
+                                                {isDepromotingId === team.id ? (
+                                                  <Loader2 className="w-3 h-3 animate-spin text-rose-600" />
+                                                ) : (
+                                                  <RotateCcw className="w-3 h-3 text-rose-600" />
+                                                )}
+                                                <span>Depromote</span>
+                                              </button>
+                                            )}
+                                            <button
+                                              type="button"
+                                              onClick={() => {
+                                                if (isSelected) {
+                                                  setSelectedPromoteRegIds(prev => prev.filter(id => id !== team.id));
+                                                } else {
+                                                  setSelectedPromoteRegIds(prev => [...prev, team.id]);
+                                                }
+                                              }}
+                                              className={`px-3 py-1.5 rounded-xl text-xs font-black transition-all cursor-pointer ${
+                                                isSelected
+                                                  ? "bg-emerald-600 text-white shadow-xs"
+                                                  : "bg-slate-100 hover:bg-slate-200 text-slate-700"
+                                              }`}
+                                            >
+                                              {isSelected ? "Selected ✓" : `Promote to R${promoteToRound}`}
+                                            </button>
+                                          </div>
                                         )}
                                       </td>
                                     </tr>
@@ -13053,6 +13410,23 @@ const EventManagementPage: React.FC = () => {
                       >
                         Cancel
                       </button>
+
+                      {selectedPromoteRegIds.some(id => (promotionRoster.find(r => r.id === id)?.currentTeamRound || 1) > 1) && (
+                        <button
+                          type="button"
+                          onClick={handleExecuteBatchDepromote}
+                          disabled={isDepromotingBatch || selectedPromoteRegIds.length === 0}
+                          className="px-5 py-3 bg-rose-50 hover:bg-rose-100 text-rose-700 border border-rose-300 hover:border-rose-400 active:scale-95 font-black text-xs rounded-2xl shadow-xs transition-all flex items-center gap-2 cursor-pointer disabled:opacity-50"
+                          title="Depromote all selected teams currently in Round 2 or higher back to their previous round"
+                        >
+                          {isDepromotingBatch ? (
+                            <Loader2 className="w-4 h-4 animate-spin text-rose-600" />
+                          ) : (
+                            <RotateCcw className="w-4 h-4 text-rose-600" />
+                          )}
+                          <span>Depromote Selected</span>
+                        </button>
+                      )}
 
                       <button
                         type="button"

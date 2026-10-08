@@ -37,6 +37,7 @@ const AdminSetupPage = React.lazy(() => import("../pages/auth/AdminSetupPage"));
 
 // Faculty/Organizer Dashboards (heavy, only for admins)
 const OrgAttendancePage = React.lazy(() => import("../pages/organizer/OrgAttendancePage"));
+const OrgChangePasswordPage = React.lazy(() => import("../pages/organizer/OrgChangePasswordPage"));
 const FacDashboardPage = React.lazy(() => import("../pages/faculty/FacDashboardPage"));
 const UserManagementPage = React.lazy(() => import("../pages/faculty/UserManagementPage"));
 const EventManagementPage = React.lazy(() => import("../pages/faculty/EventManagementPage"));
@@ -101,13 +102,15 @@ const AppRoutes: React.FC = () => {
         >
           <Route index element={<Navigate to="/organizer/attendance" replace />} />
           <Route path="attendance" element={<OrgAttendancePage />} />
+          <Route path="change-password" element={<OrgChangePasswordPage />} />
+          <Route path="password" element={<OrgChangePasswordPage />} />
           <Route path="events" element={<Navigate to="/organizer/attendance" replace />} />
           <Route path="dashboard" element={<Navigate to="/organizer/attendance" replace />} />
           <Route path="jury" element={<Navigate to="/organizer/attendance" replace />} />
           <Route path="results" element={<Navigate to="/organizer/attendance" replace />} />
           <Route path="gallery" element={<Navigate to="/organizer/attendance" replace />} />
           <Route path="registrations" element={<Navigate to="/organizer/attendance" replace />} />
-          <Route path="profile" element={<Navigate to="/organizer/attendance" replace />} />
+          <Route path="profile" element={<OrgChangePasswordPage />} />
         </Route>
 
         {/* Faculty Routes */}

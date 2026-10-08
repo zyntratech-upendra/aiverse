@@ -12,9 +12,24 @@ import {
   EyeOff,
   Flame,
   Maximize2,
-  Minimize2
+  Minimize2,
+  Award
 } from "lucide-react";
 import { fetchSettings, fetchRegistrations, fetchJuryEvaluations, updateJuryEvaluation, updateRegistration } from "../../services/apiClient";
+
+export interface JuryMarksColumn {
+  id: string;
+  name: string;
+  maxMarks: number;
+}
+
+export const DEFAULT_JURY_MARKS_COLUMNS: JuryMarksColumn[] = [
+  { id: "communication", name: "Communication", maxMarks: 20 },
+  { id: "innovationUniqueness", name: "Innovation & Uniqueness", maxMarks: 20 },
+  { id: "feasibilityViability", name: "Feasibility & Viability", maxMarks: 20 },
+  { id: "statistics", name: "Statistics", maxMarks: 20 },
+  { id: "revenue", name: "Revenue", maxMarks: 20 }
+];
 
 export interface HackathonProject {
   id: string;
@@ -23,6 +38,7 @@ export interface HackathonProject {
   projectTitle: string;
   track: string;
   status: "Pending" | "Evaluated";
+  criteriaScores?: Record<string, number>;
   communication: number;
   innovationUniqueness: number;
   feasibilityViability: number;
@@ -38,18 +54,65 @@ export interface HackathonProject {
 
 const mockProjects: HackathonProject[] = [];
 
-const JuryAssignmentsView: React.FC = () => {
+export interface JuryAssignmentsViewProps {
+  isFullScreenMode?: boolean;
+  toggleFullScreen?: () => void;
+  onOpenSubmitModal?: () => void;
+  activeRound?: number;
+}
+
+const JuryAssignmentsView: React.FC<JuryAssignmentsViewProps> = ({
+  isFullScreenMode: propFullScreenMode,
+  toggleFullScreen: propToggleFullScreen,
+  onOpenSubmitModal,
+  activeRound: propActiveRound
+}) => {
   const [projects, setProjects] = useState<HackathonProject[]>([]);
   const userModifiedIdsRef = useRef<Set<string>>(new Set());
   const [searchQuery, setSearchQuery] = useState("");
   const [filterStatus, setFilterStatus] = useState<"All" | "Pending" | "Evaluated">("All");
   const [filterTrack, setFilterTrack] = useState<string>("All");
+  const [activeRound, setActiveRound] = useState<number>(() => {
+    if (propActiveRound) return propActiveRound;
+    const local = localStorage.getItem("activeJuryRound");
+    return local ? Number(local) : 1;
+  });
+
+  useEffect(() => {
+    if (propActiveRound) setActiveRound(propActiveRound);
+  }, [propActiveRound]);
   // Reveal saved scores toggle state (defaults to false so saved evaluations are masked)
   const [revealScores, setRevealScores] = useState(false);
   const [focusedCell, setFocusedCell] = useState<{ id: string; field: string } | null>(null);
 
-  // Full Screen distraction-free scoring mode state
-  const [isFullScreenMode, setIsFullScreenMode] = useState(false);
+  // Dynamic Jury Marks Columns loaded from Faculty Settings
+  const [marksColumns, setMarksColumns] = useState<JuryMarksColumn[]>(() => {
+    try {
+      const raw = localStorage.getItem("juryMarksColumns");
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return DEFAULT_JURY_MARKS_COLUMNS;
+  });
+
+  const totalMaxMarks = marksColumns.reduce((sum, col) => sum + (Number(col.maxMarks) || 0), 0);
+
+  const getColumnScore = (project: HackathonProject, columnId: string): number => {
+    if (project.criteriaScores && project.criteriaScores[columnId] !== undefined) {
+      return Number(project.criteriaScores[columnId]) || 0;
+    }
+    const directVal = (project as any)[columnId];
+    if (directVal !== undefined && directVal !== null) {
+      return Number(directVal) || 0;
+    }
+    return 0;
+  };
+
+    // Full Screen distraction-free scoring mode state
+  const [internalFullScreenMode, setInternalFullScreenMode] = useState(false);
+  const isFullScreenMode = propFullScreenMode !== undefined ? propFullScreenMode : internalFullScreenMode;
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
   const showToast = (msg: string) => {
@@ -60,13 +123,17 @@ const JuryAssignmentsView: React.FC = () => {
   };
 
   const toggleFullScreen = () => {
+    if (propToggleFullScreen) {
+      propToggleFullScreen();
+      return;
+    }
     if (!isFullScreenMode) {
-      setIsFullScreenMode(true);
+      setInternalFullScreenMode(true);
       if (document.documentElement.requestFullscreen) {
         document.documentElement.requestFullscreen().catch(() => {});
       }
     } else {
-      setIsFullScreenMode(false);
+      setInternalFullScreenMode(false);
       if (document.fullscreenElement && document.exitFullscreen) {
         document.exitFullscreen().catch(() => {});
       }
@@ -74,16 +141,17 @@ const JuryAssignmentsView: React.FC = () => {
   };
 
   useEffect(() => {
+    if (propFullScreenMode !== undefined) return;
     const handleFullScreenChange = () => {
       if (!document.fullscreenElement) {
-        setIsFullScreenMode(false);
+        setInternalFullScreenMode(false);
       }
     };
     document.addEventListener("fullscreenchange", handleFullScreenChange);
     return () => {
       document.removeEventListener("fullscreenchange", handleFullScreenChange);
     };
-  }, []);
+  }, [propFullScreenMode]);
 
   // Active event configuration configured in Admin Settings -> Jury Control
   const [activeEventConfig, setActiveEventConfig] = useState<{ id: string; title: string }>({
@@ -96,6 +164,21 @@ const JuryAssignmentsView: React.FC = () => {
       const id = localStorage.getItem("activeJuryEventId") || "ALL_EVENTS";
       const title = localStorage.getItem("activeJuryEventTitle") || "All Events";
       setActiveEventConfig({ id, title });
+
+      const r = localStorage.getItem("activeJuryRound");
+      if (r) {
+        setActiveRound(Number(r));
+      }
+
+      try {
+        const rawCols = localStorage.getItem("juryMarksColumns");
+        if (rawCols) {
+          const parsed = JSON.parse(rawCols);
+          if (Array.isArray(parsed) && parsed.length > 0) {
+            setMarksColumns(parsed);
+          }
+        }
+      } catch {}
     };
 
     window.addEventListener("storage", syncConfig);
@@ -105,12 +188,22 @@ const JuryAssignmentsView: React.FC = () => {
     const loadSettings = async () => {
       try {
         const d = await fetchSettings("portal_config");
-        if (d && (d.activeJuryEventId || d.activeJuryEventTitle)) {
-          const id = d.activeJuryEventId || "ALL_EVENTS";
-          const title = d.activeJuryEventTitle || "All Events";
-          setActiveEventConfig({ id, title });
-          localStorage.setItem("activeJuryEventId", id);
-          localStorage.setItem("activeJuryEventTitle", title);
+        if (d) {
+          if (d.activeJuryEventId || d.activeJuryEventTitle) {
+            const id = d.activeJuryEventId || "ALL_EVENTS";
+            const title = d.activeJuryEventTitle || "All Events";
+            setActiveEventConfig({ id, title });
+            localStorage.setItem("activeJuryEventId", id);
+            localStorage.setItem("activeJuryEventTitle", title);
+          }
+          if (d.currentRound) {
+            setActiveRound(Number(d.currentRound));
+            localStorage.setItem("activeJuryRound", String(d.currentRound));
+          }
+          if (Array.isArray(d.juryMarksColumns) && d.juryMarksColumns.length > 0) {
+            setMarksColumns(d.juryMarksColumns);
+            localStorage.setItem("juryMarksColumns", JSON.stringify(d.juryMarksColumns));
+          }
         }
       } catch (e) {
         // ignore
@@ -178,12 +271,39 @@ const JuryAssignmentsView: React.FC = () => {
             const projectTitle = reg.projectTitle || evalData.projectTitle || `${teamName} Submission`;
             const membersCount = reg.teamSize || (reg.members && Array.isArray(reg.members) ? reg.members.length + 1 : 1);
 
-            const comm = Number(evalData.communication ?? reg.communication ?? evalData.criteriaScores?.communication ?? 0);
-            const innov = Number(evalData.innovationUniqueness ?? reg.innovationUniqueness ?? evalData.criteriaScores?.innovationUniqueness ?? 0);
-            const feas = Number(evalData.feasibilityViability ?? reg.feasibilityViability ?? evalData.criteriaScores?.feasibilityViability ?? 0);
-            const stats = Number(evalData.statistics ?? reg.statistics ?? evalData.criteriaScores?.statistics ?? 0);
-            const rev = Number(evalData.revenue ?? reg.revenue ?? evalData.criteriaScores?.revenue ?? 0);
-            const criteriaSum = comm + innov + feas + stats + rev;
+            const criteriaScores: Record<string, number> = {};
+            let criteriaSum = 0;
+
+            if (evalData.criteriaScores && typeof evalData.criteriaScores === "object") {
+              Object.entries(evalData.criteriaScores).forEach(([k, v]) => {
+                criteriaScores[k] = Number(v) || 0;
+              });
+            }
+            if (reg.criteriaScores && typeof reg.criteriaScores === "object") {
+              Object.entries(reg.criteriaScores).forEach(([k, v]) => {
+                if (criteriaScores[k] === undefined) {
+                  criteriaScores[k] = Number(v) || 0;
+                }
+              });
+            }
+
+            marksColumns.forEach(col => {
+              if (criteriaScores[col.id] === undefined) {
+                const legacyVal = Number(
+                  evalData[col.id] ?? 
+                  reg[col.id] ?? 
+                  0
+                );
+                criteriaScores[col.id] = legacyVal;
+              }
+              criteriaSum += Number(criteriaScores[col.id]) || 0;
+            });
+
+            const comm = Number(criteriaScores["communication"] ?? evalData.communication ?? reg.communication ?? 0);
+            const innov = Number(criteriaScores["innovationUniqueness"] ?? evalData.innovationUniqueness ?? reg.innovationUniqueness ?? 0);
+            const feas = Number(criteriaScores["feasibilityViability"] ?? evalData.feasibilityViability ?? reg.feasibilityViability ?? 0);
+            const stats = Number(criteriaScores["statistics"] ?? evalData.statistics ?? reg.statistics ?? 0);
+            const rev = Number(criteriaScores["revenue"] ?? evalData.revenue ?? reg.revenue ?? 0);
             const totalScore = criteriaSum > 0 ? criteriaSum : (Number(evalData.totalScore || evalData.score || reg.totalScore || reg.juryScore || reg.score) || 0);
 
             const isSaved = Boolean(evalData.isSaved || reg.isSaved || evalData.status === "Evaluated" || reg.evaluationStatus === "Evaluated" || totalScore > 0);
@@ -195,6 +315,7 @@ const JuryAssignmentsView: React.FC = () => {
               projectTitle,
               track,
               status: (evalData.status as "Pending" | "Evaluated") || (isSaved ? "Evaluated" : "Pending"),
+              criteriaScores,
               communication: comm,
               innovationUniqueness: innov,
               feasibilityViability: feas,
@@ -219,12 +340,28 @@ const JuryAssignmentsView: React.FC = () => {
                 return;
               }
 
-              const comm = Number(evalData.communication ?? evalData.criteriaScores?.communication ?? 0);
-              const innov = Number(evalData.innovationUniqueness ?? evalData.criteriaScores?.innovationUniqueness ?? 0);
-              const feas = Number(evalData.feasibilityViability ?? evalData.criteriaScores?.feasibilityViability ?? 0);
-              const stats = Number(evalData.statistics ?? evalData.criteriaScores?.statistics ?? 0);
-              const rev = Number(evalData.revenue ?? evalData.criteriaScores?.revenue ?? 0);
-              const criteriaSum = comm + innov + feas + stats + rev;
+              const criteriaScores: Record<string, number> = {};
+              let criteriaSum = 0;
+
+              if (evalData.criteriaScores && typeof evalData.criteriaScores === "object") {
+                Object.entries(evalData.criteriaScores).forEach(([k, v]) => {
+                  criteriaScores[k] = Number(v) || 0;
+                });
+              }
+
+              marksColumns.forEach(col => {
+                if (criteriaScores[col.id] === undefined) {
+                  const legacyVal = Number(evalData[col.id] ?? 0);
+                  criteriaScores[col.id] = legacyVal;
+                }
+                criteriaSum += Number(criteriaScores[col.id]) || 0;
+              });
+
+              const comm = Number(criteriaScores["communication"] ?? evalData.communication ?? 0);
+              const innov = Number(criteriaScores["innovationUniqueness"] ?? evalData.innovationUniqueness ?? 0);
+              const feas = Number(criteriaScores["feasibilityViability"] ?? evalData.feasibilityViability ?? 0);
+              const stats = Number(criteriaScores["statistics"] ?? evalData.statistics ?? 0);
+              const rev = Number(criteriaScores["revenue"] ?? evalData.revenue ?? 0);
               const totalScore = criteriaSum > 0 ? criteriaSum : (Number(evalData.totalScore || evalData.score) || 0);
               const isSaved = Boolean(evalData.isSaved || evalData.status === "Evaluated" || totalScore > 0);
 
@@ -235,6 +372,7 @@ const JuryAssignmentsView: React.FC = () => {
                 projectTitle: evalData.projectTitle || "Hackathon Submission",
                 track: evalData.track || evalData.eventTitle || "General Event",
                 status: (evalData.status as "Pending" | "Evaluated") || (isSaved ? "Evaluated" : "Pending"),
+                criteriaScores,
                 communication: comm,
                 innovationUniqueness: innov,
                 feasibilityViability: feas,
@@ -290,65 +428,76 @@ const JuryAssignmentsView: React.FC = () => {
   // Inline cell score change handler (Tracks modified rows to prevent any data loss)
   const handleCellChange = (
     projectId: string,
-    field: "communication" | "innovationUniqueness" | "feasibilityViability" | "statistics" | "revenue",
-    rawVal: string
+    columnId: string,
+    rawVal: string,
+    maxMarks: number = 20
   ) => {
     userModifiedIdsRef.current.add(projectId);
     let numVal = rawVal === "" ? 0 : parseInt(rawVal, 10);
     if (isNaN(numVal)) numVal = 0;
-    if (numVal > 20) numVal = 20;
+    if (numVal > maxMarks) numVal = maxMarks;
     if (numVal < 0) numVal = 0;
 
     setProjects(prev => prev.map(p => {
       if (p.id !== projectId) return p;
-      const updated = {
+      const updatedCriteria = { ...(p.criteriaScores || {}) };
+      updatedCriteria[columnId] = numVal;
+
+      const total = marksColumns.reduce((sum, col) => {
+        return sum + (Number(updatedCriteria[col.id]) || 0);
+      }, 0);
+
+      const updated: HackathonProject = {
         ...p,
-        [field]: numVal,
-        isSaved: false // Marked as unsaved while editing
-      };
-      const total = Number(updated.communication) + Number(updated.innovationUniqueness) + Number(updated.feasibilityViability) + Number(updated.statistics) + Number(updated.revenue);
-      
-      return {
-        ...updated,
+        criteriaScores: updatedCriteria,
+        [columnId]: numVal,
+        isSaved: false, // Marked as unsaved while editing
         totalScore: total,
         status: total > 0 ? ("Evaluated" as const) : ("Pending" as const)
       };
+
+      return updated;
     }));
   };
 
   // Save or update scores in database for a team row
   const handleSaveRowScores = async (project: HackathonProject) => {
-    const comm = Number(project.communication) || 0;
-    const innov = Number(project.innovationUniqueness) || 0;
-    const feas = Number(project.feasibilityViability) || 0;
-    const stats = Number(project.statistics) || 0;
-    const rev = Number(project.revenue) || 0;
-    const total = comm + innov + feas + stats + rev;
+    const currentCriteria: Record<string, number> = {};
+    let total = 0;
+
+    marksColumns.forEach(col => {
+      const val = getColumnScore(project, col.id);
+      currentCriteria[col.id] = val;
+      total += val;
+    });
 
     if (total === 0) {
       showToast(`Please enter marks for "${project.teamName}" before saving.`);
       return;
     }
 
-    const payload = {
+    const payload: any = {
+      round: activeRound,
       eventId: project.eventId || activeEventConfig.id,
       eventTitle: project.track || activeEventConfig.title,
       teamName: project.teamName,
       projectTitle: project.projectTitle,
       track: project.track || activeEventConfig.title,
-      communication: comm,
-      innovationUniqueness: innov,
-      feasibilityViability: feas,
-      statistics: stats,
-      revenue: rev,
+      criteriaScores: currentCriteria,
       score: total,
       totalScore: total,
+      maxScore: totalMaxMarks,
       status: "Evaluated",
       isSaved: true,
       membersCount: project.membersCount,
       abstract: project.abstract,
       registrationId: project.id
     };
+
+    // Populate direct legacy fields for backward compatibility
+    marksColumns.forEach(col => {
+      payload[col.id] = currentCriteria[col.id];
+    });
 
     try {
       await Promise.all([
@@ -359,17 +508,21 @@ const JuryAssignmentsView: React.FC = () => {
           juryScore: total,
           juryEvaluated: true,
           evaluationStatus: "Evaluated",
-          communication: comm,
-          innovationUniqueness: innov,
-          feasibilityViability: feas,
-          statistics: stats,
-          revenue: rev,
+          criteriaScores: currentCriteria,
+          ...currentCriteria,
           isSaved: true,
         }).catch(() => {})
       ]);
       userModifiedIdsRef.current.delete(project.id);
-      setProjects(prev => prev.map(p => p.id === project.id ? { ...p, ...payload, totalScore: total, isSaved: true, status: "Evaluated" } : p));
-      showToast(`Scores for "${project.teamName}" saved successfully (${total}/100)!`);
+      setProjects(prev => prev.map(p => p.id === project.id ? { 
+        ...p, 
+        ...payload, 
+        criteriaScores: currentCriteria, 
+        totalScore: total, 
+        isSaved: true, 
+        status: "Evaluated" 
+      } : p));
+      showToast(`Scores for "${project.teamName}" saved successfully (${total}/${totalMaxMarks})!`);
     } catch (err) {
       console.error("Save Error:", err);
       showToast("Failed to save score. Please try again.");
@@ -378,29 +531,23 @@ const JuryAssignmentsView: React.FC = () => {
 
   const exportToCSV = () => {
     const headers = [
-      "Row", 
+      "Row",
+      "Round",
       "Team Name", 
       "Project Title", 
       "Track", 
-      "Communication (20)", 
-      "Innovation and Uniqueness (20)", 
-      "Feasibility and Viability (20)", 
-      "Statistics (20)", 
-      "Revenue (20)", 
-      "Total Score (100)", 
+      ...marksColumns.map(c => `"${c.name} (${c.maxMarks})"`),
+      `"Total Score (${totalMaxMarks})"`, 
       "Status"
     ];
     const rows = filteredProjects.map((p, idx) => [
       idx + 1,
+      `Round ${activeRound}`,
       `"${p.teamName}"`,
       `"${p.projectTitle}"`,
       `"${p.track}"`,
-      p.status === "Evaluated" ? p.communication : "N/A",
-      p.status === "Evaluated" ? p.innovationUniqueness : "N/A",
-      p.status === "Evaluated" ? p.feasibilityViability : "N/A",
-      p.status === "Evaluated" ? p.statistics : "N/A",
-      p.status === "Evaluated" ? p.revenue : "N/A",
-      p.totalScore ?? "N/A",
+      ...marksColumns.map(c => p.status === "Evaluated" ? getColumnScore(p, c.id) : "N/A"),
+      p.totalScore !== undefined ? p.totalScore : "N/A",
       p.status
     ]);
 
@@ -408,7 +555,7 @@ const JuryAssignmentsView: React.FC = () => {
     const encodedUri = encodeURI(csvContent);
     const link = document.createElement("a");
     link.setAttribute("href", encodedUri);
-    link.setAttribute("download", `jury_evaluation_matrix_${new Date().toISOString().split("T")[0]}.csv`);
+    link.setAttribute("download", `jury_evaluation_matrix_round_${activeRound}_${new Date().toISOString().split("T")[0]}.csv`);
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
@@ -422,7 +569,7 @@ const JuryAssignmentsView: React.FC = () => {
     : "N/A";
 
   return (
-    <div className={isFullScreenMode ? "fixed inset-0 z-[9999] bg-[#F8FAFC] p-4 sm:p-6 overflow-y-auto space-y-5 animate-in fade-in duration-200 text-left font-sans" : "space-y-5 animate-in fade-in duration-200 text-left font-sans"}>
+    <div className={`space-y-5 animate-in fade-in duration-200 text-left font-sans w-full ${isFullScreenMode ? "min-h-full" : ""}`}>
       {/* Toast Notification Banner (Does not exit Full Screen mode!) */}
       {toastMessage && (
         <div className="fixed top-5 right-5 z-[10000] bg-slate-900/95 backdrop-blur-md text-white text-xs font-bold px-4 py-3 rounded-2xl shadow-2xl border border-slate-700/80 flex items-center gap-2.5 animate-in slide-in-from-top-3 duration-200">
@@ -442,30 +589,51 @@ const JuryAssignmentsView: React.FC = () => {
               <Maximize2 className="h-4 w-4" />
             </div>
             <div>
-              <h2 className="text-sm font-extrabold tracking-tight text-white">Full Screen Scoring Mode</h2>
+              <div className="flex items-center gap-2">
+                <h2 className="text-sm font-extrabold tracking-tight text-white">Full Screen Scoring Mode</h2>
+                <span className="px-2 py-0.5 rounded-full text-[9px] font-black uppercase tracking-wider bg-blue-500/25 text-blue-300 border border-blue-400/30">
+                  Round {activeRound} Active
+                </span>
+              </div>
               <p className="text-[10px] text-slate-300 font-medium">Distraction-free jury evaluation grid • Press Esc or click Exit to return</p>
             </div>
           </div>
-          <button
-            onClick={toggleFullScreen}
-            className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-xs transition-all flex items-center gap-2 border border-white/20 active:scale-95 cursor-pointer"
-          >
-            <Minimize2 className="h-4 w-4 text-blue-400" />
-            Exit Full Screen
-          </button>
+          <div className="flex items-center gap-2.5">
+            {onOpenSubmitModal && (
+              <button
+                type="button"
+                onClick={onOpenSubmitModal}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white font-bold rounded-xl text-xs transition-all flex items-center gap-1.5 border border-blue-500 shadow-sm active:scale-95 cursor-pointer"
+                title="Submit final evaluations"
+              >
+                <Award className="h-4 w-4" />
+                <span>Submit Final Scores</span>
+              </button>
+            )}
+            <button
+              onClick={toggleFullScreen}
+              className="px-4 py-2 bg-white/10 hover:bg-white/20 text-white font-bold rounded-xl text-xs transition-all flex items-center gap-2 border border-white/20 active:scale-95 cursor-pointer"
+            >
+              <Minimize2 className="h-4 w-4 text-blue-400" />
+              Exit Full Screen
+            </button>
+          </div>
         </div>
       )}
 
       {/* Header with Excel Export & Fullscreen Buttons */}
       <div className="flex flex-col xl:flex-row xl:items-center justify-between gap-4 bg-white p-5 rounded-2xl border border-slate-200/80 shadow-sm w-full">
         <div>
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-2.5 flex-wrap">
             <div className="w-8 h-8 rounded-lg bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200/60 shrink-0">
               <FileSpreadsheet className="h-4.5 w-4.5" />
             </div>
             <h1 className="text-lg sm:text-xl font-extrabold text-slate-900 tracking-tight">
               Assigned Projects & Submissions (Grid Scoring)
             </h1>
+            <span className="px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase tracking-wider bg-blue-50 border border-blue-200 text-blue-700 shadow-xs">
+              Round {activeRound} Active
+            </span>
           </div>
           <p className="text-xs font-medium text-slate-500 mt-1">
             Scores are visible while writing. Once saved, scores automatically convert to password dots and lock against editing.
@@ -521,14 +689,21 @@ const JuryAssignmentsView: React.FC = () => {
           </div>
 
           {/* Quick Metrics Summary */}
-          <div className="grid grid-cols-3 gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 text-left">
+          <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 p-4 bg-slate-50 rounded-2xl border border-slate-100 text-left">
             <div>
               <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">Active Event</span>
               <span className="text-xs font-black text-slate-800 truncate block mt-0.5">{activeEventConfig.title}</span>
             </div>
             <div>
+              <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">Active Round</span>
+              <span className="text-xs font-black text-[#2563EB] flex items-center gap-1 mt-0.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse" />
+                Round {activeRound}
+              </span>
+            </div>
+            <div>
               <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">Assigned Projects</span>
-              <span className="text-xs font-black text-blue-600 block mt-0.5">{projects.length} Submissions</span>
+              <span className="text-xs font-black text-slate-800 block mt-0.5">{projects.length} Submissions</span>
             </div>
             <div>
               <span className="text-[9px] font-extrabold text-slate-400 uppercase tracking-wider block">Evaluated</span>
@@ -564,9 +739,13 @@ const JuryAssignmentsView: React.FC = () => {
                 <Flame className="h-5 w-5" />
               </span>
               <div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-[10px] font-extrabold text-blue-600 uppercase tracking-widest bg-white px-2.5 py-0.5 rounded-full border border-blue-100">
                     ACTIVE EVALUATION EVENT
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[9px] font-extrabold tracking-wide uppercase bg-blue-100 text-blue-800 border border-blue-200">
+                    <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
+                    ROUND {activeRound} ACTIVE
                   </span>
                   <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[9px] font-bold tracking-wide uppercase bg-emerald-100 text-emerald-700">
                     <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
@@ -652,9 +831,12 @@ const JuryAssignmentsView: React.FC = () => {
       <div className="bg-white rounded-2xl border border-slate-200/90 shadow-sm overflow-hidden">
         {/* Excel Header Bar */}
         <div className="bg-slate-100/90 px-4 py-2 border-b border-slate-200 flex items-center justify-between text-[11px] font-bold text-slate-600">
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 inline-block"></span>
-            <span className="font-mono uppercase tracking-wider text-slate-700">Sheet1: Jury_Evaluation_Matrix.xlsx</span>
+            <span className="font-mono uppercase tracking-wider text-slate-700">Sheet1: Round {activeRound} - Jury_Evaluation_Matrix.xlsx</span>
+            <span className="px-2 py-0.5 rounded-md text-[9px] font-black uppercase tracking-wider bg-blue-100 text-blue-800 border border-blue-200">
+              Round {activeRound} Active
+            </span>
           </div>
           <span className="text-slate-400 font-mono text-[10px]">SAVE & LOCK SCORING SYSTEM</span>
         </div>
@@ -665,12 +847,16 @@ const JuryAssignmentsView: React.FC = () => {
               <tr className="bg-slate-50 border-b border-slate-200 text-[11px] font-extrabold text-slate-700 uppercase tracking-wider">
                 <th className="py-3 px-3 border-r border-slate-200 w-12 text-center font-mono">#</th>
                 <th className="py-3 px-4 border-r border-slate-200 min-w-[160px]">Team Name</th>
-                <th className="py-3 px-3 border-r border-slate-200 w-36 text-center">Communication</th>
-                <th className="py-3 px-3 border-r border-slate-200 w-48 text-center">Innovation & Uniqueness</th>
-                <th className="py-3 px-3 border-r border-slate-200 w-48 text-center">Feasibility & Viability</th>
-                <th className="py-3 px-3 border-r border-slate-200 w-36 text-center">Statistics</th>
-                <th className="py-3 px-3 border-r border-slate-200 w-36 text-center">Revenue</th>
-                <th className="py-3 px-3 border-r border-slate-200 w-28 text-center font-mono">Total Score</th>
+                {marksColumns.map((col) => (
+                  <th key={col.id} className="py-3 px-3 border-r border-slate-200 min-w-[130px] text-center">
+                    <div>{col.name}</div>
+                    <span className="text-[10px] text-slate-400 font-mono font-semibold">({col.maxMarks})</span>
+                  </th>
+                ))}
+                <th className="py-3 px-3 border-r border-slate-200 w-28 text-center font-mono">
+                  <div>Total Score</div>
+                  <span className="text-[10px] text-slate-400 font-mono font-semibold">({totalMaxMarks})</span>
+                </th>
                 <th className="py-3 px-3 border-r border-slate-200 w-28 text-center">Status</th>
                 <th className="py-3 px-4 text-center min-w-[140px] sticky right-0 bg-slate-100 border-l border-slate-200 shadow-xs z-10">Action</th>
               </tr>
@@ -678,7 +864,7 @@ const JuryAssignmentsView: React.FC = () => {
             <tbody className="divide-y divide-slate-200/80 text-xs">
               {filteredProjects.length === 0 ? (
                 <tr>
-                  <td colSpan={10} className="py-12 text-center text-slate-400 font-medium">
+                  <td colSpan={marksColumns.length + 5} className="py-12 text-center text-slate-400 font-medium">
                     No submissions matched your search criteria.
                   </td>
                 </tr>
@@ -703,125 +889,36 @@ const JuryAssignmentsView: React.FC = () => {
                         <div className="text-[10px] text-slate-400 font-normal mt-0.5">{p.membersCount} members</div>
                       </td>
 
-                      {/* 1. Communication */}
-                      <td className="py-2.5 px-2 border-r border-slate-200/70 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          {isMasked ? (
-                            <span className="w-14 py-1.5 px-2 text-center font-mono font-extrabold text-xs rounded-lg bg-amber-50/80 border border-amber-200/70 text-amber-700 tracking-widest select-none">
-                              {p.communication > 0 ? "••" : "—"}
-                            </span>
-                          ) : (
-                            <input
-                              type="number"
-                              min="0"
-                              max="20"
-                              placeholder="—"
-                              value={p.communication > 0 ? p.communication : (p.communication === 0 && focusedCell?.id === p.id && focusedCell?.field === "communication" ? "0" : "")}
-                              onFocus={() => setFocusedCell({ id: p.id, field: "communication" })}
-                              onBlur={() => setFocusedCell(null)}
-                              onChange={(e) => handleCellChange(p.id, "communication", e.target.value)}
-                              className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
-                            />
-                          )}
-                          <span className="text-[10px] text-slate-400 font-bold font-mono">/20</span>
-                        </div>
-                      </td>
+                      {/* Dynamic Marks Columns */}
+                      {marksColumns.map((col) => {
+                        const colScore = getColumnScore(p, col.id);
+                        const isFieldFocused = focusedCell?.id === p.id && focusedCell?.field === col.id;
 
-                      {/* 2. Innovation and Uniqueness */}
-                      <td className="py-2.5 px-2 border-r border-slate-200/70 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          {isMasked ? (
-                            <span className="w-14 py-1.5 px-2 text-center font-mono font-extrabold text-xs rounded-lg bg-amber-50/80 border border-amber-200/70 text-amber-700 tracking-widest select-none">
-                              {p.innovationUniqueness > 0 ? "••" : "—"}
-                            </span>
-                          ) : (
-                            <input
-                              type="number"
-                              min="0"
-                              max="20"
-                              placeholder="—"
-                              value={p.innovationUniqueness > 0 ? p.innovationUniqueness : (p.innovationUniqueness === 0 && focusedCell?.id === p.id && focusedCell?.field === "innovationUniqueness" ? "0" : "")}
-                              onFocus={() => setFocusedCell({ id: p.id, field: "innovationUniqueness" })}
-                              onBlur={() => setFocusedCell(null)}
-                              onChange={(e) => handleCellChange(p.id, "innovationUniqueness", e.target.value)}
-                              className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
-                            />
-                          )}
-                          <span className="text-[10px] text-slate-400 font-bold font-mono">/20</span>
-                        </div>
-                      </td>
-
-                      {/* 3. Feasibility and Viability */}
-                      <td className="py-2.5 px-2 border-r border-slate-200/70 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          {isMasked ? (
-                            <span className="w-14 py-1.5 px-2 text-center font-mono font-extrabold text-xs rounded-lg bg-amber-50/80 border border-amber-200/70 text-amber-700 tracking-widest select-none">
-                              {p.feasibilityViability > 0 ? "••" : "—"}
-                            </span>
-                          ) : (
-                            <input
-                              type="number"
-                              min="0"
-                              max="20"
-                              placeholder="—"
-                              value={p.feasibilityViability > 0 ? p.feasibilityViability : (p.feasibilityViability === 0 && focusedCell?.id === p.id && focusedCell?.field === "feasibilityViability" ? "0" : "")}
-                              onFocus={() => setFocusedCell({ id: p.id, field: "feasibilityViability" })}
-                              onBlur={() => setFocusedCell(null)}
-                              onChange={(e) => handleCellChange(p.id, "feasibilityViability", e.target.value)}
-                              className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
-                            />
-                          )}
-                          <span className="text-[10px] text-slate-400 font-bold font-mono">/20</span>
-                        </div>
-                      </td>
-
-                      {/* 4. Statistics */}
-                      <td className="py-2.5 px-2 border-r border-slate-200/70 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          {isMasked ? (
-                            <span className="w-14 py-1.5 px-2 text-center font-mono font-extrabold text-xs rounded-lg bg-amber-50/80 border border-amber-200/70 text-amber-700 tracking-widest select-none">
-                              {p.statistics > 0 ? "••" : "—"}
-                            </span>
-                          ) : (
-                            <input
-                              type="number"
-                              min="0"
-                              max="20"
-                              placeholder="—"
-                              value={p.statistics > 0 ? p.statistics : (p.statistics === 0 && focusedCell?.id === p.id && focusedCell?.field === "statistics" ? "0" : "")}
-                              onFocus={() => setFocusedCell({ id: p.id, field: "statistics" })}
-                              onBlur={() => setFocusedCell(null)}
-                              onChange={(e) => handleCellChange(p.id, "statistics", e.target.value)}
-                              className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
-                            />
-                          )}
-                          <span className="text-[10px] text-slate-400 font-bold font-mono">/20</span>
-                        </div>
-                      </td>
-
-                      {/* 5. Revenue */}
-                      <td className="py-2.5 px-2 border-r border-slate-200/70 text-center">
-                        <div className="flex items-center justify-center gap-1">
-                          {isMasked ? (
-                            <span className="w-14 py-1.5 px-2 text-center font-mono font-extrabold text-xs rounded-lg bg-amber-50/80 border border-amber-200/70 text-amber-700 tracking-widest select-none">
-                              {p.revenue > 0 ? "••" : "—"}
-                            </span>
-                          ) : (
-                            <input
-                              type="number"
-                              min="0"
-                              max="20"
-                              placeholder="—"
-                              value={p.revenue > 0 ? p.revenue : (p.revenue === 0 && focusedCell?.id === p.id && focusedCell?.field === "revenue" ? "0" : "")}
-                              onFocus={() => setFocusedCell({ id: p.id, field: "revenue" })}
-                              onBlur={() => setFocusedCell(null)}
-                              onChange={(e) => handleCellChange(p.id, "revenue", e.target.value)}
-                              className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
-                            />
-                          )}
-                          <span className="text-[10px] text-slate-400 font-bold font-mono">/20</span>
-                        </div>
-                      </td>
+                        return (
+                          <td key={col.id} className="py-2.5 px-2 border-r border-slate-200/70 text-center">
+                            <div className="flex items-center justify-center gap-1">
+                              {isMasked ? (
+                                <span className="w-14 py-1.5 px-2 text-center font-mono font-extrabold text-xs rounded-lg bg-amber-50/80 border border-amber-200/70 text-amber-700 tracking-widest select-none">
+                                  {colScore > 0 ? "••" : "—"}
+                                </span>
+                              ) : (
+                                <input
+                                  type="number"
+                                  min="0"
+                                  max={col.maxMarks}
+                                  placeholder="—"
+                                  value={colScore > 0 ? colScore : (colScore === 0 && isFieldFocused ? "0" : "")}
+                                  onFocus={() => setFocusedCell({ id: p.id, field: col.id })}
+                                  onBlur={() => setFocusedCell(null)}
+                                  onChange={(e) => handleCellChange(p.id, col.id, e.target.value, col.maxMarks)}
+                                  className="w-14 py-1.5 px-2 text-center font-mono font-bold text-xs rounded-lg transition-all bg-slate-50 border border-slate-300/80 focus:border-blue-600 focus:bg-white focus:outline-none focus:ring-2 focus:ring-blue-500/20 shadow-inner"
+                                />
+                              )}
+                              <span className="text-[10px] text-slate-400 font-bold font-mono">/{col.maxMarks}</span>
+                            </div>
+                          </td>
+                        );
+                      })}
 
                       {/* Total Score */}
                       <td className="py-3.5 px-3 border-r border-slate-200/70 text-center font-mono font-extrabold">
@@ -829,7 +926,7 @@ const JuryAssignmentsView: React.FC = () => {
                           isMasked ? (
                             <span className="text-amber-600 font-extrabold text-sm tracking-widest select-none">••••</span>
                           ) : (
-                            <span className="text-blue-600 text-sm font-black">{p.totalScore}/100</span>
+                            <span className="text-blue-600 text-sm font-black">{p.totalScore}/{totalMaxMarks}</span>
                           )
                         ) : (
                           <span className="text-slate-300">—</span>

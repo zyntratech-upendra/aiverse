@@ -364,7 +364,7 @@ export async function deleteContact(id: string) {
 // ==========================================
 // Attendance Tracking
 // ==========================================
-export async function fetchAttendance(query?: { eventId?: string; registrationId?: string; userEmail?: string; status?: string }) {
+export async function fetchAttendance(query?: { eventId?: string; registrationId?: string; userEmail?: string; status?: string; session?: string; day?: number }) {
   const params = new URLSearchParams(query as any).toString();
   const res = await fetch(`${API_BASE}/attendance${params ? `?${params}` : ''}`, { headers: authHeaders() });
   if (!res.ok) throw new Error('Failed to fetch attendance');
@@ -380,7 +380,7 @@ export async function markAttendance(payload: any) {
   return res.json();
 }
 
-export async function bulkMarkAttendance(payload: { records: any[]; eventId?: string; markedBy?: string }) {
+export async function bulkMarkAttendance(payload: { records: any[]; eventId?: string; markedBy?: string; day?: number }) {
   const res = await fetch(`${API_BASE}/attendance/bulk-mark`, {
     method: 'POST',
     headers: authHeaders(),
@@ -399,16 +399,37 @@ export async function fetchQuiz(id: string) {
 }
 
 export async function fetchAllQuizzes(query?: { eventId?: string; status?: string }) {
-  const params = new URLSearchParams(query as any).toString();
-  const res = await fetch(`${API_BASE}/quizzes${params ? `?${params}` : ''}`, { headers: publicHeaders() });
+  const cleanQuery: Record<string, string> = {};
+  if (query) {
+    if (query.eventId) cleanQuery.eventId = query.eventId;
+    if (query.status) cleanQuery.status = query.status;
+  }
+  const params = Object.keys(cleanQuery).length > 0 ? new URLSearchParams(cleanQuery).toString() : '';
+  const res = await fetchWithRetry(`${API_BASE}/quizzes${params ? `?${params}` : ''}`, { headers: publicHeaders() });
   if (!res.ok) throw new Error('Failed to fetch quizzes');
   return res.json();
 }
 
 export async function fetchQuizSubmissions(quizId: string) {
-  const res = await fetch(`${API_BASE}/quizzes/${quizId}/submissions`, { headers: authHeaders() });
-  if (!res.ok) return [];
-  return res.json();
+  try {
+    const res = await fetchWithRetry(`${API_BASE}/quizzes/${quizId}/submissions`, { headers: authHeaders() });
+    if (!res.ok) return [];
+    return res.json();
+  } catch (err) {
+    console.warn(`[apiClient] fetchQuizSubmissions failed for ${quizId}:`, err);
+    return [];
+  }
+}
+
+export async function fetchAllQuizSubmissions() {
+  try {
+    const res = await fetchWithRetry(`${API_BASE}/quizzes/submissions`, { headers: authHeaders() });
+    if (!res.ok) return [];
+    return res.json();
+  } catch (err) {
+    console.warn('[apiClient] fetchAllQuizSubmissions failed:', err);
+    return [];
+  }
 }
 
 export async function updateQuizSubmission(quizId: string, submissionId: string, patch: any) {
@@ -441,9 +462,14 @@ export async function batchUpdateQuizSubmissions(quizId: string, updates: any[])
 }
 
 export async function fetchQuizSessions(quizId: string) {
-  const res = await fetch(`${API_BASE}/quizzes/${quizId}/sessions`, { headers: authHeaders() });
-  if (!res.ok) return [];
-  return res.json();
+  try {
+    const res = await fetchWithRetry(`${API_BASE}/quizzes/${quizId}/sessions`, { headers: authHeaders() });
+    if (!res.ok) return [];
+    return res.json();
+  } catch (err) {
+    console.warn(`[apiClient] fetchQuizSessions failed for ${quizId}:`, err);
+    return [];
+  }
 }
 
 export async function createQuiz(quizObj: any) {

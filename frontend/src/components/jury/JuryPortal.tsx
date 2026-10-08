@@ -4,6 +4,7 @@ import JurySidebar from "./JurySidebar";
 import type { JurySidebarTab } from "./JurySidebar";
 import JuryDashboardView from "./JuryDashboardView";
 import JuryAssignmentsView from "./JuryAssignmentsView";
+import JurySettingsView from "./JurySettingsView";
 import SubmitScoresModal from "./SubmitScoresModal";
 import SEO from "../layout/SEO";
 import { Lock, ShieldAlert } from "lucide-react";
@@ -24,12 +25,96 @@ const JuryPortal: React.FC<JuryPortalProps> = ({
     const local = localStorage.getItem("juryPortalActive");
     return local !== null ? local !== "false" : true;
   });
+  const [activeRound, setActiveRound] = useState<number>(() => {
+    const local = localStorage.getItem("activeJuryRound");
+    return local ? Number(local) : 1;
+  });
+
+  // Track Full Screen state so the sidebar and top header are cleanly hidden when full screen is active
+  const [isFullScreenMode, setIsFullScreenMode] = useState<boolean>(() => {
+    return Boolean(
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      (document as any).mozFullScreenElement ||
+      (document as any).msFullscreenElement
+    );
+  });
+
+  const toggleFullScreen = () => {
+    const isFs = Boolean(
+      document.fullscreenElement ||
+      (document as any).webkitFullscreenElement ||
+      (document as any).mozFullScreenElement ||
+      (document as any).msFullscreenElement ||
+      isFullScreenMode
+    );
+
+    if (!isFs) {
+      setIsFullScreenMode(true);
+      const el = document.documentElement;
+      if (el.requestFullscreen) {
+        el.requestFullscreen().catch(() => {});
+      } else if ((el as any).webkitRequestFullscreen) {
+        (el as any).webkitRequestFullscreen();
+      } else if ((el as any).mozRequestFullScreen) {
+        (el as any).mozRequestFullScreen();
+      } else if ((el as any).msRequestFullscreen) {
+        (el as any).msRequestFullscreen();
+      }
+    } else {
+      setIsFullScreenMode(false);
+      if (
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      ) {
+        if (document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+        } else if ((document as any).webkitExitFullscreen) {
+          (document as any).webkitExitFullscreen();
+        } else if ((document as any).mozCancelFullScreen) {
+          (document as any).mozCancelFullScreen();
+        } else if ((document as any).msExitFullscreen) {
+          (document as any).msExitFullscreen();
+        }
+      }
+    }
+  };
+
+  useEffect(() => {
+    const handleFullScreenChange = () => {
+      const isFs = Boolean(
+        document.fullscreenElement ||
+        (document as any).webkitFullscreenElement ||
+        (document as any).mozFullScreenElement ||
+        (document as any).msFullscreenElement
+      );
+      setIsFullScreenMode(isFs);
+    };
+
+    document.addEventListener("fullscreenchange", handleFullScreenChange);
+    document.addEventListener("webkitfullscreenchange", handleFullScreenChange);
+    document.addEventListener("mozfullscreenchange", handleFullScreenChange);
+    document.addEventListener("MSFullscreenChange", handleFullScreenChange);
+
+    return () => {
+      document.removeEventListener("fullscreenchange", handleFullScreenChange);
+      document.removeEventListener("webkitfullscreenchange", handleFullScreenChange);
+      document.removeEventListener("mozfullscreenchange", handleFullScreenChange);
+      document.removeEventListener("MSFullscreenChange", handleFullScreenChange);
+    };
+  }, []);
 
   useEffect(() => {
     const syncStatus = () => {
       const local = localStorage.getItem("juryPortalActive");
       if (local !== null) {
         setIsJuryActive(local !== "false");
+      }
+      const roundLocal = localStorage.getItem("activeJuryRound");
+      if (roundLocal) {
+        setActiveRound(Number(roundLocal));
       }
     };
 
@@ -43,6 +128,10 @@ const JuryPortal: React.FC<JuryPortalProps> = ({
         if (data && typeof data.juryPortalActive === "boolean") {
           setIsJuryActive(data.juryPortalActive);
           localStorage.setItem("juryPortalActive", String(data.juryPortalActive));
+        }
+        if (data && data.currentRound) {
+          setActiveRound(Number(data.currentRound));
+          localStorage.setItem("activeJuryRound", String(data.currentRound));
         }
       } catch (e) {}
     };
@@ -94,33 +183,55 @@ const JuryPortal: React.FC<JuryPortalProps> = ({
         keywords="AI Verse Jury, Hackathon Judging, Evaluation Portal"
       />
 
-      {/* Top Header Navigation (Only shown in standalone mode) */}
-      {standalone && (
+      {/* Top Header Navigation (Hidden in distraction-free full screen mode) */}
+      {standalone && !isFullScreenMode && (
         <JuryHeader
           activeTab={activeTab}
           setActiveTab={(t) => setActiveTab(t as JurySidebarTab)}
           pendingCount={4}
+          activeRound={activeRound}
         />
       )}
 
       {/* Body Area: Sidebar + Main Content */}
       <div className="flex-1 flex overflow-hidden">
-        {/* Left Sidebar */}
-        <JurySidebar
-          activeTab={activeTab}
-          setActiveTab={setActiveTab}
-          onOpenSubmitModal={() => setIsSubmitModalOpen(true)}
-        />
+        {/* Left Sidebar (Hidden when in fullscreen mode) */}
+        {!isFullScreenMode && (
+          <JurySidebar
+            activeTab={activeTab}
+            setActiveTab={setActiveTab}
+            onOpenSubmitModal={() => setIsSubmitModalOpen(true)}
+            activeRound={activeRound}
+          />
+        )}
 
         {/* Main Content Pane */}
-        <main className="flex-1 p-4 sm:p-6 md:p-8 overflow-y-auto max-w-7xl mx-auto w-full min-w-0">
+        <main
+          className={`flex-1 overflow-y-auto w-full min-w-0 transition-all ${
+            isFullScreenMode
+              ? "p-3 sm:p-5 md:p-6 bg-[#F8FAFC]"
+              : "p-4 sm:p-6 md:p-8 max-w-7xl mx-auto"
+          }`}
+        >
           {activeTab === "Dashboard" && (
             <JuryDashboardView
               onNavigateTab={setActiveTab}
+              activeRound={activeRound}
             />
           )}
 
-          {activeTab === "Assignments" && <JuryAssignmentsView />}
+          {activeTab === "Assignments" && (
+            <JuryAssignmentsView
+              isFullScreenMode={isFullScreenMode}
+              toggleFullScreen={toggleFullScreen}
+              onOpenSubmitModal={() => setIsSubmitModalOpen(true)}
+              activeRound={activeRound}
+            />
+          )}
+
+          {activeTab === "Settings" && (
+            <JurySettingsView onNavigateTab={setActiveTab} />
+          )}
         </main>
       </div>
 

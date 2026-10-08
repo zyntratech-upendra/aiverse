@@ -6,8 +6,8 @@ export default defineConfig({
   plugins: [react()],
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
-      '@supabase/supabase-js': path.resolve(__dirname, './src/config/supabase.ts'),
+      '@': path.resolve(import.meta.dirname, './src'),
+      '@supabase/supabase-js': path.resolve(import.meta.dirname, './src/config/supabase.ts'),
     },
   },
   build: {

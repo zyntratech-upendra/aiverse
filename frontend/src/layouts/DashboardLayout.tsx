@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { Outlet, Link, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { motion } from "framer-motion";
@@ -18,8 +18,8 @@ import {
   ClipboardCheck,
   BarChart2,
   Mail,
-  ShieldCheck
 } from "lucide-react";
+import OrgChangePasswordModal from "../pages/organizer/OrgChangePasswordModal";
 
 const DashboardLayout: React.FC = () => {
   const { user, logout } = useAuth();
@@ -27,6 +27,20 @@ const DashboardLayout: React.FC = () => {
   const location = useLocation();
   const [isSidebarOpen, setIsSidebarOpen] = useState(true);
   const [isMobileOpen, setIsMobileOpen] = useState(false);
+  const [isPasswordModalOpen, setIsPasswordModalOpen] = useState(false);
+
+  // Global Keyboard Shortcut: Alt + Shift + C opens Change Password modal
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.altKey && e.shiftKey && (e.key === "c" || e.key === "C" || e.code === "KeyC")) {
+        e.preventDefault();
+        setIsPasswordModalOpen(true);
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   if (!user) return null;
 
@@ -247,7 +261,7 @@ const DashboardLayout: React.FC = () => {
               ) : (
                 <div className="w-8 h-8 sm:w-10 sm:h-10 rounded-full bg-[#2563EB] text-white flex items-center justify-center font-bold text-xs sm:text-sm shadow-xs border border-white shrink-0 font-sans">
                   {(() => {
-                    if (!user.name) return "AV";
+                    if (!user.name) return isOrganizer ? "SO" : "AV";
                     const parts = user.name.trim().split(/\s+/);
                     if (parts.length >= 2) return (parts[0][0] + parts[1][0]).toUpperCase();
                     return parts[0].substring(0, 2).toUpperCase();
@@ -280,6 +294,12 @@ const DashboardLayout: React.FC = () => {
           © 2026 AI Verse. Precise Innovation.
         </footer>
       </div>
+
+      {/* Coordinator Change Password Modal (Shortcut: Alt + Shift + C) */}
+      <OrgChangePasswordModal
+        isOpen={isPasswordModalOpen}
+        onClose={() => setIsPasswordModalOpen(false)}
+      />
     </div>
   );
 };

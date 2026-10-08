@@ -52,7 +52,7 @@
 }
 
 /* GPU Hardware Acceleration & Smooth Kinetic Scrolling */
-main, section, [role="dialog"], .scroll-smooth-gpu {
+[role="dialog"], .scroll-smooth-gpu {
   -webkit-overflow-scrolling: touch;
   transform: translateZ(0);
   backface-visibility: hidden;

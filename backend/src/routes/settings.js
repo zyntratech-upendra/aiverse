@@ -44,6 +44,13 @@ router.get(
           allowTeamLogin: true,
           allowSubmissions: true,
           currentRound: 1,
+          juryMarksColumns: [
+            { id: "communication", name: "Communication", maxMarks: 20 },
+            { id: "innovationUniqueness", name: "Innovation & Uniqueness", maxMarks: 20 },
+            { id: "feasibilityViability", name: "Feasibility & Viability", maxMarks: 20 },
+            { id: "statistics", name: "Statistics", maxMarks: 20 },
+            { id: "revenue", name: "Revenue", maxMarks: 20 }
+          ],
         });
       }
       return res.status(404).json({ error: 'Setting not found', id: key });
@@ -59,6 +66,14 @@ router.get(
       availableRoles: doc.availableRoles || val.availableRoles || ["Faculty Coordinator", "Student Lead", "Organizer", "Volunteer"],
       heroImages: doc.heroImages || val.heroImages || ["/homepage/p.png", "/homepage/vice.png", "/homepage/all.jpeg"],
       aboutImage: doc.aboutImage || val.aboutImage || "/homepage/g.jpeg",
+      juryMarksColumns: doc.juryMarksColumns || val.juryMarksColumns || [
+        { id: "communication", name: "Communication", maxMarks: 20 },
+        { id: "innovationUniqueness", name: "Innovation & Uniqueness", maxMarks: 20 },
+        { id: "feasibilityViability", name: "Feasibility & Viability", maxMarks: 20 },
+        { id: "statistics", name: "Statistics", maxMarks: 20 },
+        { id: "revenue", name: "Revenue", maxMarks: 20 }
+      ],
+      currentRound: Number(doc.currentRound || val.currentRound || 1),
     };
     res.json(data);
   })
