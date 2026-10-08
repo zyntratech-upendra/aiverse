@@ -17,28 +17,35 @@ import {
   ArrowUpDown, 
   RefreshCw, 
   FileText, 
-  QrCode,
-  Camera,
-  Check,
-  X,
-  Sun,
-  Moon,
-  Calendar,
-  Users,
-  User,
-  ChevronDown,
-  ArrowLeft,
-  MapPin,
-  Clock,
-  LogIn,
-  Sparkles,
-  DoorOpen,
-  DoorClosed,
-  ArrowRight,
-  Crown,
-  CheckCheck,
-  ChevronsUpDown,
-  Ticket
+  QrCode, 
+  Camera, 
+  Check, 
+  X, 
+  Sun, 
+  Moon, 
+  Calendar, 
+  Users, 
+  User, 
+  ChevronDown, 
+  ArrowLeft, 
+  MapPin, 
+  Clock, 
+  LogIn, 
+  Sparkles, 
+  DoorOpen, 
+  DoorClosed, 
+  ArrowRight, 
+  Crown, 
+  CheckCheck, 
+  ChevronsUpDown, 
+  Ticket,
+  GraduationCap,
+  Building2,
+  Hash,
+  IdCard,
+  Mail,
+  Phone,
+  CheckCircle2
 } from "lucide-react";
 import { computeEventDays, type EventDayInfo } from "../faculty/AttendanceManagementPage";
 
@@ -377,8 +384,9 @@ export const OrgAttendancePage: React.FC = () => {
             isLead: true,
             name: r.teamLeadName || r.name || "Team Lead",
             email: r.teamLeadEmail || r.email || "",
-            studentId: r.teamLeadStudentId || r.studentId || `AI-${String(regId).substring(0, 5).toUpperCase()}`,
+            studentId: r.teamLeadStudentId || r.studentId || r.rollNo || r.registrationNumber || `AI-${String(regId).substring(0, 5).toUpperCase()}`,
             teamName: r.groupName || r.teamName || "Solo Registration",
+            college: r.college || r.collegeName || "Vishnu Institute of Technology",
             department: r.department || r.branch || "Engineering & Tech",
             year: r.year || "Year 3",
             program: r.program || "B.Tech",
@@ -436,8 +444,9 @@ export const OrgAttendancePage: React.FC = () => {
                 memberIndex: idx,
                 name: m.name || `Teammate ${idx + 1}`,
                 email: m.email || "",
-                studentId: m.studentId || `AI-${String(regId).substring(0, 3)}-${idx + 1}`,
+                studentId: m.studentId || m.rollNo || m.registrationNumber || `AI-${String(regId).substring(0, 3)}-${idx + 1}`,
                 teamName: r.groupName || r.teamName || "Team Member",
+                college: m.college || m.collegeName || r.college || r.collegeName || "Vishnu Institute of Technology",
                 department: m.department || r.department || "Engineering & Tech",
                 year: m.year || r.year || "Year 3",
                 program: m.program || r.program || "B.Tech",
@@ -591,7 +600,19 @@ export const OrgAttendancePage: React.FC = () => {
         r.ticketCode === cleanText || 
         r.registrationId === cleanText ||
         (r.teamLeadStudentId && r.teamLeadStudentId.toLowerCase() === cleanText.toLowerCase()) ||
-        (r.teamLeadEmail && r.teamLeadEmail.toLowerCase() === cleanText.toLowerCase())
+        (r.studentId && r.studentId.toLowerCase() === cleanText.toLowerCase()) ||
+        (r.rollNo && r.rollNo.toLowerCase() === cleanText.toLowerCase()) ||
+        (r.registrationNumber && r.registrationNumber.toLowerCase() === cleanText.toLowerCase()) ||
+        (r.teamLeadEmail && r.teamLeadEmail.toLowerCase() === cleanText.toLowerCase()) ||
+        (r.leadEmail && r.leadEmail.toLowerCase() === cleanText.toLowerCase()) ||
+        (r.email && r.email.toLowerCase() === cleanText.toLowerCase()) ||
+        (r.userEmail && r.userEmail.toLowerCase() === cleanText.toLowerCase()) ||
+        (Array.isArray(r.members) && r.members.some((m: any) =>
+          (m.studentId && m.studentId.toLowerCase() === cleanText.toLowerCase()) ||
+          (m.rollNo && m.rollNo.toLowerCase() === cleanText.toLowerCase()) ||
+          (m.registrationNumber && m.registrationNumber.toLowerCase() === cleanText.toLowerCase()) ||
+          (m.email && m.email.toLowerCase() === cleanText.toLowerCase())
+        ))
       );
 
       if (!reg) {
@@ -757,6 +778,7 @@ export const OrgAttendancePage: React.FC = () => {
         s.name.toLowerCase().includes(q) ||
         s.studentId.toLowerCase().includes(q) ||
         s.email.toLowerCase().includes(q) ||
+        (s.college || "").toLowerCase().includes(q) ||
         (s.teamName || "").toLowerCase().includes(q);
 
       const status = sessionTab === "gate_entry" 
@@ -867,10 +889,12 @@ export const OrgAttendancePage: React.FC = () => {
         !q ||
         t.teamName.toLowerCase().includes(q) ||
         t.ticketCode.toLowerCase().includes(q) ||
+        (t.college && t.college.toLowerCase().includes(q)) ||
         t.allMembers.some(
           (m) =>
             m.name.toLowerCase().includes(q) ||
             m.studentId.toLowerCase().includes(q) ||
+            (m.college && m.college.toLowerCase().includes(q)) ||
             m.email.toLowerCase().includes(q)
         );
 
@@ -2055,7 +2079,7 @@ export const OrgAttendancePage: React.FC = () => {
                                   return (
                                     <tr key={member.id} className="hover:bg-slate-50/50 transition-colors">
                                       <td className="py-3 px-4">
-                                        <div className="flex items-center gap-1.5">
+                                        <div className="flex items-center gap-1.5 flex-wrap">
                                           <span className="font-extrabold text-slate-900 text-xs">{member.name}</span>
                                           {member.isLead && (
                                             <span className="inline-flex items-center gap-0.5 text-[8.5px] font-black bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-md uppercase border border-blue-200">
@@ -2064,8 +2088,13 @@ export const OrgAttendancePage: React.FC = () => {
                                             </span>
                                           )}
                                         </div>
+                                        {(member.college || team.college) && (
+                                          <span className="text-[10px] text-slate-400 font-medium block truncate max-w-[200px] mt-0.5">
+                                            {member.college || team.college}
+                                          </span>
+                                        )}
                                       </td>
-                                      <td className="py-3 px-4 font-mono text-slate-800 text-[11px]">
+                                      <td className="py-3 px-4 font-mono text-slate-800 text-[11px] font-bold">
                                         {member.studentId}
                                       </td>
                                       <td className="py-3 px-4 text-slate-500 text-[11px] truncate max-w-[180px]">
@@ -2127,15 +2156,21 @@ export const OrgAttendancePage: React.FC = () => {
                               const isLate = status === "Late";
 
                               return (
-                                <div key={member.id} className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs space-y-1.5">
-                                  <div className="flex items-center justify-between gap-2">
-                                    <div className="flex items-center gap-1.5 min-w-0">
-                                      <span className="font-extrabold text-slate-900 text-xs truncate">{member.name}</span>
-                                      {member.isLead && (
-                                        <span className="text-[8px] font-black bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-md uppercase">
-                                          Lead
-                                        </span>
-                                      )}
+                                <div key={member.id} className="bg-white p-3 rounded-xl border border-slate-200/80 shadow-2xs space-y-2">
+                                  <div className="flex items-start justify-between gap-2">
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex items-center gap-1.5 flex-wrap">
+                                        <span className="font-extrabold text-slate-900 text-xs leading-snug break-words">{member.name}</span>
+                                        {member.isLead && (
+                                          <span className="text-[8px] font-black bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-md uppercase">
+                                            Lead
+                                          </span>
+                                        )}
+                                      </div>
+                                      <div className="flex items-center gap-1 text-[11px] text-slate-700 font-mono font-bold mt-0.5">
+                                        <Hash className="w-3 h-3 text-slate-400 shrink-0" />
+                                        <span>{member.studentId}</span>
+                                      </div>
                                     </div>
                                     <button
                                       type="button"
@@ -2143,7 +2178,7 @@ export const OrgAttendancePage: React.FC = () => {
                                         const nextStatus = isPresent ? "Late" : isLate ? "Absent" : "Present";
                                         handleStatusChange(member.id, nextStatus);
                                       }}
-                                      className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase border shrink-0 ${
+                                      className={`px-2.5 py-1 rounded-lg text-[9px] font-black uppercase border shrink-0 cursor-pointer active:scale-95 ${
                                         isPresent
                                           ? "bg-emerald-50 text-emerald-700 border-emerald-200"
                                           : isLate
@@ -2154,9 +2189,17 @@ export const OrgAttendancePage: React.FC = () => {
                                       {status}
                                     </button>
                                   </div>
-                                  <div className="flex items-center justify-between text-[10.5px] text-slate-500 font-mono">
-                                    <span>{member.studentId}</span>
-                                    <span className="text-slate-400">{checkIn}</span>
+
+                                  {/* Member College */}
+                                  <div className="flex items-center gap-1.5 text-[10.5px] text-slate-600 bg-slate-50 px-2 py-1 rounded-lg border border-slate-100">
+                                    <GraduationCap className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                                    <span className="truncate font-medium">{member.college || team.college || "Vishnu Institute of Technology"}</span>
+                                  </div>
+
+                                  {/* Session Check-in time */}
+                                  <div className="flex items-center justify-between text-[10px] text-slate-400 pt-0.5">
+                                    <span>Check-in:</span>
+                                    <span className="font-bold text-slate-600">{checkIn}</span>
                                   </div>
                                 </div>
                               );
@@ -2195,13 +2238,13 @@ export const OrgAttendancePage: React.FC = () => {
                       <div key={student.id} className="p-4 space-y-2.5 bg-white hover:bg-slate-50/50 transition-colors">
                         {/* Top Row: Name + Lead Badge + Status Button */}
                         <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
+                          <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-1.5 flex-wrap">
-                              <span className="font-extrabold text-slate-900 text-sm leading-tight">
+                              <span className="font-extrabold text-slate-900 text-sm leading-tight break-words">
                                 {student.name}
                               </span>
                               {student.isLead && (
-                                <span className="text-[8.5px] font-black bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-md uppercase">
+                                <span className="text-[8.5px] font-black bg-blue-100 text-blue-700 px-1.5 py-0.5 rounded-md uppercase border border-blue-200">
                                   Lead
                                 </span>
                               )}
@@ -2229,10 +2272,19 @@ export const OrgAttendancePage: React.FC = () => {
                           </button>
                         </div>
 
-                        {/* Middle Row: ID & Email */}
-                        <div className="flex items-center justify-between text-[11px] text-slate-400 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100">
-                          <span className="font-mono font-bold text-slate-700">{student.studentId}</span>
-                          <span className="truncate max-w-[170px] text-[10.5px]">{student.email}</span>
+                        {/* Middle Row 1: Roll No & Email */}
+                        <div className="flex items-center justify-between text-[11px] text-slate-600 bg-slate-50 px-2.5 py-1.5 rounded-lg border border-slate-100 gap-2">
+                          <div className="flex items-center gap-1 font-mono font-bold text-slate-800 shrink-0">
+                            <Hash className="w-3 h-3 text-slate-400" />
+                            <span>{student.studentId}</span>
+                          </div>
+                          <span className="truncate max-w-[170px] text-[10.5px] text-slate-400">{student.email}</span>
+                        </div>
+
+                        {/* Middle Row 2: College */}
+                        <div className="flex items-center gap-1.5 text-[11px] text-slate-600 bg-slate-50/70 px-2.5 py-1.5 rounded-lg border border-slate-100">
+                          <GraduationCap className="w-3.5 h-3.5 text-indigo-500 shrink-0" />
+                          <span className="font-medium truncate">{student.college || "Vishnu Institute of Technology"}</span>
                         </div>
 
                         {/* Bottom Row: Check-in Time */}
@@ -2286,6 +2338,11 @@ export const OrgAttendancePage: React.FC = () => {
                                 <span className="text-[11px] text-slate-400 font-medium mt-0.5 block">
                                   Team: <span className="text-slate-600 font-bold">{student.teamName}</span>
                                 </span>
+                                {student.college && (
+                                  <span className="text-[10px] text-slate-400 font-medium block truncate max-w-[200px] mt-0.5">
+                                    {student.college}
+                                  </span>
+                                )}
                               </div>
                             </td>
 
@@ -2426,128 +2483,221 @@ export const OrgAttendancePage: React.FC = () => {
 
       {/* ================= QR SCANNER MODAL ================= */}
       {isScannerModalOpen && createPortal(
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-3 sm:p-4 bg-slate-950/85 backdrop-blur-md overflow-y-auto">
-          <div className="bg-slate-950 text-white rounded-3xl shadow-2xl w-full max-w-md max-h-[90vh] overflow-y-auto border border-slate-800 p-4 sm:p-6 flex flex-col items-center space-y-3.5 sm:space-y-4 relative">
-            {/* Close Button */}
-            <button
-              onClick={() => {
-                setIsScannerModalOpen(false);
-                setScannedTeamInfo(null);
-              }}
-              className="absolute top-3.5 right-3.5 p-1.5 hover:bg-slate-800 text-slate-400 hover:text-slate-200 rounded-xl transition-colors cursor-pointer z-30"
-            >
-              <X className="h-5 w-5" />
-            </button>
+        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-2.5 sm:p-4 bg-slate-950/85 backdrop-blur-md">
+          <div className="bg-slate-950 text-white rounded-2xl sm:rounded-3xl shadow-2xl w-full max-w-lg max-h-[92vh] sm:max-h-[88vh] flex flex-col border border-slate-800 relative overflow-hidden animate-in fade-in zoom-in-95 duration-200">
+            {/* Sticky Modal Top Header */}
+            <div className="px-4 py-3 sm:px-5 sm:py-3.5 border-b border-slate-800/80 bg-slate-950/95 backdrop-blur-md flex items-center justify-between shrink-0">
+              <div className="min-w-0 pr-2">
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className={`text-[9px] sm:text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full border ${
+                    sessionTab === "gate_entry"
+                      ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/20"
+                      : sessionTab === "morning"
+                      ? "text-amber-400 bg-amber-500/10 border-amber-500/20"
+                      : sessionTab === "gate_exit"
+                      ? "text-rose-400 bg-rose-500/10 border-rose-500/20"
+                      : "text-indigo-400 bg-indigo-500/10 border-indigo-500/20"
+                  }`}>
+                    {sessionTab === "gate_entry" ? "Gate Enter" : sessionTab === "morning" ? "Morning" : sessionTab === "gate_exit" ? "Gate Exit" : "Afternoon"} • Day {selectedDay}
+                  </span>
+                  {scannedTeamInfo && (
+                    <span className="text-[9px] font-mono font-bold text-slate-400 bg-slate-900 border border-slate-800 px-2 py-0.5 rounded-full truncate max-w-[140px]">
+                      #{scannedTeamInfo.ticketCode || scannedTeamInfo.registrationId || (scannedTeamInfo.id ? scannedTeamInfo.id.slice(-6).toUpperCase() : "PASS")}
+                    </span>
+                  )}
+                </div>
+                <h2 className="text-base sm:text-lg font-black text-white tracking-tight mt-0.5 truncate">
+                  {scannedTeamInfo ? "Verify Participant Ticket" : "Ticket QR Scanner"}
+                </h2>
+              </div>
 
-            {/* Header */}
-            <div className="text-center space-y-0.5 pt-1 sm:pt-0">
-              <span className="text-[9.5px] sm:text-[10px] font-black uppercase text-blue-400 tracking-widest block">
-                {sessionTab === "gate_entry" ? "Gate Enter Check-in" : sessionTab === "morning" ? "Morning Session Check-in" : sessionTab === "gate_exit" ? "Gate Exit Check-in" : "Afternoon Session Check-in"} (Day {selectedDay})
-              </span>
-              <h2 className="text-base sm:text-xl font-black text-white tracking-tight">
-                Participant Ticket Check-in
-              </h2>
-              <p className="text-[11px] sm:text-xs text-slate-400 font-medium max-w-[260px] sm:max-w-[280px]">
-                Scan registration QR barcode presented by student to log session attendance.
-              </p>
+              {/* Close Button */}
+              <button
+                type="button"
+                onClick={() => {
+                  setIsScannerModalOpen(false);
+                  setScannedTeamInfo(null);
+                }}
+                className="p-1.5 sm:p-2 hover:bg-slate-800 text-slate-400 hover:text-white rounded-xl transition-colors cursor-pointer shrink-0"
+              >
+                <X className="h-5 w-5" />
+              </button>
             </div>
 
-            {/* Camera Viewfinder */}
-            {!scannedTeamInfo && (
-              <div className="w-40 h-40 sm:w-52 sm:h-52 rounded-2xl border-4 border-dashed border-blue-500 relative flex items-center justify-center bg-black overflow-hidden shrink-0">
-                <div className="absolute top-0 left-0 w-full h-1 bg-red-500 shadow-[0_0_8px_#ef4444] animate-[bounce_2.5s_infinite] z-20"></div>
-                
-                <div className="absolute top-2 left-2 w-3.5 h-3.5 border-t-2 border-l-2 border-blue-400 z-20"></div>
-                <div className="absolute top-2 right-2 w-3.5 h-3.5 border-t-2 border-r-2 border-blue-400 z-20"></div>
-                <div className="absolute bottom-2 left-2 w-3.5 h-3.5 border-b-2 border-l-2 border-blue-400 z-20"></div>
-                <div className="absolute bottom-2 right-2 w-3.5 h-3.5 border-b-2 border-r-2 border-blue-400 z-20"></div>
-
-                {scanLoading ? (
-                  <div className="flex flex-col items-center gap-2 z-10">
-                    <RefreshCw className="h-7 w-7 sm:h-8 sm:w-8 text-blue-500 animate-spin" />
-                    <span className="text-[9px] sm:text-[10px] text-blue-300 font-bold uppercase tracking-wider">Reading QR Code...</span>
+            {/* Scrollable Modal Content Body */}
+            <div className="flex-1 overflow-y-auto p-3.5 sm:p-5 space-y-3.5 sm:space-y-4 overscroll-contain">
+              {/* State A: Camera Viewfinder (Scanning Mode) */}
+              {!scannedTeamInfo && (
+                <div className="flex flex-col items-center space-y-3.5 py-2">
+                  <div className="text-center space-y-1">
+                    <p className="text-xs sm:text-sm text-slate-300 font-medium max-w-xs mx-auto">
+                      Point camera at the participant's QR ticket barcode to instantly log session attendance.
+                    </p>
                   </div>
-                ) : (
-                  <>
-                    <video
-                      ref={videoRef}
-                      className="absolute inset-0 w-full h-full object-cover z-10"
-                      muted
-                      playsInline
-                    />
-                    <div className="absolute inset-0 flex flex-col items-center justify-center p-4 space-y-2 bg-black/75 z-0">
-                      <div className="w-14 h-14 sm:w-18 sm:h-18 bg-white rounded-lg p-1.5 relative shadow-inner">
-                        <img
-                          src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=simulate_scanner_feed"
-                          alt="QR Scanner Target"
-                          className="w-full h-full object-contain opacity-60"
+
+                  <div className="w-48 h-48 sm:w-56 sm:h-56 rounded-2xl border-4 border-dashed border-blue-500 relative flex items-center justify-center bg-black overflow-hidden shrink-0 shadow-inner">
+                    <div className="absolute top-0 left-0 w-full h-1 bg-red-500 shadow-[0_0_8px_#ef4444] animate-[bounce_2.5s_infinite] z-20"></div>
+                    
+                    <div className="absolute top-2 left-2 w-3.5 h-3.5 border-t-2 border-l-2 border-blue-400 z-20"></div>
+                    <div className="absolute top-2 right-2 w-3.5 h-3.5 border-t-2 border-r-2 border-blue-400 z-20"></div>
+                    <div className="absolute bottom-2 left-2 w-3.5 h-3.5 border-b-2 border-l-2 border-blue-400 z-20"></div>
+                    <div className="absolute bottom-2 right-2 w-3.5 h-3.5 border-b-2 border-r-2 border-blue-400 z-20"></div>
+
+                    {scanLoading ? (
+                      <div className="flex flex-col items-center gap-2 z-10">
+                        <RefreshCw className="h-8 w-8 text-blue-500 animate-spin" />
+                        <span className="text-[10px] text-blue-300 font-bold uppercase tracking-wider">Reading QR Code...</span>
+                      </div>
+                    ) : (
+                      <>
+                        <video
+                          ref={videoRef}
+                          className="absolute inset-0 w-full h-full object-cover z-10"
+                          muted
+                          playsInline
                         />
-                      </div>
-                      <span className="text-[8px] sm:text-[9px] text-slate-500 font-black uppercase tracking-wider">
-                        Camera View Ready
-                      </span>
-                    </div>
-                  </>
-                )}
-              </div>
-            )}
-
-            {/* Quick Simulate Option if no webcam */}
-            {!scannedTeamInfo && !scanLoading && (
-              <div className="w-full pt-1">
-                <button
-                  type="button"
-                  onClick={async () => {
-                    const reg = registrations.find(x => 
-                      (x.eventId === selectedEventId || (x.eventTitle || "").toLowerCase().trim() === (assignedEvent?.title || "").toLowerCase().trim())
-                    );
-                    if (!reg) {
-                      alert(`No registrations found in the database for the active event "${assignedEvent?.title}".`);
-                      return;
-                    }
-
-                    setScanLoading(true);
-                    await new Promise(resolve => setTimeout(resolve, 600));
-                    setScanLoading(false);
-                    setScannedTeamInfo(reg);
-                  }}
-                  className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs py-2.5 px-3 rounded-xl transition-all uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer text-center"
-                >
-                  <Camera className="h-4 w-4 shrink-0" />
-                  <span className="truncate">Select First Ticket from Database</span>
-                </button>
-              </div>
-            )}
-
-            {/* Team details view */}
-            {scannedTeamInfo && (
-              <div className="w-full space-y-4 text-left animate-in fade-in duration-200">
-                {scanSuccessMsg ? (
-                  <div className="flex flex-col items-center justify-center gap-2 py-8 text-center animate-in zoom-in-95 duration-200">
-                    <div className="w-12 h-12 rounded-full bg-emerald-500/25 text-emerald-400 flex items-center justify-center border border-emerald-500/40 shadow-inner">
-                      <Check className="h-6 w-6" />
-                    </div>
-                    <span className="text-xs font-black uppercase tracking-widest text-emerald-400 block">Check-in Verified</span>
-                    <h4 className="text-sm font-bold text-white mt-1">{scanSuccessMsg}</h4>
-                  </div>
-                ) : (
-                  <>
-                    <div className="rounded-2xl bg-slate-900 border border-slate-800 p-3.5 sm:p-4 space-y-3">
-                      <div>
-                        <span className="inline-block px-2.5 py-0.5 bg-blue-500/20 text-blue-400 text-[9px] font-black tracking-widest uppercase rounded-full border border-blue-500/30 mb-1">
-                          Scanned Registration
-                        </span>
-                        <h3 className="text-sm sm:text-base font-black text-white">{scannedTeamInfo.groupName || scannedTeamInfo.teamLeadName}</h3>
-                        <p className="text-[11px] text-slate-400 font-semibold">{scannedTeamInfo.eventTitle}</p>
-                      </div>
-
-                      {/* Lead */}
-                      <div className="bg-slate-950/60 rounded-xl p-3 flex items-center justify-between border border-slate-800/80 gap-2">
-                        <div className="min-w-0">
-                          <span className="text-[10px] font-bold text-blue-400 block">Team Lead</span>
-                          <span className="text-xs font-bold text-white block truncate">{scannedTeamInfo.teamLeadName}</span>
-                          <span className="text-[10px] text-slate-400 block truncate">{scannedTeamInfo.teamLeadEmail}</span>
+                        <div className="absolute inset-0 flex flex-col items-center justify-center p-4 space-y-2 bg-black/75 z-0">
+                          <div className="w-16 h-16 bg-white rounded-xl p-1.5 relative shadow-inner">
+                            <img
+                              src="https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=simulate_scanner_feed"
+                              alt="QR Scanner Target"
+                              className="w-full h-full object-contain opacity-60"
+                            />
+                          </div>
+                          <span className="text-[9px] text-slate-500 font-black uppercase tracking-wider">
+                            Live Scanner Active
+                          </span>
                         </div>
+                      </>
+                    )}
+                  </div>
+
+                  {/* Fallback button if no camera */}
+                  {!scanLoading && (
+                    <div className="w-full pt-1">
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          const reg = registrations.find(x => 
+                            (x.eventId === selectedEventId || (x.eventTitle || "").toLowerCase().trim() === (assignedEvent?.title || "").toLowerCase().trim())
+                          );
+                          if (!reg) {
+                            alert(`No registrations found in the database for the active event "${assignedEvent?.title}".`);
+                            return;
+                          }
+
+                          setScanLoading(true);
+                          await new Promise(resolve => setTimeout(resolve, 500));
+                          setScanLoading(false);
+                          setScannedTeamInfo(reg);
+                        }}
+                        className="w-full bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold text-xs py-2.5 px-3 rounded-xl transition-all uppercase tracking-wider flex items-center justify-center gap-1.5 cursor-pointer text-center"
+                      >
+                        <Camera className="h-4 w-4 shrink-0" />
+                        <span className="truncate">Select First Ticket from Database</span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* State B: Verified Success Animation */}
+              {scannedTeamInfo && scanSuccessMsg && (
+                <div className="flex flex-col items-center justify-center gap-3 py-10 text-center animate-in zoom-in-95 duration-200">
+                  <div className="w-14 h-14 rounded-full bg-emerald-500/25 text-emerald-400 flex items-center justify-center border border-emerald-500/40 shadow-inner">
+                    <CheckCircle2 className="h-8 w-8" />
+                  </div>
+                  <span className="text-xs font-black uppercase tracking-widest text-emerald-400 block">Attendance Recorded</span>
+                  <h4 className="text-base font-bold text-white max-w-xs">{scanSuccessMsg}</h4>
+                </div>
+              )}
+
+              {/* State C: Scanned Participant Details (Showing Name, Roll No, College & Squad) */}
+              {scannedTeamInfo && !scanSuccessMsg && (() => {
+                const leadName = scannedTeamInfo.teamLeadName || scannedTeamInfo.fullName || scannedTeamInfo.userName || scannedTeamInfo.name || "Participant";
+                const leadRollNo = scannedTeamInfo.teamLeadStudentId || scannedTeamInfo.studentId || scannedTeamInfo.rollNo || scannedTeamInfo.registrationNumber || "Not Provided";
+                const leadCollege = scannedTeamInfo.college || scannedTeamInfo.collegeName || "Vishnu Institute of Technology";
+                const leadEmail = scannedTeamInfo.teamLeadEmail || scannedTeamInfo.leadEmail || scannedTeamInfo.email || scannedTeamInfo.userEmail || "";
+                const leadPhone = scannedTeamInfo.leadPhone || scannedTeamInfo.teamLeadPhone || scannedTeamInfo.phone || scannedTeamInfo.phoneNumber || "";
+                const teamName = scannedTeamInfo.groupName || scannedTeamInfo.teamName || leadName;
+                const ticketCode = scannedTeamInfo.ticketCode || scannedTeamInfo.registrationId || (scannedTeamInfo.id ? scannedTeamInfo.id.slice(-6).toUpperCase() : "PASS");
+                const members = Array.isArray(scannedTeamInfo.members) ? scannedTeamInfo.members : [];
+                const totalAttendeesCount = 1 + members.length;
+
+                return (
+                  <div className="space-y-3.5 text-left animate-in fade-in duration-200">
+                    {/* Header Summary Card */}
+                    <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 p-3.5 sm:p-4 space-y-2.5 shadow-sm">
+                      <div className="flex items-start justify-between gap-2 flex-wrap">
+                        <div className="min-w-0 flex-1">
+                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 text-blue-400 text-[9px] font-black tracking-widest uppercase rounded-full border border-blue-500/30 mb-1">
+                            <Sparkles className="w-2.5 h-2.5 text-blue-400" />
+                            Scanned Ticket Verified
+                          </span>
+                          <h3 className="text-base sm:text-lg font-black text-white leading-tight break-words">
+                            {teamName}
+                          </h3>
+                          <p className="text-[11px] text-slate-400 font-semibold mt-0.5">
+                            {scannedTeamInfo.eventTitle || assignedEvent?.title}
+                          </p>
+                        </div>
+
+                        <div className="flex flex-col items-end gap-1 shrink-0">
+                          <span className="text-[10px] font-mono font-bold bg-slate-800/90 text-blue-300 border border-slate-700/80 px-2 py-0.5 rounded-md">
+                            #{ticketCode}
+                          </span>
+                          <span className="text-[9.5px] font-black uppercase tracking-wider bg-slate-800 text-slate-300 px-2 py-0.5 rounded-md border border-slate-700/60">
+                            {totalAttendeesCount} {totalAttendeesCount === 1 ? "Attendee" : "Attendees"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Mass Actions */}
+                      <div className="pt-1 border-t border-slate-800/80 flex items-center justify-between gap-2 flex-wrap">
+                        <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
+                          Quick Toggle:
+                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const allP: Record<string, "Present"> = { lead: "Present" };
+                              members.forEach((_: any, idx: number) => { allP[`member_${idx}`] = "Present"; });
+                              setRosterAttendance(allP);
+                            }}
+                            className="px-2.5 py-1 text-[10px] font-bold text-emerald-300 bg-emerald-500/15 hover:bg-emerald-500/25 border border-emerald-500/30 rounded-lg transition-colors cursor-pointer"
+                          >
+                            All Present
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const allA: Record<string, "Absent"> = { lead: "Absent" };
+                              members.forEach((_: any, idx: number) => { allA[`member_${idx}`] = "Absent"; });
+                              setRosterAttendance(allA);
+                            }}
+                            className="px-2.5 py-1 text-[10px] font-bold text-rose-300 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/30 rounded-lg transition-colors cursor-pointer"
+                          >
+                            All Absent
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Team Lead Card */}
+                    <div className="rounded-2xl bg-slate-900 border border-slate-800 p-3 sm:p-4 space-y-2.5 shadow-sm">
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0 flex-1">
+                          <span className="inline-flex items-center gap-1 text-[9px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md bg-blue-500/20 text-blue-300 border border-blue-500/30">
+                            <Crown className="w-3 h-3 text-amber-400" />
+                            {members.length > 0 ? "Team Lead" : "Primary Participant"}
+                          </span>
+                          <h4 className="text-sm sm:text-base font-extrabold text-white tracking-tight mt-1 break-words">
+                            {leadName}
+                          </h4>
+                        </div>
+
+                        {/* Status Toggle Button */}
                         <button
                           type="button"
                           onClick={() => {
@@ -2555,201 +2705,345 @@ export const OrgAttendancePage: React.FC = () => {
                             const nextStatus = currentStatus === "Present" ? "Late" : currentStatus === "Late" ? "Absent" : "Present";
                             setRosterAttendance(prev => ({ ...prev, lead: nextStatus }));
                           }}
-                          className={`px-2.5 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider border cursor-pointer shrink-0 ${
+                          className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider border cursor-pointer shrink-0 transition-all active:scale-95 flex items-center gap-1.5 shadow-sm ${
                             (!rosterAttendance["lead"] || rosterAttendance["lead"] === "Present")
-                              ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
+                              ? "bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/50 shadow-emerald-500/10"
                               : rosterAttendance["lead"] === "Late"
-                              ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                              : "bg-red-500/20 text-red-300 border-red-500/40"
+                              ? "bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/50 shadow-amber-500/10"
+                              : "bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border-rose-500/50 shadow-rose-500/10"
                           }`}
                         >
-                          {rosterAttendance["lead"] || "Present"}
+                          <span className={`w-2 h-2 rounded-full ${
+                            (!rosterAttendance["lead"] || rosterAttendance["lead"] === "Present")
+                              ? "bg-emerald-400 animate-pulse"
+                              : rosterAttendance["lead"] === "Late"
+                              ? "bg-amber-400"
+                              : "bg-rose-400"
+                          }`} />
+                          <span>{rosterAttendance["lead"] || "Present"}</span>
                         </button>
                       </div>
 
-                      {/* Teammates */}
-                      {scannedTeamInfo.members && scannedTeamInfo.members.length > 0 && (
-                        <div className="space-y-1.5 pt-1">
-                          <span className="text-[10px] font-black text-slate-400 uppercase tracking-wider block">Squad Members</span>
-                          {scannedTeamInfo.members.map((member: any, i: number) => (
-                            <div key={i} className="bg-slate-950/40 rounded-xl p-2.5 flex items-center justify-between border border-slate-800/60 gap-2">
-                              <div className="min-w-0">
-                                <span className="text-xs font-bold text-slate-200 block truncate">{member.name || `Member ${i + 1}`}</span>
-                                <span className="text-[10px] text-slate-400 block truncate">{member.studentId || member.email || ""}</span>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const currentStatus = rosterAttendance[`member_${i}`] || "Present";
-                                  const nextStatus = currentStatus === "Present" ? "Late" : currentStatus === "Late" ? "Absent" : "Present";
-                                  setRosterAttendance(prev => ({ ...prev, [`member_${i}`]: nextStatus }));
-                                }}
-                                className={`px-2 py-0.5 rounded-lg text-[9px] font-bold uppercase border cursor-pointer shrink-0 ${
-                                  (!rosterAttendance[`member_${i}`] || rosterAttendance[`member_${i}`] === "Present")
-                                    ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/40"
-                                    : rosterAttendance[`member_${i}`] === "Late"
-                                    ? "bg-amber-500/20 text-amber-300 border-amber-500/40"
-                                    : "bg-red-500/20 text-red-300 border-red-500/40"
-                                }`}
-                              >
-                                {rosterAttendance[`member_${i}`] || "Present"}
-                              </button>
-                            </div>
-                          ))}
+                      {/* Info Badges: Roll No & College */}
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                        {/* Roll No */}
+                        <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2 sm:p-2.5 flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center shrink-0">
+                            <Hash className="w-3.5 h-3.5 text-blue-400" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Roll No / ID</span>
+                            <span className="font-mono font-bold text-xs text-white block truncate">{leadRollNo}</span>
+                          </div>
+                        </div>
+
+                        {/* College */}
+                        <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2 sm:p-2.5 flex items-center gap-2">
+                          <div className="w-7 h-7 rounded-lg bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center shrink-0">
+                            <GraduationCap className="w-3.5 h-3.5 text-indigo-400" />
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">College</span>
+                            <span className="font-semibold text-xs text-slate-200 block truncate" title={leadCollege}>{leadCollege}</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      {/* Email & Phone */}
+                      {(leadEmail || leadPhone) && (
+                        <div className="flex items-center gap-3 text-[11px] text-slate-400 pt-0.5 flex-wrap">
+                          {leadEmail && (
+                            <span className="flex items-center gap-1.5 truncate max-w-[240px]">
+                              <Mail className="w-3 h-3 text-slate-500 shrink-0" />
+                              <span className="truncate">{leadEmail}</span>
+                            </span>
+                          )}
+                          {leadPhone && (
+                            <span className="flex items-center gap-1.5">
+                              <Phone className="w-3 h-3 text-slate-500 shrink-0" />
+                              <span>{leadPhone}</span>
+                            </span>
+                          )}
                         </div>
                       )}
                     </div>
 
-                    <div className="flex gap-2.5 pt-1">
-                      <button
-                        type="button"
-                        onClick={() => setScannedTeamInfo(null)}
-                        className="flex-1 border border-slate-700 hover:bg-slate-800 text-slate-300 font-bold text-xs py-3 rounded-xl cursor-pointer"
-                      >
-                        Cancel
-                      </button>
-                      <button
-                        type="button"
-                        onClick={async () => {
-                          setScanLoading(true);
-                          try {
-                            const timeStr = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) + " (QR Scan)";
-                            const regId = scannedTeamInfo.id || scannedTeamInfo._id;
+                    {/* Squad Members List */}
+                    {members.length > 0 && (
+                      <div className="space-y-2.5 pt-1">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] font-black uppercase tracking-wider text-slate-400 block">
+                            Squad Members ({members.length})
+                          </span>
+                        </div>
 
-                            // Update registration members with session specific attendance
-                            const updatedMembers = (scannedTeamInfo.members || []).map((m: any, idx: number) => {
-                              const status = rosterAttendance[`member_${idx}`] || "Present";
-                              if (sessionTab === "gate_entry") {
-                                return { ...m, gateEntryMarked: status === "Present" || status === "Late", checkInTimeGateEntry: timeStr, attendanceStatus: status, checkInTime: timeStr };
-                              } else if (sessionTab === "morning") {
-                                return { ...m, attendanceStatusMorning: status, checkInTimeMorning: timeStr, attendanceStatus: status, checkInTime: timeStr };
-                              } else if (sessionTab === "gate_exit") {
-                                return { ...m, gateExitMarked: status === "Present" || status === "Late", checkInTimeGateExit: timeStr };
-                              } else {
-                                return { ...m, attendanceStatusAfternoon: status, checkInTimeAfternoon: timeStr };
-                              }
+                        {members.map((member: any, i: number) => {
+                          const memberName = member.name || member.fullName || member.userName || `Member ${i + 1}`;
+                          const memberRollNo = member.studentId || member.rollNo || member.registrationNumber || "Not Provided";
+                          const memberCollege = member.college || member.collegeName || leadCollege || "Vishnu Institute of Technology";
+                          const memberEmail = member.email || "";
+                          const memberPhone = member.phone || "";
+                          const memberStatus = rosterAttendance[`member_${i}`] || "Present";
+
+                          return (
+                            <div key={i} className="rounded-2xl bg-slate-900 border border-slate-800 p-3 sm:p-4 space-y-2.5 shadow-sm">
+                              <div className="flex items-start justify-between gap-2">
+                                <div className="min-w-0 flex-1">
+                                  <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-slate-800 text-slate-300 border border-slate-700/80">
+                                    <User className="w-3 h-3 text-slate-400" />
+                                    Member {i + 1}
+                                  </span>
+                                  <h5 className="text-sm sm:text-base font-extrabold text-white tracking-tight mt-1 break-words">
+                                    {memberName}
+                                  </h5>
+                                </div>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    const nextStatus = memberStatus === "Present" ? "Late" : memberStatus === "Late" ? "Absent" : "Present";
+                                    setRosterAttendance(prev => ({ ...prev, [`member_${i}`]: nextStatus }));
+                                  }}
+                                  className={`px-3 py-1.5 rounded-xl text-xs font-black uppercase tracking-wider border cursor-pointer shrink-0 transition-all active:scale-95 flex items-center gap-1.5 shadow-sm ${
+                                    memberStatus === "Present"
+                                      ? "bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-300 border-emerald-500/50 shadow-emerald-500/10"
+                                      : memberStatus === "Late"
+                                      ? "bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border-amber-500/50 shadow-amber-500/10"
+                                      : "bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border-rose-500/50 shadow-rose-500/10"
+                                  }`}
+                                >
+                                  <span className={`w-2 h-2 rounded-full ${
+                                    memberStatus === "Present"
+                                      ? "bg-emerald-400 animate-pulse"
+                                      : memberStatus === "Late"
+                                      ? "bg-amber-400"
+                                      : "bg-rose-400"
+                                  }`} />
+                                  <span>{memberStatus}</span>
+                                </button>
+                              </div>
+
+                              {/* Info Badges: Roll No & College */}
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                                {/* Roll No */}
+                                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2 sm:p-2.5 flex items-center gap-2">
+                                  <div className="w-7 h-7 rounded-lg bg-blue-500/15 border border-blue-500/30 flex items-center justify-center shrink-0">
+                                    <Hash className="w-3.5 h-3.5 text-blue-400" />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">Roll No / ID</span>
+                                    <span className="font-mono font-bold text-xs text-white block truncate">{memberRollNo}</span>
+                                  </div>
+                                </div>
+
+                                {/* College */}
+                                <div className="bg-slate-950/80 border border-slate-800 rounded-xl p-2 sm:p-2.5 flex items-center gap-2">
+                                  <div className="w-7 h-7 rounded-lg bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center shrink-0">
+                                    <GraduationCap className="w-3.5 h-3.5 text-indigo-400" />
+                                  </div>
+                                  <div className="min-w-0 flex-1">
+                                    <span className="text-[9px] font-black uppercase tracking-wider text-slate-400 block">College</span>
+                                    <span className="font-semibold text-xs text-slate-200 block truncate" title={memberCollege}>{memberCollege}</span>
+                                  </div>
+                                </div>
+                              </div>
+
+                              {/* Email & Phone */}
+                              {(memberEmail || memberPhone) && (
+                                <div className="flex items-center gap-3 text-[11px] text-slate-400 pt-0.5 flex-wrap">
+                                  {memberEmail && (
+                                    <span className="flex items-center gap-1.5 truncate max-w-[240px]">
+                                      <Mail className="w-3 h-3 text-slate-500 shrink-0" />
+                                      <span className="truncate">{memberEmail}</span>
+                                    </span>
+                                  )}
+                                  {memberPhone && (
+                                    <span className="flex items-center gap-1.5">
+                                      <Phone className="w-3 h-3 text-slate-500 shrink-0" />
+                                      <span>{memberPhone}</span>
+                                    </span>
+                                  )}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            {/* Sticky Modal Bottom Footer */}
+            {scannedTeamInfo && !scanSuccessMsg && (
+              <div className="p-3 sm:p-4 bg-slate-950/95 border-t border-slate-800/80 flex items-center gap-2.5 shrink-0 backdrop-blur-md">
+                <button
+                  type="button"
+                  onClick={() => setScannedTeamInfo(null)}
+                  className="flex-1 border border-slate-700 hover:bg-slate-800 text-slate-300 font-bold text-xs py-3 px-3 rounded-xl cursor-pointer text-center transition-colors"
+                >
+                  Scan Next
+                </button>
+                <button
+                  type="button"
+                  disabled={scanLoading}
+                  onClick={async () => {
+                    setScanLoading(true);
+                    try {
+                      const timeStr = new Date().toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" }) + " (QR Scan)";
+                      const regId = scannedTeamInfo.id || scannedTeamInfo._id;
+
+                      // Update registration members with session specific attendance
+                      const updatedMembers = (scannedTeamInfo.members || []).map((m: any, idx: number) => {
+                        const status = rosterAttendance[`member_${idx}`] || "Present";
+                        if (sessionTab === "gate_entry") {
+                          return { ...m, gateEntryMarked: status === "Present" || status === "Late", checkInTimeGateEntry: timeStr, attendanceStatus: status, checkInTime: timeStr };
+                        } else if (sessionTab === "morning") {
+                          return { ...m, attendanceStatusMorning: status, checkInTimeMorning: timeStr, attendanceStatus: status, checkInTime: timeStr };
+                        } else if (sessionTab === "gate_exit") {
+                          return { ...m, gateExitMarked: status === "Present" || status === "Late", checkInTimeGateExit: timeStr };
+                        } else {
+                          return { ...m, attendanceStatusAfternoon: status, checkInTimeAfternoon: timeStr };
+                        }
+                      });
+
+                      const regUpdates: any = { members: updatedMembers };
+                      const leadStatus = rosterAttendance["lead"] || "Present";
+
+                      if (sessionTab === "gate_entry") {
+                        regUpdates.gateEntryMarked = leadStatus === "Present" || leadStatus === "Late";
+                        regUpdates.checkInTimeGateEntry = timeStr;
+                        regUpdates.attendanceStatus = leadStatus;
+                        regUpdates.checkInTime = timeStr;
+                      } else if (sessionTab === "morning") {
+                        regUpdates.attendanceStatusMorning = leadStatus;
+                        regUpdates.checkInTimeMorning = timeStr;
+                        regUpdates.attendanceStatus = leadStatus;
+                        regUpdates.checkInTime = timeStr;
+                      } else if (sessionTab === "gate_exit") {
+                        regUpdates.gateExitMarked = leadStatus === "Present" || leadStatus === "Late";
+                        regUpdates.checkInTimeGateExit = timeStr;
+                      } else {
+                        regUpdates.attendanceStatusAfternoon = leadStatus;
+                        regUpdates.checkInTimeAfternoon = timeStr;
+                      }
+
+                      await updateRegistration(regId, regUpdates);
+
+                      // Update attendances collection via apiClient
+                      if (selectedEventId) {
+                        const leadId = `${regId}_lead`;
+                        await markAttendance({
+                          eventId: selectedEventId,
+                          eventTitle: assignedEvent?.title || "",
+                          registrationId: regId,
+                          participantId: leadId,
+                          userEmail: scannedTeamInfo.teamLeadEmail || scannedTeamInfo.email || "",
+                          userName: scannedTeamInfo.teamLeadName || "Participant",
+                          name: scannedTeamInfo.teamLeadName || "Participant",
+                          role: "Participant",
+                          session: sessionTab,
+                          day: selectedDay,
+                          status: leadStatus,
+                          checkInTime: timeStr
+                        });
+
+                        if (scannedTeamInfo.members && Array.isArray(scannedTeamInfo.members)) {
+                          for (let i = 0; i < scannedTeamInfo.members.length; i++) {
+                            const mem = scannedTeamInfo.members[i];
+                            const memId = `${regId}_member_${i}`;
+                            const memStatus = rosterAttendance[`member_${i}`] || "Present";
+                            await markAttendance({
+                              eventId: selectedEventId,
+                              eventTitle: assignedEvent?.title || "",
+                              registrationId: regId,
+                              participantId: memId,
+                              userEmail: mem.email || "",
+                              userName: mem.name || "Teammate",
+                              name: mem.name || "Teammate",
+                              role: "Participant",
+                              session: sessionTab,
+                              day: selectedDay,
+                              status: memStatus,
+                              checkInTime: timeStr
                             });
-
-                            const regUpdates: any = { members: updatedMembers };
-                            const leadStatus = rosterAttendance["lead"] || "Present";
-
-                            if (sessionTab === "gate_entry") {
-                              regUpdates.gateEntryMarked = leadStatus === "Present" || leadStatus === "Late";
-                              regUpdates.checkInTimeGateEntry = timeStr;
-                              regUpdates.attendanceStatus = leadStatus;
-                              regUpdates.checkInTime = timeStr;
-                            } else if (sessionTab === "morning") {
-                              regUpdates.attendanceStatusMorning = leadStatus;
-                              regUpdates.checkInTimeMorning = timeStr;
-                              regUpdates.attendanceStatus = leadStatus;
-                              regUpdates.checkInTime = timeStr;
-                            } else if (sessionTab === "gate_exit") {
-                              regUpdates.gateExitMarked = leadStatus === "Present" || leadStatus === "Late";
-                              regUpdates.checkInTimeGateExit = timeStr;
-                            } else {
-                              regUpdates.attendanceStatusAfternoon = leadStatus;
-                              regUpdates.checkInTimeAfternoon = timeStr;
-                            }
-
-                            await updateRegistration(regId, regUpdates);
-
-                            // Update attendances collection via apiClient
-                            if (selectedEventId) {
-                              const leadId = `${regId}_lead`;
-                              await markAttendance({
-                                eventId: selectedEventId,
-                                eventTitle: assignedEvent?.title || "",
-                                registrationId: regId,
-                                participantId: leadId,
-                                userEmail: scannedTeamInfo.teamLeadEmail || scannedTeamInfo.email || "",
-                                userName: scannedTeamInfo.teamLeadName || "Participant",
-                                name: scannedTeamInfo.teamLeadName || "Participant",
-                                role: "Participant",
-                                session: sessionTab,
-                                day: selectedDay,
-                                status: leadStatus,
-                                checkInTime: timeStr
-                              });
-
-                              if (scannedTeamInfo.members && Array.isArray(scannedTeamInfo.members)) {
-                                for (let i = 0; i < scannedTeamInfo.members.length; i++) {
-                                  const mem = scannedTeamInfo.members[i];
-                                  const memId = `${regId}_member_${i}`;
-                                  const memStatus = rosterAttendance[`member_${i}`] || "Present";
-                                  await markAttendance({
-                                    eventId: selectedEventId,
-                                    eventTitle: assignedEvent?.title || "",
-                                    registrationId: regId,
-                                    participantId: memId,
-                                    userEmail: mem.email || "",
-                                    userName: mem.name || "Teammate",
-                                    name: mem.name || "Teammate",
-                                    role: "Participant",
-                                    session: sessionTab,
-                                    day: selectedDay,
-                                    status: memStatus,
-                                    checkInTime: timeStr
-                                  });
-                                }
-                              }
-                            }
-
-                            // Update local students state
-                            setStudents(prev => prev.map(s => {
-                              if (s.regId !== regId) return s;
-                              if (s.isLead) {
-                                if (sessionTab === "gate_entry") {
-                                  return { ...s, gateStatus: leadStatus, gateCheckInTime: timeStr };
-                                } else if (sessionTab === "morning") {
-                                  return { ...s, morningStatus: leadStatus, morningCheckInTime: timeStr };
-                                } else if (sessionTab === "gate_exit") {
-                                  return { ...s, gateExitStatus: leadStatus, gateExitCheckInTime: timeStr };
-                                } else {
-                                  return { ...s, afternoonStatus: leadStatus, afternoonCheckInTime: timeStr };
-                                }
-                              } else if (s.memberIndex !== undefined) {
-                                const mStatus = rosterAttendance[`member_${s.memberIndex}`] || "Present";
-                                if (sessionTab === "gate_entry") {
-                                  return { ...s, gateStatus: mStatus, gateCheckInTime: timeStr };
-                                } else if (sessionTab === "morning") {
-                                  return { ...s, morningStatus: mStatus, morningCheckInTime: timeStr };
-                                } else if (sessionTab === "gate_exit") {
-                                  return { ...s, gateExitStatus: mStatus, gateExitCheckInTime: timeStr };
-                                } else {
-                                  return { ...s, afternoonStatus: mStatus, afternoonCheckInTime: timeStr };
-                                }
-                              }
-                              return s;
-                            }));
-
-                            setScanSuccessMsg(`Checked in for ${sessionTab === "gate_entry" ? "Gate Enter" : sessionTab === "morning" ? "Morning" : sessionTab === "gate_exit" ? "Gate Exit" : "Afternoon"} session (Day ${selectedDay})!`);
-                            setTimeout(() => {
-                              setScanSuccessMsg("");
-                              setScannedTeamInfo(null);
-                              setRosterAttendance({});
-                              setIsScannerModalOpen(false);
-                            }, 1200);
-                          } catch (err) {
-                            console.error("QR Check-in error:", err);
-                            alert("Check-in failed. Please retry.");
-                          } finally {
-                            setScanLoading(false);
                           }
-                        }}
-                        className="flex-1 bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-extrabold text-xs py-3 rounded-xl flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-500/20 cursor-pointer active:scale-95"
-                      >
-                        <Check className="h-4 w-4" />
-                        <span>Confirm ({sessionTab === "gate_entry" ? "Gate Enter" : sessionTab === "morning" ? "Morning" : sessionTab === "gate_exit" ? "Gate Exit" : "Afternoon"})</span>
-                      </button>
-                    </div>
-                  </>
-                )}
+                        }
+                      }
+
+                      // Update local students state
+                      setStudents(prev => prev.map(s => {
+                        if (s.regId !== regId) return s;
+                        if (s.isLead) {
+                          if (sessionTab === "gate_entry") {
+                            return { ...s, gateStatus: leadStatus, gateCheckInTime: timeStr };
+                          } else if (sessionTab === "morning") {
+                            return { ...s, morningStatus: leadStatus, morningCheckInTime: timeStr };
+                          } else if (sessionTab === "gate_exit") {
+                            return { ...s, gateExitStatus: leadStatus, gateExitCheckInTime: timeStr };
+                          } else {
+                            return { ...s, afternoonStatus: leadStatus, afternoonCheckInTime: timeStr };
+                          }
+                        } else if (s.memberIndex !== undefined) {
+                          const mStatus = rosterAttendance[`member_${s.memberIndex}`] || "Present";
+                          if (sessionTab === "gate_entry") {
+                            return { ...s, gateStatus: mStatus, gateCheckInTime: timeStr };
+                          } else if (sessionTab === "morning") {
+                            return { ...s, morningStatus: mStatus, morningCheckInTime: timeStr };
+                          } else if (sessionTab === "gate_exit") {
+                            return { ...s, gateExitStatus: mStatus, gateExitCheckInTime: timeStr };
+                          } else {
+                            return { ...s, afternoonStatus: mStatus, afternoonCheckInTime: timeStr };
+                          }
+                        }
+                        return s;
+                      }));
+
+                      setScanSuccessMsg(`Checked in for ${sessionTab === "gate_entry" ? "Gate Enter" : sessionTab === "morning" ? "Morning" : sessionTab === "gate_exit" ? "Gate Exit" : "Afternoon"} session (Day ${selectedDay})!`);
+                      setTimeout(() => {
+                        setScanSuccessMsg("");
+                        setScannedTeamInfo(null);
+                        setRosterAttendance({});
+                        setIsScannerModalOpen(false);
+                      }, 1200);
+                    } catch (err) {
+                      console.error("QR Check-in error:", err);
+                      alert("Check-in failed. Please retry.");
+                    } finally {
+                      setScanLoading(false);
+                    }
+                  }}
+                  className="flex-[2] bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-white font-extrabold text-xs sm:text-sm py-3 px-3 rounded-xl flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  {scanLoading ? (
+                    <RefreshCw className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <Check className="h-4 w-4" />
+                  )}
+                  <span className="truncate">Confirm Check-in</span>
+                </button>
               </div>
             )}
           </div>
         </div>,
         document.body
       )}
+
+      {/* Floating QR Scanner Button on Mobile */}
+      <div className="fixed bottom-6 right-6 z-40 lg:hidden">
+        <button
+          type="button"
+          onClick={() => {
+            setIsScannerModalOpen(true);
+            setScanSuccessMsg("");
+          }}
+          className="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 text-white font-black text-xs px-4 py-3 rounded-full shadow-xl shadow-blue-600/40 flex items-center gap-2 cursor-pointer active:scale-95 border border-white/20"
+        >
+          <QrCode className="h-5 w-5" />
+          <span>Scan QR</span>
+        </button>
+      </div>
 
       {/* Session Modal rendered in marking view if triggered */}
       {renderSessionModal()}
