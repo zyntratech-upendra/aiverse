@@ -45,7 +45,11 @@ import {
   IdCard,
   Mail,
   Phone,
-  CheckCircle2
+  CheckCircle2,
+  Trophy,
+  Filter,
+  Layers,
+  AlertTriangle
 } from "lucide-react";
 import { computeEventDays, type EventDayInfo } from "../faculty/AttendanceManagementPage";
 
@@ -63,6 +67,9 @@ export interface StudentAttendee {
   program?: string;
   isLead: boolean;
   memberIndex?: number;
+  currentRound?: number;
+  promotedToRound?: number;
+  roundStatus?: string;
   gateStatus: "Present" | "Late" | "Absent";
   gateCheckInTime: string;
   morningStatus: "Present" | "Late" | "Absent";
@@ -86,6 +93,9 @@ export interface TeamMemberAttendee {
   program?: string;
   isLead: boolean;
   memberIndex?: number;
+  currentRound?: number;
+  promotedToRound?: number;
+  roundStatus?: string;
   gateStatus: "Present" | "Late" | "Absent";
   gateCheckInTime: string;
   morningStatus: "Present" | "Late" | "Absent";
@@ -105,6 +115,9 @@ export interface TeamAttendee {
   department: string;
   year: string;
   program: string;
+  currentRound?: number;
+  promotedToRound?: number;
+  roundStatus?: string;
   lead: StudentAttendee;
   members: StudentAttendee[];
   allMembers: StudentAttendee[];
@@ -128,6 +141,9 @@ interface EventItem {
   status?: string;
   isToday?: boolean;
   daysCount?: number;
+  currentRound?: number;
+  totalRounds?: number;
+  rounds?: any[];
 }
 
 export const OrgAttendancePage: React.FC = () => {
@@ -150,6 +166,7 @@ export const OrgAttendancePage: React.FC = () => {
   // Four Attendance Session Tabs: "gate_entry" | "morning" | "afternoon" | "gate_exit"
   const [sessionTab, setSessionTab] = useState<"gate_entry" | "morning" | "afternoon" | "gate_exit">("morning");
   const [selectedDay, setSelectedDay] = useState<number>(1);
+  const [selectedRound, setSelectedRound] = useState<number | "all">(1);
 
   // Session & Day Selection Modal on "Enter Event"
   const [sessionModalEvent, setSessionModalEvent] = useState<EventItem | null>(null);
@@ -254,7 +271,10 @@ export const OrgAttendancePage: React.FC = () => {
               room: data.room || "Room 101",
               status: data.status || "Active",
               daysCount: Number(data.daysCount || data.durationDays || data.totalDays) || undefined,
-              isToday: isToday || true
+              isToday: isToday || true,
+              currentRound: data.currentRound !== undefined ? Number(data.currentRound) : 1,
+              totalRounds: data.totalRounds ? Number(data.totalRounds) : (Array.isArray(data.rounds) ? data.rounds.length : 1),
+              rounds: data.rounds || []
             });
           }
         });
@@ -274,7 +294,10 @@ export const OrgAttendancePage: React.FC = () => {
           room: data.room || "Room 101",
           status: data.status || "Active",
           daysCount: Number(data.daysCount || data.durationDays || data.totalDays) || undefined,
-          isToday: true
+          isToday: true,
+          currentRound: data.currentRound !== undefined ? Number(data.currentRound) : 1,
+          totalRounds: data.totalRounds ? Number(data.totalRounds) : (Array.isArray(data.rounds) ? data.rounds.length : 1),
+          rounds: data.rounds || []
         }));
 
         // Filter today's events by organizer assignment if assignments exist
@@ -390,6 +413,9 @@ export const OrgAttendancePage: React.FC = () => {
             department: r.department || r.branch || "Engineering & Tech",
             year: r.year || "Year 3",
             program: r.program || "B.Tech",
+            currentRound: Number(r.currentRound || r.promotedToRound) || 1,
+            promotedToRound: r.promotedToRound ? Number(r.promotedToRound) : undefined,
+            roundStatus: r.roundStatus || undefined,
             gateStatus: (attLeadGate?.status as any) || (isGateLeadPresent ? "Present" : "Absent"),
             gateCheckInTime: attLeadGate?.checkInTime || (selectedDay === 1 ? (r.checkInTimeGateEntry || (isGateLeadPresent ? r.checkInTime : "Not Checked-in")) : "Not Checked-in"),
             morningStatus: (attLeadMorning?.status as any) || (selectedDay === 1 ? (r.attendanceStatusMorning || r.attendanceStatus || "Absent") : "Absent"),
@@ -450,6 +476,9 @@ export const OrgAttendancePage: React.FC = () => {
                 department: m.department || r.department || "Engineering & Tech",
                 year: m.year || r.year || "Year 3",
                 program: m.program || r.program || "B.Tech",
+                currentRound: Number(r.currentRound || r.promotedToRound) || 1,
+                promotedToRound: r.promotedToRound ? Number(r.promotedToRound) : undefined,
+                roundStatus: r.roundStatus || undefined,
                 gateStatus: (attMemGate?.status as any) || (isGateMemPresent ? "Present" : "Absent"),
                 gateCheckInTime: attMemGate?.checkInTime || (selectedDay === 1 ? (m.checkInTimeGateEntry || (isGateMemPresent ? m.checkInTime : "Not Checked-in")) : "Not Checked-in"),
                 morningStatus: (attMemMorning?.status as any) || (selectedDay === 1 ? (m.attendanceStatusMorning || m.attendanceStatus || "Absent") : "Absent"),
@@ -747,9 +776,155 @@ export const OrgAttendancePage: React.FC = () => {
     }
   }, [scannedTeamInfo, sessionTab]);
 
-  // Compute live statistics based on active sessionTab
+  // Group all students by team / registration
+  const teams = useMemo<TeamAttendee[]>(() => {
+    const regGroups = new Map<string, StudentAttendee[]>();
+    students.forEach((s) => {
+      const arr = regGroups.get(s.regId) || [];
+      arr.push(s);
+      regGroups.set(s.regId, arr);
+    });
+
+    const teamList: TeamAttendee[] = [];
+    regGroups.forEach((groupStudents, regId) => {
+      const reg = registrations.find((r) => (r.id || r._id) === regId);
+      const lead = groupStudents.find((s) => s.isLead) || groupStudents[0];
+      const members = groupStudents.filter((s) => !s.isLead);
+
+      const teamName = reg?.groupName || reg?.teamName || lead?.teamName || "Solo Registration";
+      const ticketCode = reg?.ticketCode || lead?.studentId || `AI-${String(regId).substring(0, 6).toUpperCase()}`;
+      const college = reg?.college || lead?.college || "Vishnu Institute of Technology";
+      const department = reg?.department || reg?.branch || lead?.department || "Engineering";
+      const year = reg?.year || lead?.year || "Year 3";
+      const program = reg?.program || lead?.program || "B.Tech";
+      const regRound = Number(reg?.currentRound || reg?.promotedToRound || lead?.currentRound) || 1;
+      const regPromoted = reg?.promotedToRound ? Number(reg.promotedToRound) : lead?.promotedToRound;
+      const regRoundStatus = reg?.roundStatus || lead?.roundStatus;
+
+      const presentMembers = groupStudents.filter((s) => {
+        const status =
+          sessionTab === "gate_entry"
+            ? s.gateStatus
+            : sessionTab === "morning"
+            ? s.morningStatus
+            : sessionTab === "gate_exit"
+            ? s.gateExitStatus
+            : s.afternoonStatus;
+        return status === "Present" || status === "Late";
+      });
+
+      const presentCount = presentMembers.length;
+      const totalCount = groupStudents.length;
+
+      let status: "All Present" | "Partial" | "All Absent" = "All Absent";
+      if (presentCount === totalCount && totalCount > 0) {
+        status = "All Present";
+      } else if (presentCount > 0) {
+        status = "Partial";
+      }
+
+      teamList.push({
+        id: regId,
+        regId,
+        teamName,
+        ticketCode,
+        college,
+        department,
+        year,
+        program,
+        currentRound: regRound,
+        promotedToRound: regPromoted,
+        roundStatus: regRoundStatus,
+        lead,
+        members,
+        allMembers: groupStudents,
+        totalMembersCount: totalCount,
+        presentCount,
+        status,
+      });
+    });
+
+    return teamList;
+  }, [students, registrations, sessionTab]);
+
+  // Active round determination for the assigned event
+  const eventActiveRound: number = useMemo(() => {
+    if (!assignedEvent) return 1;
+    if (assignedEvent.currentRound && Number(assignedEvent.currentRound) >= 1) {
+      return Number(assignedEvent.currentRound);
+    }
+    const actR = Array.isArray(assignedEvent.rounds) 
+      ? assignedEvent.rounds.find((r: any) => (r.status || "").toLowerCase() === "active") 
+      : null;
+    if (actR && (actR.roundNumber || actR.round)) {
+      return Number(actR.roundNumber || actR.round);
+    }
+    return 1;
+  }, [assignedEvent]);
+
+  // List of available rounds across the event and registered teams
+  const availableRounds: number[] = useMemo(() => {
+    if (!assignedEvent) return [1];
+    const roundSet = new Set<number>();
+    if (assignedEvent.rounds && Array.isArray(assignedEvent.rounds) && assignedEvent.rounds.length > 0) {
+      assignedEvent.rounds.forEach((r: any) => {
+        const rn = Number(r.roundNumber || r.round);
+        if (!isNaN(rn) && rn >= 1) roundSet.add(rn);
+      });
+    }
+    if (assignedEvent.totalRounds && assignedEvent.totalRounds > 0) {
+      for (let i = 1; i <= assignedEvent.totalRounds; i++) roundSet.add(i);
+    }
+    teams.forEach((t) => {
+      const cr = Number(t.currentRound || t.promotedToRound);
+      if (!isNaN(cr) && cr >= 1) roundSet.add(cr);
+    });
+    if (eventActiveRound >= 1) roundSet.add(eventActiveRound);
+    if (roundSet.size === 0) roundSet.add(1);
+    return Array.from(roundSet).sort((a, b) => a - b);
+  }, [assignedEvent, teams, eventActiveRound]);
+
+  const isTeamInRound = (t: { currentRound?: number; promotedToRound?: number; roundStatus?: string }, targetRound: number | "all") => {
+    if (targetRound === "all") return true;
+    if (t.roundStatus === "Eliminated") return false;
+    const rNum = Number(targetRound);
+    const teamRound = Number(t.currentRound || t.promotedToRound) || 1;
+    if (rNum === 1) {
+      return (
+        teamRound === 1 ||
+        t.currentRound === 1 ||
+        t.promotedToRound === 1 ||
+        !t.currentRound ||
+        t.currentRound === 0
+      );
+    }
+    return teamRound === rNum || t.currentRound === rNum || t.promotedToRound === rNum;
+  };
+
+  // Automatically sync selectedRound to eventActiveRound whenever assignedEvent loads or changes
+  useEffect(() => {
+    if (assignedEvent) {
+      const act = (assignedEvent.currentRound && Number(assignedEvent.currentRound) >= 1)
+        ? Number(assignedEvent.currentRound)
+        : (Array.isArray(assignedEvent.rounds) && assignedEvent.rounds.find((r: any) => (r.status || "").toLowerCase() === "active")?.roundNumber) || 1;
+      setSelectedRound(act);
+    }
+  }, [assignedEvent?.id, assignedEvent?.currentRound]);
+
+  // Teams strictly filtered by selected round (defaults to eventActiveRound)
+  const roundFilteredTeams = useMemo(() => {
+    return teams.filter(t => isTeamInRound(t, selectedRound));
+  }, [teams, selectedRound]);
+
+  // Students belonging strictly to roundFilteredTeams
+  const roundFilteredStudents = useMemo(() => {
+    const allowedRegIds = new Set(roundFilteredTeams.map(t => t.regId));
+    return students.filter(s => allowedRegIds.has(s.regId));
+  }, [students, roundFilteredTeams]);
+
+  // Compute live statistics based on active sessionTab and selected round
   const stats = useMemo(() => {
-    const presentList = students.filter(s => {
+    const presentList = roundFilteredStudents.filter(s => {
       const status = sessionTab === "gate_entry" 
         ? s.gateStatus 
         : sessionTab === "morning" 
@@ -760,7 +935,7 @@ export const OrgAttendancePage: React.FC = () => {
       return status === "Present" || status === "Late";
     });
     const totalPresent = presentList.length;
-    const totalExpected = students.length;
+    const totalExpected = roundFilteredStudents.length;
     const rate = totalExpected > 0 ? ((totalPresent / totalExpected) * 100).toFixed(1) : "0.0";
 
     return {
@@ -768,11 +943,11 @@ export const OrgAttendancePage: React.FC = () => {
       expected: totalExpected,
       rate
     };
-  }, [students, sessionTab]);
+  }, [roundFilteredStudents, sessionTab]);
 
-  // Search & Filter students
+  // Search & Filter students within active round
   const filteredStudents = useMemo(() => {
-    let result = students.filter((s) => {
+    let result = roundFilteredStudents.filter((s) => {
       const q = searchQuery.toLowerCase();
       const matchesSearch = 
         s.name.toLowerCase().includes(q) ||
@@ -814,76 +989,11 @@ export const OrgAttendancePage: React.FC = () => {
     });
 
     return result;
-  }, [students, searchQuery, statusFilter, sortBy, sortOrder, sessionTab]);
+  }, [roundFilteredStudents, searchQuery, statusFilter, sortBy, sortOrder, sessionTab]);
 
-  // Group students by team / registration
-  const teams = useMemo<TeamAttendee[]>(() => {
-    const regGroups = new Map<string, StudentAttendee[]>();
-    students.forEach((s) => {
-      const arr = regGroups.get(s.regId) || [];
-      arr.push(s);
-      regGroups.set(s.regId, arr);
-    });
-
-    const teamList: TeamAttendee[] = [];
-    regGroups.forEach((groupStudents, regId) => {
-      const reg = registrations.find((r) => (r.id || r._id) === regId);
-      const lead = groupStudents.find((s) => s.isLead) || groupStudents[0];
-      const members = groupStudents.filter((s) => !s.isLead);
-
-      const teamName = reg?.groupName || reg?.teamName || lead?.teamName || "Solo Registration";
-      const ticketCode = reg?.ticketCode || lead?.studentId || `AI-${String(regId).substring(0, 6).toUpperCase()}`;
-      const college = reg?.college || lead?.college || "Vishnu Institute of Technology";
-      const department = reg?.department || reg?.branch || lead?.department || "Engineering";
-      const year = reg?.year || lead?.year || "Year 3";
-      const program = reg?.program || lead?.program || "B.Tech";
-
-      const presentMembers = groupStudents.filter((s) => {
-        const status =
-          sessionTab === "gate_entry"
-            ? s.gateStatus
-            : sessionTab === "morning"
-            ? s.morningStatus
-            : sessionTab === "gate_exit"
-            ? s.gateExitStatus
-            : s.afternoonStatus;
-        return status === "Present" || status === "Late";
-      });
-
-      const presentCount = presentMembers.length;
-      const totalCount = groupStudents.length;
-
-      let status: "All Present" | "Partial" | "All Absent" = "All Absent";
-      if (presentCount === totalCount && totalCount > 0) {
-        status = "All Present";
-      } else if (presentCount > 0) {
-        status = "Partial";
-      }
-
-      teamList.push({
-        id: regId,
-        regId,
-        teamName,
-        ticketCode,
-        college,
-        department,
-        year,
-        program,
-        lead,
-        members,
-        allMembers: groupStudents,
-        totalMembersCount: totalCount,
-        presentCount,
-        status,
-      });
-    });
-
-    return teamList;
-  }, [students, registrations, sessionTab]);
-
-  // Filtered Teams based on search & status filter
+  // Filtered Teams based on active round, search & status filter
   const filteredTeams = useMemo(() => {
-    let result = teams.filter((t) => {
+    let result = roundFilteredTeams.filter((t) => {
       const q = searchQuery.toLowerCase().trim();
       const matchesSearch =
         !q ||
@@ -927,7 +1037,7 @@ export const OrgAttendancePage: React.FC = () => {
     });
 
     return result;
-  }, [teams, searchQuery, statusFilter, sortBy, sortOrder]);
+  }, [roundFilteredTeams, searchQuery, statusFilter, sortBy, sortOrder]);
 
   const toggleTeamCollapse = (teamId: string) => {
     setCollapsedTeamIds((prev) => {
@@ -1733,6 +1843,15 @@ export const OrgAttendancePage: React.FC = () => {
               )}
             </div>
 
+            {/* Active Stage Indicator */}
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-black bg-emerald-50 text-emerald-800 border border-emerald-200/90 shadow-2xs">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              <span>Stage {eventActiveRound} Active</span>
+              <span className="text-[10px] bg-emerald-200/70 text-emerald-900 px-1.5 py-0.2 rounded-md font-extrabold">
+                {teams.filter(t => isTeamInRound(t, eventActiveRound)).length} Teams
+              </span>
+            </div>
+
             {/* Quick Switch Button (Reopens Setup Modal) */}
             <button
               type="button"
@@ -1844,6 +1963,79 @@ export const OrgAttendancePage: React.FC = () => {
         </div>
       </div>
 
+      {/* ================= STAGE / ROUND SELECTOR ================= */}
+      {availableRounds.length > 1 && (
+        <div className="flex items-center justify-between gap-3 p-2.5 sm:p-3 bg-white border border-slate-200/90 rounded-2xl sm:rounded-3xl shadow-2xs flex-wrap">
+          <div className="flex items-center gap-2 flex-wrap">
+            <div className="flex items-center gap-1.5 text-xs font-black text-slate-500 uppercase tracking-wider px-1">
+              <Sparkles className="w-3.5 h-3.5 text-blue-600" />
+              <span>Event Stage:</span>
+            </div>
+            {availableRounds.map((rNum) => {
+              const isSelected = selectedRound === rNum;
+              const isEventActive = rNum === eventActiveRound;
+              const count = teams.filter((t) => isTeamInRound(t, rNum)).length;
+
+              return (
+                <button
+                  key={rNum}
+                  type="button"
+                  onClick={() => setSelectedRound(rNum)}
+                  className={`text-xs font-black px-3.5 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                    isSelected
+                      ? "bg-blue-600 text-white shadow-md shadow-blue-600/25 ring-2 ring-blue-400/20"
+                      : "bg-slate-100 hover:bg-slate-200/80 text-slate-700"
+                  }`}
+                >
+                  <span>Round {rNum}</span>
+                  {isEventActive && (
+                    <span
+                      className={`text-[9px] px-1.5 py-0.2 rounded-full font-black uppercase tracking-wider ${
+                        isSelected
+                          ? "bg-emerald-400/30 text-emerald-100 border border-emerald-300/40"
+                          : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                      }`}
+                    >
+                      Active
+                    </span>
+                  )}
+                  <span
+                    className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${
+                      isSelected ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"
+                    }`}
+                  >
+                    {count}
+                  </span>
+                </button>
+              );
+            })}
+
+            <button
+              type="button"
+              onClick={() => setSelectedRound("all")}
+              className={`text-xs font-black px-3.5 py-1.5 rounded-xl transition-all flex items-center gap-1.5 cursor-pointer active:scale-95 ${
+                selectedRound === "all"
+                  ? "bg-blue-600 text-white shadow-md shadow-blue-600/25 ring-2 ring-blue-400/20"
+                  : "bg-slate-100 hover:bg-slate-200/80 text-slate-700"
+              }`}
+            >
+              <span>All Stages</span>
+              <span
+                className={`text-[10px] px-1.5 py-0.2 rounded-full font-extrabold ${
+                  selectedRound === "all" ? "bg-white/20 text-white" : "bg-slate-200 text-slate-600"
+                }`}
+              >
+                {teams.length}
+              </span>
+            </button>
+          </div>
+
+          <div className="text-[11px] font-bold text-slate-400 hidden sm:block">
+            Showing: <strong className="text-slate-800">{selectedRound === "all" ? "All Stages" : selectedRound === eventActiveRound ? `Round ${selectedRound} (Active Stage)` : `Round ${selectedRound}`}</strong>
+          </div>
+        </div>
+      )}
+
       {/* ================= SPLIT SCREEN GRID ================= */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-5 sm:gap-6 items-start">
         
@@ -1896,6 +2088,11 @@ export const OrgAttendancePage: React.FC = () => {
 
             <span className="text-[10.5px] sm:text-[11px] font-bold text-slate-400">
               Active: <span className="font-extrabold text-blue-600">{sessionTab === "gate_entry" ? "Gate Enter" : sessionTab === "morning" ? "Morning Session" : sessionTab === "gate_exit" ? "Gate Exit" : "Afternoon Session"} (Day {selectedDay})</span>
+              {selectedRound !== "all" && (
+                <span className="ml-1.5 font-bold text-slate-500 bg-slate-100 px-2 py-0.5 rounded-md border border-slate-200/60">
+                  Round {selectedRound}
+                </span>
+              )}
             </span>
           </div>
 
@@ -1961,6 +2158,14 @@ export const OrgAttendancePage: React.FC = () => {
                               </span>
                               <span className="text-[10px] font-black uppercase tracking-wider bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md border border-slate-200/70">
                                 {team.totalMembersCount} {team.totalMembersCount === 1 ? "Member" : "Members"}
+                              </span>
+                              <span className={`inline-flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-md border ${
+                                team.roundStatus === "Eliminated"
+                                  ? "bg-rose-50 text-rose-700 border-rose-200"
+                                  : "bg-indigo-50 text-indigo-700 border-indigo-200/80"
+                              }`}>
+                                <Trophy className="w-2.5 h-2.5 text-indigo-500" />
+                                {team.roundStatus === "Eliminated" ? "Eliminated" : `Round ${team.currentRound || 1}`}
                               </span>
                             </div>
 
@@ -2248,6 +2453,9 @@ export const OrgAttendancePage: React.FC = () => {
                                   Lead
                                 </span>
                               )}
+                              <span className="text-[8.5px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200/80 px-1.5 py-0.5 rounded-md uppercase">
+                                Round {student.currentRound || 1}
+                              </span>
                             </div>
                             <span className="text-[11px] text-slate-500 font-medium mt-0.5 block truncate">
                               Team: <span className="font-bold text-slate-700">{student.teamName}</span>
@@ -2325,7 +2533,7 @@ export const OrgAttendancePage: React.FC = () => {
                             {/* Student Column */}
                             <td className="px-6 py-4">
                               <div>
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center gap-2 flex-wrap">
                                   <span className="font-extrabold text-slate-800 text-xs leading-snug">
                                     {student.name}
                                   </span>
@@ -2334,6 +2542,9 @@ export const OrgAttendancePage: React.FC = () => {
                                       Lead
                                     </span>
                                   )}
+                                  <span className="text-[9px] font-black bg-indigo-50 text-indigo-700 border border-indigo-200/80 px-2 py-0.5 rounded-md uppercase">
+                                    Round {student.currentRound || 1}
+                                  </span>
                                 </div>
                                 <span className="text-[11px] text-slate-400 font-medium mt-0.5 block">
                                   Team: <span className="text-slate-600 font-bold">{student.teamName}</span>
@@ -2630,10 +2841,28 @@ export const OrgAttendancePage: React.FC = () => {
                     <div className="rounded-2xl bg-gradient-to-br from-slate-900 to-slate-950 border border-slate-800 p-3.5 sm:p-4 space-y-2.5 shadow-sm">
                       <div className="flex items-start justify-between gap-2 flex-wrap">
                         <div className="min-w-0 flex-1">
-                          <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 text-blue-400 text-[9px] font-black tracking-widest uppercase rounded-full border border-blue-500/30 mb-1">
-                            <Sparkles className="w-2.5 h-2.5 text-blue-400" />
-                            Scanned Ticket Verified
-                          </span>
+                          <div className="flex items-center gap-1.5 flex-wrap mb-1">
+                            <span className="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-500/20 text-blue-400 text-[9px] font-black tracking-widest uppercase rounded-full border border-blue-500/30">
+                              <Sparkles className="w-2.5 h-2.5 text-blue-400" />
+                              Scanned Ticket Verified
+                            </span>
+                            {(() => {
+                              const scannedRound = Number(scannedTeamInfo.currentRound || scannedTeamInfo.promotedToRound) || 1;
+                              const isScannedActive = selectedRound === "all" ? scannedRound === eventActiveRound : scannedRound === selectedRound;
+                              return (
+                                <span className={`inline-flex items-center gap-1 px-2 py-0.5 text-[9px] font-black tracking-widest uppercase rounded-full border ${
+                                  scannedTeamInfo.roundStatus === "Eliminated"
+                                    ? "bg-rose-500/20 text-rose-300 border-rose-500/30"
+                                    : isScannedActive
+                                    ? "bg-emerald-500/20 text-emerald-300 border-emerald-500/30"
+                                    : "bg-amber-500/20 text-amber-300 border-amber-500/30"
+                                }`}>
+                                  <Trophy className="w-2.5 h-2.5" />
+                                  {scannedTeamInfo.roundStatus === "Eliminated" ? "Eliminated" : `Round ${scannedRound}`}
+                                </span>
+                              );
+                            })()}
+                          </div>
                           <h3 className="text-base sm:text-lg font-black text-white leading-tight break-words">
                             {teamName}
                           </h3>
@@ -2683,6 +2912,34 @@ export const OrgAttendancePage: React.FC = () => {
                         </div>
                       </div>
                     </div>
+
+                    {/* Round Mismatch or Eliminated Alert */}
+                    {(() => {
+                      const scannedRound = Number(scannedTeamInfo.currentRound || scannedTeamInfo.promotedToRound) || 1;
+                      const isScannedActive = selectedRound === "all" ? scannedRound === eventActiveRound : scannedRound === selectedRound;
+                      if (!isScannedActive || scannedTeamInfo.roundStatus === "Eliminated") {
+                        return (
+                          <div className={`p-3 rounded-2xl border text-xs flex items-center gap-2.5 ${
+                            scannedTeamInfo.roundStatus === "Eliminated"
+                              ? "bg-rose-500/15 border-rose-500/40 text-rose-200"
+                              : "bg-amber-500/15 border-amber-500/40 text-amber-200"
+                          }`}>
+                            <AlertTriangle className={`w-4 h-4 shrink-0 ${scannedTeamInfo.roundStatus === "Eliminated" ? "text-rose-400" : "text-amber-400"}`} />
+                            <div className="min-w-0">
+                              <span className="font-bold block">
+                                {scannedTeamInfo.roundStatus === "Eliminated"
+                                  ? `Eliminated Team Notice: This team was marked Eliminated in Round ${scannedRound}.`
+                                  : `Stage Mismatch Notice: This attendee is registered for Round ${scannedRound}, but portal is currently set to Round ${selectedRound}.`}
+                              </span>
+                              <span className="text-[10px] text-slate-400 mt-0.5 block">
+                                You can still log attendance, or switch stages using the Stage Filter on the main screen.
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
 
                     {/* Team Lead Card */}
                     <div className="rounded-2xl bg-slate-900 border border-slate-800 p-3 sm:p-4 space-y-2.5 shadow-sm">
